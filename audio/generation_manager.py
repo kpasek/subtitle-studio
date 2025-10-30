@@ -84,9 +84,7 @@ class GenerationManager:
     def remove_job(self, project_path: str) -> bool:
         """Usuwa zadanie z kolejki (ale nie bieżące). Poprawiona wersja bezpieczna wątkowo."""
         removed = False
-        # *** ZMIANA: Cała logika wewnątrz bloku 'with' i modyfikacja .queue.queue ***
         with self.job_queue.mutex:
-            # self.job_queue.queue to wewnętrzna lista (deque)
             current_jobs = list(self.job_queue.queue)
             new_jobs = []
 
@@ -101,7 +99,6 @@ class GenerationManager:
                 for job in new_jobs:
                     # Bezpośrednie dodanie do deque
                     self.job_queue.queue.append(job)
-        # *** KONIEC ZMIANY ***
 
         if removed:
             print(f"Usunięto zadanie {project_path} z kolejki.")

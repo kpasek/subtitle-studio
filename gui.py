@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import multiprocessing
 import os.path
 import customtkinter as ctk
@@ -35,16 +33,9 @@ from app.tooltip import CreateToolTip
 
 from audio.audio_renamer import AudioRenameWindow
 from audio.pattern_editor import PatternEditorWindow
-from audio.progress import GenerationProgressWindow
 from audio.deleter import AudioDeleterWindow
-from audio.progress import GenerationProgressWindow
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from audio.generation_queue import GenerationQueueWindow
-
-# --- TTS Model Imports ---
-from generators.google_cloud_tts import GoogleCloudTTS
-from generators.elevenlabs_tts import ElevenLabsTTS
-from generators.tts_base import TTSBase
 
 APP_TITLE = "Subtitle Studio"
 APP_CONFIG = Path.cwd() / ".subtitle_studio_config.json"
@@ -72,8 +63,8 @@ BUILTIN_REPLACE = [
     (PatternItem(r"\s{2,}", " ", False), "Zamień białe znaki na spacje"),
     (PatternItem(r"^[-.\"\']", "", False),
      "Usuń wiodące znaki specjalne (-.\"')"),
-    (PatternItem(r"[-\.\"\']$", "", False),
-     "Usuń kończące znaki specjalne (-.\"')"),
+    (PatternItem(r"[-\"\']$", "", False),
+     "Usuń kończące znaki specjalne (-\"')"),
 ]
 
 try:

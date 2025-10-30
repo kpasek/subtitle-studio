@@ -109,8 +109,7 @@ class PatternEditorWindow(ctk.CTkToplevel):
         self.ent_pattern.insert(0, self.existing_pattern.pattern)
         self.ent_replace.insert(0, self.existing_pattern.replace)
         self.var_case_sensitive.set(self.existing_pattern.case_sensitive)
-        if self.pattern_type == 'remove':
-            self.ent_replace.configure(state="disabled")
+
 
     def check_pattern(self) -> bool:
         """Sprawdza poprawność składniową regex."""

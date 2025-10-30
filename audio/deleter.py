@@ -101,7 +101,7 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         if not pattern:
             return
 
-        new_pattern = PatternItem(pattern, "", not case_sensitive)
+        new_pattern = PatternItem(pattern, "", case_sensitive)
         self.custom_remove.append(new_pattern)
         self.add_row(self.custom_remove_frame, new_pattern, self.custom_remove)
 
