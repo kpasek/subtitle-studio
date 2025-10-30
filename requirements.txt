@@ -1,0 +1,10 @@
+customtkinter
+nltk
+pillow
+pyinstaller
+pygame
+google-cloud-texttospeech
+elevenlabs
+pydub
+requests
+packaging

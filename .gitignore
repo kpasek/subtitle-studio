@@ -1,0 +1,14 @@
+.venv
+.vscode
+.idea
+
+
+subtitles
+dialogs
+__pycache__
+
+dist
+build
+/gui.build/
+/gui.dist/
+/.subtitle_studio_config.json
