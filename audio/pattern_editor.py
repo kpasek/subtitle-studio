@@ -97,10 +97,8 @@ class PatternEditorWindow(ctk.CTkToplevel):
         if self.existing_pattern:
             self.populate_fields()
 
-        # Jeśli to wzorzec 'remove', domyślnie wyłącz pole 'replace'
         if self.pattern_type == 'remove' and not self.existing_pattern:
             self.ent_replace.insert(0, "")
-            self.ent_replace.configure(state="disabled")
 
     def populate_fields(self):
         """Wypełnia pola danymi z istniejącego wzorca."""

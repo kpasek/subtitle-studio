@@ -2,28 +2,21 @@ import multiprocessing
 import os.path
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import filedialog, messagebox
 import re
 import csv
 import json
 import sys
 import os
 import shutil
-from typing import List, Optional, Tuple
-from pathlib import Path
 import threading
 import queue
 import webbrowser
-
-try:
-    from packaging import version
-    PACKAGING_AVAILABLE = True
-except ImportError:
-    PACKAGING_AVAILABLE = False
-    print("Ostrzeżenie: Biblioteka 'packaging' nie jest zainstalowana. Sprawdzanie aktualizacji będzie wyłączone.")
-    print("Aby włączyć, zainstaluj: pip install packaging")
-
 import requests
+
+from pathlib import Path
+from typing import List, Optional, Tuple
+from tkinter import filedialog, messagebox
+from datetime import datetime
 from customtkinter import CTkFrame, CTkScrollableFrame
 
 from app.settings import SettingsWindow
@@ -36,6 +29,16 @@ from audio.pattern_editor import PatternEditorWindow
 from audio.deleter import AudioDeleterWindow
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from audio.generation_queue import GenerationQueueWindow
+
+try:
+    from packaging import version
+    PACKAGING_AVAILABLE = True
+except ImportError:
+    PACKAGING_AVAILABLE = False
+    print("Ostrzeżenie: Biblioteka 'packaging' nie jest zainstalowana. Sprawdzanie aktualizacji będzie wyłączone.")
+    print("Aby włączyć, zainstaluj: pip install packaging")
+
+
 
 APP_TITLE = "Subtitle Studio"
 APP_CONFIG = Path.cwd() / ".subtitle_studio_config.json"
@@ -83,7 +86,7 @@ class SubtitleStudioApp(ctk.CTk):
     Main application class for Subtitle Studio.
     Handles the main window, UI, file operations, project management, and audio interactions.
     """
-    APP_VERSION = "0.9.4"
+    APP_VERSION = "0.9.5"
 
     def __init__(self):
         super().__init__()
@@ -129,6 +132,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         self.update_button: Optional[ctk.CTkButton] = None
         self.latest_version_info: Optional[Tuple[str, str]] = None
+        self.is_audio_playing = False
 
         self._load_app_config(only_config=True)
         self.apply_theme_settings()
@@ -214,6 +218,11 @@ class SubtitleStudioApp(ctk.CTk):
             label="Ustawienia projektu", command=self.open_project_settings)
         menubar.add_cascade(label="Ustawienia", menu=settings_menu)
 
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="O programie",
+                              command=self.show_about_window)
+        menubar.add_cascade(label="Pomoc", menu=help_menu)
+
         self.config(menu=menubar)
 
     def _create_widgets(self):
@@ -278,17 +287,17 @@ class SubtitleStudioApp(ctk.CTk):
         self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
                                              command=self.enqueue_generate_single, state="disabled")
         self.generate_button.pack(side="left", padx=4)
-        self.edit_line_button = ctk.CTkButton(audio_btn_frame, text="✏️ Edytuj linię", width=80,
-                                              command=self.add_replace_pattern_from_selection, state="disabled")
-        self.edit_line_button.pack(side="left", padx=4)
 
         self.delete_button = ctk.CTkButton(audio_btn_frame, text="❌ Usuń", width=80, command=self.delete_selected_audio,
                                            state="disabled")
         self.delete_button.pack(side="left", padx=4)
 
-        self.delete_all_button = ctk.CTkButton(audio_btn_frame, text="🗑️ Usuń Wsz.", width=80,
+        self.delete_all_button = ctk.CTkButton(audio_btn_frame, text="🗑️Usuń Wsz.", width=80,
                                                command=self.delete_all_selected_audio, state="disabled")
         self.delete_all_button.pack(side="left", padx=4)
+        self.edit_line_button = ctk.CTkButton(audio_btn_frame, text="✏️ Edytuj linię", width=80,
+                                              command=self.add_replace_pattern_from_selection, state="disabled")
+        self.edit_line_button.pack(side="left", padx=4)
 
         # Search bar
         search_frame = ctk.CTkFrame(right)
@@ -489,15 +498,29 @@ class SubtitleStudioApp(ctk.CTk):
         def on_edit():
             self.open_edit_pattern(pattern_item, target_list)
 
-        btnEdit = ctk.CTkButton(row, text="Edytuj", width=60, command=on_edit)
-        btnEdit.pack(side="left", padx=4)
-        btnX = ctk.CTkButton(row, text="X", width=60, command=on_delete)
+        def on_toggle():
+            pattern_item.enabled = enabled_var.get()
+            self.mark_as_unsaved()
+            lbl.configure(
+                text_color="gray50" if not pattern_item.enabled else ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+
+        enabled_var = tk.BooleanVar(value=pattern_item.enabled)
+        cb = ctk.CTkCheckBox(
+            row, text="", variable=enabled_var, command=on_toggle, width=20)
+        cb.pack(side="left", padx=(4, 0))
+
+        btnX = ctk.CTkButton(row, text="❌", width=20, command=on_delete)
         btnX.pack(side="left", padx=4)
+        btnEdit = ctk.CTkButton(row, text="✏️", width=20, command=on_edit)
+        btnEdit.pack(side="left", padx=4)
 
         lbl_text = f"{'' if not pattern_item.case_sensitive else '(Aa)'} [{pattern_item.pattern}] -> [{pattern_item.replace}]"
         lbl = ctk.CTkLabel(row, text=lbl_text)
         lbl.pack(side="left", fill="x", expand=False, padx=4)
         lbl.bind("<Button-1>", on_edit_click)
+
+        if not pattern_item.enabled:
+            lbl.configure(text_color="gray50")
 
     def _clear_custom_list(self, pattern_type: str):
         """Usuwa wszystkie wzorce z wybranej listy (remove lub replace)."""
@@ -737,12 +760,9 @@ class SubtitleStudioApp(ctk.CTk):
         if not search_term:
             return lines
         try:
-            # Użyj re.escape, aby traktować wyszukiwany tekst dosłownie, chyba że to regex
-            # Prostsze: po prostu szukaj podciągu, ignorując wielkość liter
             pattern = search_term.lower()
-            return [line for line in lines if pattern in line.lower()]
+            return [line for line in lines if re.search(pattern, line, re.IGNORECASE)]
         except re.error:
-            # Jeśli wprowadzono nieprawidłowy regex, po prostu nie filtruj
             return lines
 
     def _refresh_custom_lists(self):
@@ -767,11 +787,11 @@ class SubtitleStudioApp(ctk.CTk):
 
     def _gather_active_patterns(self) -> tuple[List[PatternItem], List[PatternItem]]:
         """Collects all active built-in and custom patterns."""
-        remove_patterns = list(self.custom_remove)  # Kopiuj listę
+        remove_patterns = [p for p in self.custom_remove if p.enabled]
         remove_patterns.extend(
             p for i, p in enumerate(self.builtin_remove) if self.builtin_remove_state[i].get())
 
-        replace_patterns = list(self.custom_replace)  # Kopiuj listę
+        replace_patterns = [p for p in self.custom_replace if p.enabled]
         replace_patterns.extend(
             p for i, p in enumerate(self.builtin_replace) if self.builtin_replace_state[i].get())
 
@@ -783,6 +803,58 @@ class SubtitleStudioApp(ctk.CTk):
             messagebox.showwarning(
                 'Brak pliku', 'Najpierw wczytaj plik z napisami.')
             return
+
+        rem_patterns, _ = self._gather_active_patterns()
+        old_path = self.loaded_path
+        new_name = f"{old_path.stem}_{datetime.now().strftime('%Y%m%d')}{old_path.suffix}"
+
+        if rem_patterns and self.loaded_path:
+            msg = (
+                "Wykryto aktywne wzorce wycinające.\n\n"
+                "Czy chcesz 'przeładować' plik z napisami?\n\n"
+                "TAK:\n"
+                "1. Zostaną zastosowane wzorce wycinające.\n"
+                f"2. Wynik zostanie zapisany jako nowy plik (np. {new_name}).\n"
+                "3. Nowy plik stanie się bazowym plikiem projektu.\n"
+                "4. Wszystkie wzorce wycinające zostaną wyłączone.\n"
+                "NIE:\n"
+                "Wzorce (wycinające i podmieniające) zostaną zastosowane tylko do podglądu, "
+                "plik bazowy się nie zmieni (standardowe działanie)."
+            )
+
+            if messagebox.askyesno("Przeładować plik bazowy?", msg, parent=self):
+                try:
+                    # 1. Zastosuj tylko wzorce wycinające
+                    temp_clean_lines = apply_remove_patterns(
+                        self.original_lines, rem_patterns)
+
+                    # 2. Wygeneruj nową nazwę i zapisz
+
+                    new_path = old_path.with_name(new_name)
+
+                    # Zapisz plik BEZ pokazywania okienka z _save_lines_to_file
+                    with open(new_path, 'w', encoding='utf-8') as f:
+                        f.write('\n'.join(temp_clean_lines))
+                    print(f"Zapisano przeładowane napisy: {new_path}")
+
+                    # 4. Wyłącz wszystkie wzorce wycinające
+                    for var in self.builtin_remove_state:
+                        var.set(False)
+                    for p in self.custom_remove:
+                        p.enabled = False
+
+                    # Odśwież UI wzorców
+                    self._refresh_custom_lists()
+                    self.mark_as_unsaved()
+
+                    # 3. & 5. Załaduj nowy plik (to wywoła apply_patterns)
+                    self.load_file(str(new_path), bypass_save_check=True)
+                    self.set_status(f"Przeładowano plik na: {new_path.name}")
+
+                except Exception as e:
+                    messagebox.showerror(
+                        "Błąd przeładowania", f"Nie udało się przeładować pliku: {e}")
+                return
 
         self.apply_patterns()  # To zaktualizuje processed_clean i processed_replace
 
@@ -1246,6 +1318,7 @@ class SubtitleStudioApp(ctk.CTk):
             pygame.mixer.music.unload()
         except Exception:
             pass
+        self.is_audio_playing = False
 
     def play_selected_audio(self, event=None):
         """Plays the first available audio file for the selected line."""
@@ -1265,7 +1338,9 @@ class SubtitleStudioApp(ctk.CTk):
                 print(f"Odtwarzam: {file_to_play}")
                 pygame.mixer.music.load(str(file_to_play))
                 pygame.mixer.music.play()
+                self.is_audio_playing = True
             except Exception as e:
+                self.is_audio_playing = False
                 messagebox.showerror(
                     "Błąd odtwarzania", f"Nie udało się odtworzyć pliku:\n{e}", parent=self)
         else:
@@ -1566,6 +1641,17 @@ class SubtitleStudioApp(ctk.CTk):
             pass
         else:
             task()
+
+        if PYGAME_AVAILABLE and self.is_audio_playing:
+            try:
+                if not pygame.mixer.music.get_busy():
+                    # Playback finished, unload the file
+                    self.stop_audio()
+            except pygame.error as e:
+                # Mixer might be uninitialized during close
+                print(f"Pygame error checking music status: {e}")
+                self.is_audio_playing = False
+
         self.after(100, self.check_queue)
 
     def export_patterns_to_csv(self):
@@ -1832,6 +1918,40 @@ class SubtitleStudioApp(ctk.CTk):
                 print(f"Nie udało się otworzyć przeglądarki: {e}")
                 messagebox.showerror(
                     "Błąd", f"Nie udało się otworzyć linku:\n{download_url}", parent=self)
+
+    def show_about_window(self):
+        """Displays the 'About' window."""
+        about_win = ctk.CTkToplevel(self)
+        about_win.title("O programie Subtitle Studio")
+        about_win.geometry("450x250")
+        about_win.transient(self)
+        about_win.grab_set()
+
+        about_win.grid_columnconfigure(0, weight=1)
+
+        title_label = ctk.CTkLabel(
+            about_win, text=APP_TITLE, font=ctk.CTkFont(size=20, weight="bold"))
+        title_label.pack(pady=(15, 5))
+
+        version_label = ctk.CTkLabel(
+            about_win, text=f"Wersja: {self.APP_VERSION}")
+        version_label.pack(pady=5)
+
+        author_label = ctk.CTkLabel(about_win, text="Twórca: Kamil Pasek")
+        author_label.pack(pady=5)
+
+        repo_label = ctk.CTkLabel(
+            about_win, text="Repozytorium GitHub (dokumentacja, licencja)", text_color="#60a5fa", cursor="hand2")
+        repo_label.pack(pady=5)
+        repo_label.bind("<Button-1>", lambda e: webbrowser.open(
+            "https://github.com/kpasek/subtitle-studio", new=2))
+
+        license_label = ctk.CTkLabel(about_win, text="Licencja MIT")
+        license_label.pack(pady=5)
+
+        close_button = ctk.CTkButton(
+            about_win, text="Zamknij", command=about_win.destroy)
+        close_button.pack(pady=15)
 
 
 if __name__ == '__main__':

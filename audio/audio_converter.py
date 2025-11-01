@@ -176,18 +176,17 @@ class AudioConverter:
 
         creation_flags = 0
         if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             creation_flags = subprocess.CREATE_NO_WINDOW
 
         try:
-            # Wywołujemy polecenie z `shell=False` (domyślne)
-            # przekazując listę argumentów `command_list`.
-            # Teraz flaga `creation_flags` będzie poprawnie zastosowana
-            # do procesu `ffmpeg.exe`, ukrywając jego okno.
-            result = subprocess.run(
+            subprocess.run(
                 command_list,
-                shell=False,  # Kluczowa zmiana!
+                shell=False,
                 check=True,
                 creationflags=creation_flags,
+                startupinfo=startupinfo,
                 capture_output=True,
                 text=True,
                 encoding='utf-8'
