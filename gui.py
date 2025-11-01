@@ -86,7 +86,7 @@ class SubtitleStudioApp(ctk.CTk):
     Main application class for Subtitle Studio.
     Handles the main window, UI, file operations, project management, and audio interactions.
     """
-    APP_VERSION = "0.9.5"
+    APP_VERSION = "0.9.6"
 
     def __init__(self):
         super().__init__()
@@ -805,8 +805,8 @@ class SubtitleStudioApp(ctk.CTk):
             return
 
         rem_patterns, _ = self._gather_active_patterns()
-        old_path = self.loaded_path
-        new_name = f"{old_path.stem}_{datetime.now().strftime('%Y%m%d')}{old_path.suffix}"
+        old_path = self.current_project_path
+        new_name = f"{old_path.stem}_{datetime.now().strftime('%Y%m%d')}{self.loaded_path.suffix}"
 
         if rem_patterns and self.loaded_path:
             msg = (
