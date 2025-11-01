@@ -11,9 +11,6 @@ from pydub import AudioSegment
 
 def convert_file(input_file: Path, output_file: Path, speed: float, filters: dict):
     """Konwertuje pojedynczy plik audio do OGG z filtrami FFmpeg."""
-    temp_file = output_file.with_suffix(".temp.ogg")
-    audio = AudioSegment.from_file(input_file)
-    audio.export(temp_file, format="ogg")
 
     filter_list = []
     order = ["highpass", "lowpass", "deesser", "acompressor", "loudnorm", "alimiter"]
@@ -33,7 +30,7 @@ def convert_file(input_file: Path, output_file: Path, speed: float, filters: dic
     else:
         full_chain = speed_filter
 
-    cmd = ["ffmpeg", "-i", str(temp_file)]
+    cmd = ["ffmpeg", "-i", str(input_file)]
     if full_chain:
         cmd += ["-af", full_chain, "-c:a", "libvorbis"]
     else:
@@ -42,7 +39,7 @@ def convert_file(input_file: Path, output_file: Path, speed: float, filters: dic
 
     try:
         subprocess.run(cmd, check=True, text=True, capture_output=True)
-        os.remove(temp_file)
+
         print(f"✅ {input_file.name} → {output_file.name}")
     except subprocess.CalledProcessError as e:
         print(f"❌ Błąd konwersji {input_file.name}: {e.stderr}")
@@ -61,10 +58,15 @@ def convert_directory(dir_path: Path, workers: int, speed: float, filters: dict)
         futures = []
         for f in files:
             out = ready_dir / (f.stem + ".ogg")
-            if out.exists():
-                print(f"⚠️  Plik {out.name} już istnieje. Pomijam.")
-                continue
-            futures.append(executor.submit(convert_file, f, out, speed, filters))
+            if not out.exists():
+                futures.append(executor.submit(
+                    convert_file, f, out, speed, filters))
+
+            out2 = ready_dir / f"{f.stem.replace('output1', 'output2')}.ogg"
+            if not out2.exists():
+                filters['speed'] = filters.get('speed', speed) * 1.2
+                futures.append(executor.submit(
+                    convert_file, f, out2, speed, filters))
         concurrent.futures.wait(futures)
 
     print("\n✅ Konwersja zakończona.")
