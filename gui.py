@@ -86,7 +86,7 @@ class SubtitleStudioApp(ctk.CTk):
     Main application class for Subtitle Studio.
     Handles the main window, UI, file operations, project management, and audio interactions.
     """
-    APP_VERSION = "0.9.6"
+    APP_VERSION = "0.9.7"
 
     def __init__(self):
         super().__init__()
