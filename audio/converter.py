@@ -70,6 +70,7 @@ def convert_directory(dir_path: Path, workers: int, speed: float, filters: dict)
         concurrent.futures.wait(futures)
 
     print("\n✅ Konwersja zakończona.")
+    sys.exit(1)
 
 
 def main():
