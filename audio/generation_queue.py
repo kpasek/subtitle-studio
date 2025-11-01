@@ -1,7 +1,7 @@
 # audio/generation_queue.py
 import customtkinter as ctk
 from typing import List, Optional
-from audio.generation_manager import GenerationManager, JobType, GenerationJob, ConversionJob
+from audio.generation_manager import GenerationManager, JobType, GenerationJob
 
 
 class GenerationQueueWindow(ctk.CTkToplevel):
@@ -67,13 +67,11 @@ class GenerationQueueWindow(ctk.CTkToplevel):
 
     def _update_job_list_safe(self, current_job: Optional[JobType], queued_jobs: List[JobType]):
         """Metoda bezpieczna do wywołania z innego wątku przez queue.put."""
-        self.master.queue.put(
-            lambda: self.update_job_list(current_job, queued_jobs))
+        self.master.queue.put(lambda: self.update_job_list(current_job, queued_jobs))  # type: ignore
 
     def _update_progress_safe(self, current: int, total: int, message: str):
         """Metoda bezpieczna do wywołania z innego wątku przez queue.put."""
-        self.master.queue.put(
-            lambda: self.update_progress(current, total, message))
+        self.master.queue.put(lambda: self.update_progress(current, total, message))  # type: ignore
 
     def update_job_list(self, current_job: Optional[JobType], queued_jobs: List[JobType]):
         """Odświeża UI na podstawie danych z menedżera."""
@@ -149,6 +147,6 @@ class GenerationQueueWindow(ctk.CTkToplevel):
 
         # Powiedz głównemu oknu, że jesteśmy zamknięci
         if self.master and hasattr(self.master, 'on_queue_window_close'):
-            self.master.on_queue_window_close()
+            self.master.on_queue_window_close()  # type: ignore
 
         self.destroy()

@@ -1,5 +1,6 @@
 import multiprocessing
 import os.path
+import subprocess
 import customtkinter as ctk
 import tkinter as tk
 import re
@@ -22,12 +23,11 @@ from customtkinter import CTkFrame, CTkScrollableFrame
 from app.settings import SettingsWindow
 from app.utils import apply_remove_patterns, apply_replace_patterns, resource_path, is_installed
 from app.entity import PatternItem
-from app.tooltip import CreateToolTip
 
 from audio.audio_renamer import AudioRenameWindow
 from audio.pattern_editor import PatternEditorWindow
 from audio.deleter import AudioDeleterWindow
-from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
+from audio.generation_manager import GenerationManager, GenerationJob
 from audio.generation_queue import GenerationQueueWindow
 
 try:
@@ -1611,26 +1611,50 @@ class SubtitleStudioApp(ctk.CTk):
             f"Dodano zadanie ({len(dialogs_to_generate)} linii) do kolejki.")
 
     def enqueue_convert_all(self):
-        """Dodaje zadanie samej konwersji do kolejki."""
+        """Uruchamia niezależny proces konwersji audio w nowym terminalu."""
         if not self.audio_dir or not self.audio_dir.is_dir():
             messagebox.showwarning(
                 "Brak katalogu", "Najpierw wybierz katalog audio.", parent=self)
             return
 
-        if not self.current_project_path:
-            messagebox.showwarning(
-                "Brak projektu", "Zapisz projekt przed dodaniem do kolejki.", parent=self)
-            return
+        converter_config = self._gather_converter_config()
+        workers = converter_config.get("conversion_workers", 4)
+        speed = converter_config.get("base_audio_speed", 1.1)
+        filters = converter_config.get("ffmpeg_filters", {})
 
-        job = ConversionJob(
-            project_path=f"KONWERSJA - {self.current_project_path.name}",
-            audio_dir=self.audio_dir,
-            converter_config=self._gather_converter_config()
-        )
+        if getattr(sys, 'frozen', False):
+            exe_path = "converter.exe"  # type: ignore
+        else:
+            exe_path = Path(__file__).parent / "audio" / "converter.py"
+        cmd = [
+            exe_path,
+            "--path", str(self.audio_dir),
+            "--workers", str(workers),
+            "--speed", str(speed),
+            "--filters", json.dumps(filters)
+        ]
 
-        GenerationManager.get_instance().add_job(job)
-        self.show_generation_queue()
-        self.set_status("Dodano zadanie konwersji audio do kolejki.")
+        try:
+            if sys.platform.startswith("win"):
+                print(["start", "cmd", "/K"] + cmd)
+                subprocess.Popen(["start", "cmd", "/K"] + cmd, shell=True)
+            elif sys.platform.startswith("linux"):
+                # Uruchom w nowym terminalu (Linux – obsługa GNOME/KDE)
+                term_cmd = shutil.which(
+                    "x-terminal-emulator") or shutil.which("gnome-terminal") or shutil.which("konsole")
+                if term_cmd:
+                    subprocess.Popen([term_cmd, "--"] + cmd)
+                else:
+                    subprocess.Popen(cmd)
+            elif sys.platform == "darwin":
+                # macOS – otwarcie w Terminal.app
+                subprocess.Popen(["open", "-a", "Terminal.app"] + cmd)
+            else:
+                subprocess.Popen(cmd)
+            self.set_status("Rozpoczęto konwersję w nowym procesie.")
+        except Exception as e:
+            messagebox.showerror(
+                "Błąd uruchamiania konwersji", str(e), parent=self)
 
     def check_queue(self):
         """Periodically checks queue for GUI updates."""

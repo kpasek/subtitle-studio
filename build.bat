@@ -20,3 +20,4 @@ if exist "%DIST_DIR%\%APP_DIR%" (
 )
 
 pyinstaller SubtitleStudio.spec
+pyinstaller --onefile --distpath="dist/SubtitleStudio" audio/converter.py
