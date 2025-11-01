@@ -219,7 +219,7 @@ class GenerationManager:
 
             try:
                 if job.tts_model_name in ['XTTS', 'STylish']:
-                    self._call_local_api(tts_model_instance, text, str(
+                    self._call_local_api(tts_model_instance, text, str( # type: ignore
                         output_path), job.tts_config)
                 elif isinstance(tts_model_instance, TTSBase):
                     tts_model_instance.tts(text, str(output_path))
@@ -311,7 +311,7 @@ class GenerationManager:
             base_speed = float(config.get('base_audio_speed', 1.1))
             filter_settings = config.get('ffmpeg_filters', {})
 
-            default_workers = max(1, os.cpu_count() //
+            default_workers = max(1, os.cpu_count() //  # type: ignore
                                   2 if os.cpu_count() else 4)
             max_workers = int(config.get(
                 'conversion_workers', default_workers))

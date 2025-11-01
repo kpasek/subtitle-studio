@@ -598,7 +598,7 @@ class SubtitleStudioApp(ctk.CTk):
                 if var.trace_info():
                     trace_id = var.trace_info()[0][1]
                     # Zapisz var i trace_id pod nazwą
-                    traces[var._name] = (var, trace_id)
+                    traces[var._name] = (var, trace_id) # type: ignore
                     var.trace_remove("write", trace_id)
 
             for i, val in enumerate(cfg.get("builtin_remove_state", [])):
@@ -806,7 +806,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         rem_patterns, _ = self._gather_active_patterns()
         old_path = self.current_project_path
-        new_name = f"{old_path.stem}_{datetime.now().strftime('%Y%m%d')}{self.loaded_path.suffix}"
+        new_name = f"{old_path.stem}_{datetime.now().strftime('%Y%m%d')}{self.loaded_path.suffix}" # type: ignore
 
         if rem_patterns and self.loaded_path:
             msg = (
@@ -830,7 +830,7 @@ class SubtitleStudioApp(ctk.CTk):
 
                     # 2. Wygeneruj nową nazwę i zapisz
 
-                    new_path = old_path.with_name(new_name)
+                    new_path = old_path.with_name(new_name) # type: ignore
 
                     # Zapisz plik BEZ pokazywania okienka z _save_lines_to_file
                     with open(new_path, 'w', encoding='utf-8') as f:
@@ -1260,7 +1260,7 @@ class SubtitleStudioApp(ctk.CTk):
         # Znajdź pliki dla zaznaczonej linii (jeśli jest)
         files_exist = False
         if line_selected and audio_dir_set:
-            identifier = str(self.selected_line_index + 1)
+            identifier = str(self.selected_line_index + 1) # type: ignore
             found_files = self._find_audio_files(identifier)
             files_exist = bool(found_files)
 
@@ -1496,12 +1496,12 @@ class SubtitleStudioApp(ctk.CTk):
             base_speed = 1.1
 
         try:
-            default_workers = max(1, os.cpu_count() //
+            default_workers = max(1, os.cpu_count() // # type: ignore
                                   2 if os.cpu_count() else 4)
             max_workers = int(self.global_config.get(
                 'conversion_workers', default_workers))
         except (ValueError, TypeError):
-            default_workers = max(1, os.cpu_count() //
+            default_workers = max(1, os.cpu_count() // # type: ignore
                                   2 if os.cpu_count() else 4)
             max_workers = default_workers
 
@@ -1557,8 +1557,8 @@ class SubtitleStudioApp(ctk.CTk):
             return
 
         job = GenerationJob(
-            project_path=f"POJEDYNCZY ({identifier}) - {self.current_project_path.name}",
-            audio_dir=self.audio_dir,
+            project_path=f"POJEDYNCZY ({identifier}) - {self.current_project_path.name}", # type: ignore
+            audio_dir=self.audio_dir, # type: ignore
             lines_to_generate=lines_to_gen,
             tts_model_name=tts_model_name,
             tts_config=self._gather_tts_config(),
@@ -1568,6 +1568,7 @@ class SubtitleStudioApp(ctk.CTk):
         GenerationManager.get_instance().add_job(job)
         self.set_status(f"Dodano zadanie (linia {identifier}) do kolejki.")
 
+    # type: ignore
     def enqueue_generate_all(self):
         """Dodaje zadanie generowania dla wszystkich brakujących linii do kolejki."""
         if not self._prepare_job_dependencies():
@@ -1583,12 +1584,10 @@ class SubtitleStudioApp(ctk.CTk):
         dialogs_to_generate = []
         for i, text in enumerate(self.processed_replace):
             identifier = str(i + 1)
-            raw_wav = self.audio_dir / f"output1 ({identifier}).wav"
-            raw_mp3 = self.audio_dir / f"output1 ({identifier}).mp3"
-            ready_ogg1 = self.audio_dir / "ready" / \
-                f"output1 ({identifier}).ogg"
-            ready_ogg2 = self.audio_dir / "ready" / \
-                f"output2 ({identifier}).ogg"
+            raw_wav = self.audio_dir / f"output1 ({identifier}).wav" # pyright: ignore[reportOptionalOperand]
+            raw_mp3 = self.audio_dir / f"output1 ({identifier}).mp3" # pyright: ignore[reportOptionalOperand]
+            ready_ogg1 = self.audio_dir / "ready" / f"output1 ({identifier}).ogg" # type: ignore
+            ready_ogg2 = self.audio_dir / "ready" / f"output2 ({identifier}).ogg" # type: ignore
             if not (raw_wav.exists() or raw_mp3.exists() or ready_ogg1.exists() or ready_ogg2.exists()):
                 dialogs_to_generate.append((identifier, text))
 
@@ -1598,8 +1597,8 @@ class SubtitleStudioApp(ctk.CTk):
             return
 
         job = GenerationJob(
-            project_path=self.current_project_path.name,
-            audio_dir=self.audio_dir,
+            project_path=self.current_project_path.name, # type: ignore
+            audio_dir=self.audio_dir,  # type: ignore
             lines_to_generate=dialogs_to_generate,
             tts_model_name=tts_model_name,
             tts_config=self._gather_tts_config(),

@@ -263,49 +263,20 @@ class AudioConverter:
         failed_count = 0
         total_tasks = len(tasks)
 
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(
-                _convert_worker, task_args): task_args for task_args in tasks}
-
-            for i, future in enumerate(as_completed(futures)):
-                task_args = futures[future]
-                input_file = task_args[0]
-
+        for task_args in tasks:
+            try:
                 if cancel_event and cancel_event.is_set():
-                    print("Anulowanie konwersji wymuszone przez użytkownika.")
-                    # Anuluj wszystkie oczekujące zadania (nie są one jeszcze uruchomione)
-                    for remaining_future in futures:
-                        remaining_future.cancel()
-                    break  # Wyjdź z pętli as_completed
-
-                try:
-                    _, success, error_msg = future.result()
-                    if success:
-                        successful_count += 1
-                    else:
-                        failed_count += 1
-                        print(f"NIE POWIODŁO SIĘ: {input_file} -> {error_msg}")
-                except Exception as e:
-                    failed_count += 1
+                    print("Proces konwersji zakończony anulowaniem.")
                     print(
-                        f"NIE POWIODŁO SIĘ (Błąd 'future'): {input_file} -> {e}")
-
-                if progress_callback and successful_count % 20 == 0:
-                    try:
-                        progress_callback(i + 1, total_tasks)
-                    except Exception as e:
-                        print(f"Błąd w progress_callback: {e}")
-
-            if cancel_event and cancel_event.is_set():
-                print("Proces konwersji zakończony anulowaniem.")
-                # Nie rzucamy wyjątku, tylko kończymy normalnie.
-            else:
-                print(f"✅ Zakończono przetwarzanie dla {audio_dir}.")
-                print(
-                    f"Pomyślnie: {successful_count}, Nie powiodło się: {failed_count}")
-                # Upewnij się, że pasek postępu pokazuje 100% po zakończeniu
-                if progress_callback:
-                    progress_callback(total_tasks, total_tasks)
+                        f"Pomyślnie: {successful_count} / {total_tasks}, Nie powiodło się: {failed_count}")
+                    return
+                _convert_worker(task_args)
+                successful_count += 1
+                if progress_callback and successful_count % 5 == 0:
+                    progress_callback(successful_count + failed_count, total_tasks)
+            except Exception as e:
+                failed_count += 1
+                print(f"Błąd podczas przetwarzania {task_args[0]}: {e}")
 
     def build_output_file_path(self, filename: str, output_dir: str) -> str:
         """
