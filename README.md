@@ -74,6 +74,9 @@ Aby wygenerować nowy plik audio, kliknij przycisk `Generuj` przy danej linii.
 * XTTSv2 (lokalny model).
 * STylish TTS (localny model)
 
+### Lokalne modele serwowane są za pomocą pomocniczej aplikacji
+https://github.com/kpasek/tts-dialog-generator
+
 ### 5. Usuwanie plików audio
 
 Subtitle Studio pozwala zarządzać nagraniami audio w sposób elastyczny:
