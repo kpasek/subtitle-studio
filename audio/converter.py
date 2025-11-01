@@ -80,8 +80,6 @@ def main():
     parser.add_argument("--filters", type=str, default="{}", help="JSON z konfiguracją filtrów.")
     args = parser.parse_args()
 
-    print(args)
-
     path = Path(args.path)
     filters = json.loads(args.filters) if args.filters else {}
     if path.is_file():
