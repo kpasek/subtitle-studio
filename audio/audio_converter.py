@@ -7,11 +7,6 @@ import subprocess
 import sys
 import threading
 
-try:
-    import audioop
-except ImportError:
-    import pyaudioop as audioop
-
 
 def _convert_worker(task_args):
     """
@@ -126,17 +121,16 @@ class AudioConverter:
 
     def export_file(self, audio: AudioSegment, output_file: str, speed: float):
         """
-        Exports an AudioSegment to a temporary .ogg file, then runs FFmpeg
-        to apply filters and speed changes, saving the final .ogg file.
+        Eksportuje AudioSegment bezpośrednio do finalnego pliku .ogg,
+        przekazując filtry i prędkość do FFmpeg za pomocą pydub.
 
         Args:
-            audio: The Pydub AudioSegment.
-            output_file: The final destination path for the .ogg file.
-            speed: The speed multiplier (atempo) to apply.
+            audio: Obiekt Pydub AudioSegment.
+            output_file: Docelowa ścieżka dla pliku .ogg.
+            speed: Mnożnik prędkości (atempo) do zastosowania.
         """
-        temp_file = output_file + ".temp.ogg"
-        audio.export(temp_file, format="ogg")
 
+        # 1. Budowanie łańcucha filtrów (tak jak wcześniej)
         filter_list = []
         filter_order = ['highpass', 'lowpass', 'deesser',
                         'acompressor', 'loudnorm', 'alimiter']
@@ -160,56 +154,38 @@ class AudioConverter:
         else:
             final_filter_chain = ""
 
-        # Zamiast tworzyć string, tworzymy listę argumentów
-        command_list = [
-            'ffmpeg',
-            '-i', temp_file
-        ]
+        # 2. Budowanie listy parametrów dla pydub.export()
+        #    Nie potrzebujemy już 'ffmpeg', '-i', '-y' ani nazwy pliku wyjściowego.
+        #    Pydub zajmie się tym wszystkim.
+        export_params = ['-loglevel', 'error']
 
         if final_filter_chain:
-            command_list.extend(['-af', final_filter_chain])
-            command_list.extend(['-c:a', 'libvorbis'])
+            export_params.extend(['-af', final_filter_chain])
+            # Pydub domyślnie użyje libvorbis dla formatu "ogg",
+            # ale możemy być precyzyjni, jeśli filtrujemy.
+            export_params.extend(['-c:a', 'libvorbis'])
         else:
-            # Jeśli nie ma filtrów ani zmiany prędkości, kopiuj strumień
-            command_list.extend(['-c', 'copy'])
+            # Jeśli nie ma filtrów ani zmiany prędkości, pydub
+            # po prostu przekonwertuje do ogg.
+            # Oryginalny kod używał '-c copy' na pliku temp.ogg.
+            # To jest w praktyce równoważne, ale bardziej wydajne,
+            # bo unikamy tworzenia pliku temp.
+            pass
 
-        command_list.extend([
-            '-y',
-            '-loglevel', 'error',
-            output_file
-        ])
-
-        creation_flags = 0
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            creation_flags = subprocess.CREATE_NO_WINDOW
-
+        # 3. Wykonanie eksportu w jednym kroku
+        #    Nie ma już pliku .temp.ogg ani bloku subprocess.
         try:
-            subprocess.run(
-                command_list,
-                shell=False,
-                check=True,
-                creationflags=creation_flags,
-                startupinfo=startupinfo,
-                capture_output=True,
-                text=True,
-                encoding='utf-8'
+            audio.export(
+                output_file,
+                format="ogg",
+                parameters=export_params
             )
-        except subprocess.CalledProcessError as e:
-            print(f"Błąd FFmpeg (stdout): {e.stdout}")
-            print(f"Błąd FFmpeg (stderr): {e.stderr}")
-            raise Exception(f"Błąd FFmpeg: {e.stderr}")
         except Exception as e:
-            print(f"Nieoczekiwany błąd subprocess: {e}")
+            # Łapiemy błąd, jeśli pydub/ffmpeg zawiedzie
+            print(f"Błąd FFmpeg/Pydub podczas eksportu do {output_file}: {e}")
+            # Rzuć błąd dalej, aby parse_ogg i _convert_worker go złapały
             raise e
-
-        try:
-            os.remove(temp_file)
-        except Exception as e:
-            print(
-                f"Ostrzeżenie: Nie udało się usunąć pliku tymczasowego {temp_file}: {e}")
-
+            
     def convert_dir(self, audio_dir: str, output_dir: str, max_workers: int = 4,
                     progress_callback: Optional[Callable[[
                         int, int], None]] = None,
@@ -268,20 +244,49 @@ class AudioConverter:
         failed_count = 0
         total_tasks = len(tasks)
 
-        for task_args in tasks:
-            try:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(
+                _convert_worker, task_args): task_args for task_args in tasks}
+
+            for i, future in enumerate(as_completed(futures)):
+                task_args = futures[future]
+                input_file = task_args[0]
+
                 if cancel_event and cancel_event.is_set():
-                    print("Proces konwersji zakończony anulowaniem.")
+                    print("Anulowanie konwersji wymuszone przez użytkownika.")
+                    # Anuluj wszystkie oczekujące zadania (nie są one jeszcze uruchomione)
+                    for remaining_future in futures:
+                        remaining_future.cancel()
+                    break  # Wyjdź z pętli as_completed
+
+                try:
+                    _, success, error_msg = future.result()
+                    if success:
+                        successful_count += 1
+                    else:
+                        failed_count += 1
+                        print(f"NIE POWIODŁO SIĘ: {input_file} -> {error_msg}")
+                except Exception as e:
+                    failed_count += 1
                     print(
-                        f"Pomyślnie: {successful_count} / {total_tasks}, Nie powiodło się: {failed_count}")
-                    return
-                _convert_worker(task_args)
-                successful_count += 1
-                if progress_callback and successful_count % 5 == 0:
-                    progress_callback(successful_count + failed_count, total_tasks)
-            except Exception as e:
-                failed_count += 1
-                print(f"Błąd podczas przetwarzania {task_args[0]}: {e}")
+                        f"NIE POWIODŁO SIĘ (Błąd 'future'): {input_file} -> {e}")
+
+                if progress_callback and successful_count % 20 == 0:
+                    try:
+                        progress_callback(i + 1, total_tasks)
+                    except Exception as e:
+                        print(f"Błąd w progress_callback: {e}")
+
+            if cancel_event and cancel_event.is_set():
+                print("Proces konwersji zakończony anulowaniem.")
+                # Nie rzucamy wyjątku, tylko kończymy normalnie.
+            else:
+                print(f"✅ Zakończono przetwarzanie dla {audio_dir}.")
+                print(
+                    f"Pomyślnie: {successful_count}, Nie powiodło się: {failed_count}")
+                # Upewnij się, że pasek postępu pokazuje 100% po zakończeniu
+                if progress_callback:
+                    progress_callback(total_tasks, total_tasks)
 
     def build_output_file_path(self, filename: str, output_dir: str) -> str:
         """
