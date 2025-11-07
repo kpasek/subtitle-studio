@@ -1,21 +1,43 @@
-# -*- mode: python ; coding: utf-8 -*-
+# gui.spec
+# Spec file for PyInstaller build with tkinter + pyaudioop
+# Run: pyinstaller gui.spec
 
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+# 🔹 Automatycznie zbiera wszystkie moduły z pyaudioop (jeśli jest zainstalowany)
+hiddenimports = []
+try:
+    hiddenimports += collect_submodules('pyaudioop')
+except ImportError:
+    pass  # w Pythonie <3.13 nie ma pyaudioop
+
+# 🔹 Zbierz dane (np. fonty, pliki konfiguracyjne, assets)
+datas = []
+datas += collect_data_files('tkinter')  # tkinter resources
+datas += collect_data_files('pyaudioop', include_py_files=True)  # jeśli istnieje
+datas += [
+    ('assets', 'assets'),  # przykładowy katalog zasobów
+]
+
+block_cipher = None
 
 a = Analysis(
     ['gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets')],
-    hiddenimports=[],
+    datas=datas,
+    hiddenimports=hiddenimports + ['tkinter', 'pyaudioop'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
     noarchive=False,
-    optimize=0,
 )
 
-pyz = PYZ(a.pure)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
@@ -28,20 +50,14 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=['assets\\icon512.ico'],
 )
 
 coll = COLLECT(
     exe,
     a.binaries,
+    a.zipfiles,
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
     name='SubtitleStudio',
 )

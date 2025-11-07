@@ -1,7 +1,4 @@
 # audio/generation_manager.py
-import shutil
-import subprocess
-import sys
 import threading
 import queue
 import requests
@@ -15,6 +12,7 @@ from typing import List, Tuple, Callable, Optional, Union, Dict, Any
 from generators.google_cloud_tts import GoogleCloudTTS
 from generators.elevenlabs_tts import ElevenLabsTTS
 from generators.tts_base import TTSBase
+from audio.audio_converter import AudioConverter
 
 
 @dataclass
@@ -28,8 +26,15 @@ class GenerationJob:
     converter_config: Dict[str, Any]
 
 
+@dataclass
+class ConversionJob:
+    """Przechowuje dane dla zadania samej konwersji."""
+    project_path: str
+    audio_dir: Path
+    converter_config: Dict[str, Any]
 
-JobType = Union[GenerationJob]
+
+JobType = Union[GenerationJob, ConversionJob]
 
 
 class GenerationManager:
@@ -130,6 +135,10 @@ class GenerationManager:
                     print(
                         f"Rozpoczynam zadanie generowania: {self.current_job.project_path}")
                     self._execute_tts_job(self.current_job)
+                elif isinstance(self.current_job, ConversionJob):
+                    print(
+                        f"Rozpoczynam zadanie konwersji: {self.current_job.project_path}")
+                    self._execute_convert_job(self.current_job)
 
             except InterruptedError:
                 print(f"Zadanie {self.current_job.project_path} zatrzymane.")
@@ -228,6 +237,11 @@ class GenerationManager:
 
         self._notify_progress(total_to_gen, total_to_gen, "Zakończono.")
 
+    def _execute_convert_job(self, job: ConversionJob):
+        """Wykonuje zadanie konwersji audio."""
+        self._notify_indeterminate("Rozpoczynam konwertowanie audio...")
+        self._run_converter(job.audio_dir, job.converter_config)
+
         if self.cancel_event.is_set():
             raise InterruptedError()
 
@@ -290,3 +304,41 @@ class GenerationManager:
         except requests.exceptions.RequestException as e:
             raise ConnectionError(
                 f"Błąd połączenia z Local API ({api_url}): {e}")
+
+    def _run_converter(self, audio_dir: Path, config: dict):
+        """Uruchamia konwerter audio."""
+        try:
+            base_speed = float(config.get('base_audio_speed', 1.1))
+            filter_settings = config.get('ffmpeg_filters', {})
+
+            default_workers = max(1, os.cpu_count() //  # type: ignore
+                                  2 if os.cpu_count() else 4)
+            max_workers = int(config.get(
+                'conversion_workers', default_workers))
+
+            converter = AudioConverter(
+                base_speed=base_speed, filter_settings=filter_settings)
+
+            output_dir = audio_dir / "ready"
+            os.makedirs(output_dir, exist_ok=True)
+
+            def conversion_progress(current: int, total: int):
+                if self.cancel_event.is_set():
+                    # To nie zatrzyma puli procesów, ale przynajmniej przestanie wysyłać aktualizacje
+                    print(
+                        "Zatrzymano postęp konwersji, ale zadanie jest zatrzymane.")
+                else:
+                    self._notify_progress(
+                        current, total, f"Konwertowanie... ({current}/{total})")
+
+            converter.convert_dir(
+                str(audio_dir),
+                str(output_dir),
+                max_workers=max_workers,
+                progress_callback=conversion_progress,
+                cancel_event=self.cancel_event)
+
+        except Exception as e:
+            print(f"Błąd podczas konwersji audio w menedżerze: {e}")
+            # Błąd jest logowany, ale nie przerywa kolejki
+            raise e  # Rzuć dalej, aby _process_queue go złapał
