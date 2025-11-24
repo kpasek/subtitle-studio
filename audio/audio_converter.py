@@ -68,7 +68,7 @@ class AudioConverter:
     def parse_ogg(self, input_file: str, output_file: str):
         """
         Converts a single audio file (.wav, .mp3, .ogg) to two .ogg files
-        in the /ready/ directory (output1 and output2) with filters applied.
+        in the /ready/ directory (output1) with filters applied.
 
         Args:
             input_file: Path to the source audio file.
@@ -84,10 +84,8 @@ class AudioConverter:
         else:
             base_name = base_name_match
 
-        output_path_speed = os.path.join(
-            input_dir, f"output2 {base_name}.ogg")
 
-        if os.path.exists(output_path_speed) and os.path.exists(output_file):
+        if os.path.exists(output_file):
             return
 
         try:
@@ -102,10 +100,6 @@ class AudioConverter:
 
             if not os.path.exists(output_file):
                 self.export_file(audio, output_file, base_speed)
-
-            if not os.path.exists(output_path_speed):
-                speed = 1.10 if (len(audio) / 1000) > 2 else 1
-                self.export_file(audio, output_path_speed, base_speed * speed)
 
         except Exception as e:
             print(f"Błąd podczas przetwarzania pliku {input_file}: {e}")
@@ -219,14 +213,11 @@ class AudioConverter:
                     base_name = base_name_match[8:]
                 else:
                     base_name = base_name_match
-                output_path_speed = os.path.join(
-                    output_dir, f"output2 {base_name}.ogg")
 
-                if os.path.exists(output_path_ogg) and os.path.exists(output_path_speed):
+                if os.path.exists(output_path_ogg) :
                     continue
 
-                task_args = (input_path, output_path_ogg,
-                             self.base_speed, self.filter_settings)
+                task_args = (input_path, output_path_ogg, self.base_speed, self.filter_settings)
                 tasks.append(task_args)
 
         if not tasks:

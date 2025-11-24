@@ -1,30 +1,50 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-DIST_DIR="dist"
-APP_DIR="SubtitleStudio"
-OLD_DIR="SubtitleStudioOld"
+# -------------------------
+# Konfiguracja builda Nuitka
+# -------------------------
 
-echo "---------------------------------------------"
-echo " Obsługa katalogów $DIST_DIR/$APP_DIR"
-echo "---------------------------------------------"
+APP_NAME="SubtitleStudio"
+ENTRY_FILE="gui.py"
+BUILD_DIR="build"
 
-# Usuwanie starego katalogu OLD_DIR
-if [ -d "$DIST_DIR/$OLD_DIR" ]; then
-    echo "[INFO] Usuwanie starego katalogu '$DIST_DIR/$OLD_DIR'..."
-    rm -rf "$DIST_DIR/$OLD_DIR"
-fi
+# Opcjonalnie: aktywuj wirtualne środowisko, jeśli masz
+source .venv/bin/activate
 
-# Zmienianie nazwy katalogu APP_DIR na OLD_DIR
-if [ -d "$DIST_DIR/$APP_DIR" ]; then
-    echo "[INFO] Zmienianie nazwy katalogu '$DIST_DIR/$APP_DIR' na '$OLD_DIR'..."
-    mv "$DIST_DIR/$APP_DIR" "$DIST_DIR/$OLD_DIR"
-else
-    echo "[INFO] Brak starego katalogu '$DIST_DIR/$APP_DIR' - pomijam zmianę nazwy."
-fi
+echo "🚀 Buduję aplikację $APP_NAME przy użyciu Nuitka..."
 
-# Budowanie aplikacji
-echo "[INFO] Uruchamianie PyInstaller..."
-pyinstaller SubtitleStudio.spec
+# Wyczyść poprzednie buildy
+# rm -rf "$BUILD_DIR" dist __pycache__ *.build *.dist *.onefile-build *.onefile-dist || true
 
-echo "[INFO] Budowanie zakończone."
+# -------------------------
+# Kompilacja
+# -------------------------
+python -m nuitka \
+  --standalone \
+  --onefile \
+  --follow-imports \
+  --enable-plugin=tk-inter \
+  --enable-plugin=pylint-warnings \
+  --output-dir="$BUILD_DIR" \
+  --clang \
+  --show-progress \
+  --show-memory \
+  --assume-yes-for-downloads \
+  --lto=yes \
+  --jobs=$(nproc) \
+  --include-package=elevenlabs \
+  --include-package=elevenlabs.types \
+  --include-package=pydub \
+  --include-package=google.cloud \
+  "$ENTRY_FILE" \
+  -o "$APP_NAME"
+
+# -------------------------
+# Wynik
+# -------------------------
+echo ""
+echo "✅ Kompilacja zakończona!"
+echo "Plik wynikowy: $BUILD_DIR/$APP_NAME"
+echo ""
+ls -lh "$BUILD_DIR/$APP_NAME"

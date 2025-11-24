@@ -12,6 +12,7 @@ import threading
 import queue
 import webbrowser
 import requests
+import subprocess
 
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -70,15 +71,9 @@ BUILTIN_REPLACE = [
      "Usuń kończące znaki specjalne (-\"')"),
 ]
 
-try:
-    import pygame
-
-    pygame.mixer.init()
-    PYGAME_AVAILABLE = True
-except (ImportError, pygame.error) as e:
-    print(
-        f"Ostrzeżenie: Pygame mixer nie mógł zostać zainicjowany ({e}). Odtwarzanie audio będzie niedostępne.")
-    PYGAME_AVAILABLE = False
+FFPLAY_AVAILABLE = shutil.which("ffplay") is not None
+if not FFPLAY_AVAILABLE:
+    print("Ostrzeżenie: Nie znaleziono 'ffplay' w zmiennych środowiskowych (PATH). Odtwarzanie audio będzie niedostępne.")
 
 
 class SubtitleStudioApp(ctk.CTk):
@@ -132,7 +127,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         self.update_button: Optional[ctk.CTkButton] = None
         self.latest_version_info: Optional[Tuple[str, str]] = None
-        self.is_audio_playing = False
+        self.current_audio_process: Optional[subprocess.Popen] = None
 
         self._load_app_config(only_config=True)
         self.apply_theme_settings()
@@ -275,14 +270,13 @@ class SubtitleStudioApp(ctk.CTk):
         self.play_button = ctk.CTkButton(audio_btn_frame, text="▶️ Odtwórz", width=80, command=self.play_selected_audio,
                                          state="disabled")
         self.play_button.pack(side="left", padx=(0, 4))
+        if not FFPLAY_AVAILABLE:
+            self.play_button.configure(state="disabled", text="N/A ffplay")
 
         self.audio_select_var = tk.StringVar(value="(brak plików)")
         self.audio_select = ctk.CTkOptionMenu(
             audio_btn_frame, variable=self.audio_select_var, values=["(brak plików)"])
         self.audio_select.pack(side="left", padx=(4, 8))
-
-        if not PYGAME_AVAILABLE:
-            self.play_button.configure(state="disabled", text="N/A Pygame")
 
         self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
                                              command=self.enqueue_generate_single, state="disabled")
@@ -1273,7 +1267,7 @@ class SubtitleStudioApp(ctk.CTk):
                 self.audio_select_var.set("(brak plików)")
 
         # Ustaw stany przycisków
-        play_state = "normal" if PYGAME_AVAILABLE and line_selected and audio_dir_set and files_exist else "disabled"
+        play_state = "normal" if FFPLAY_AVAILABLE and line_selected and audio_dir_set and files_exist else "disabled"
         gen_state = "normal" if line_selected and audio_dir_set and project_loaded and lines_processed else "disabled"
 
         del_state = "normal" if line_selected and audio_dir_set and files_exist else "disabled"
@@ -1310,20 +1304,20 @@ class SubtitleStudioApp(ctk.CTk):
         return [(f, ready) for f, ready in candidates if f.exists()]
 
     def stop_audio(self):
-        """Stops and unloads any currently playing audio file."""
-        if not PYGAME_AVAILABLE:
-            return
-        try:
-            pygame.mixer.music.stop()
-            pygame.mixer.music.unload()
-        except Exception:
-            pass
-        self.is_audio_playing = False
+        """Stops any currently running ffplay process."""
+        if self.current_audio_process:
+            try:
+                # Próba "ładnego" zakończenia, a jak nie to kill
+                self.current_audio_process.terminate()
+                self.current_audio_process = None
+            except Exception:
+                self.current_audio_process = None
 
     def play_selected_audio(self, event=None):
-        """Plays the first available audio file for the selected line."""
-        if not PYGAME_AVAILABLE:
+        """Plays the selected audio file using ffplay."""
+        if not FFPLAY_AVAILABLE:
             return
+            
         identifier = self._get_selected_identifier()
         if not identifier or not self.audio_dir:
             return
@@ -1333,16 +1327,30 @@ class SubtitleStudioApp(ctk.CTk):
             selected_name = self.audio_select_var.get()
             file_to_play = next(
                 (f for f, _ in files if f.name == selected_name), files[0][0])
-            self.stop_audio()  # Zatrzymaj poprzedni
+            
+            self.stop_audio()
+
             try:
                 print(f"Odtwarzam: {file_to_play}")
-                pygame.mixer.music.load(str(file_to_play))
-                pygame.mixer.music.play()
-                self.is_audio_playing = True
+                # Konfiguracja, aby ukryć okno konsoli na Windows
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+                # Uruchomienie ffplay: -nodisp (bez okna wideo), -autoexit (zamknij po zakończeniu)
+                cmd = ["ffplay", "-nodisp", "-autoexit", str(file_to_play)]
+                
+                self.current_audio_process = subprocess.Popen(
+                    cmd, 
+                    startupinfo=startupinfo,
+                    stdout=subprocess.DEVNULL, 
+                    stderr=subprocess.DEVNULL
+                )
             except Exception as e:
-                self.is_audio_playing = False
+                self.current_audio_process = None
                 messagebox.showerror(
-                    "Błąd odtwarzania", f"Nie udało się odtworzyć pliku:\n{e}", parent=self)
+                    "Błąd odtwarzania", f"Nie udało się uruchomić ffplay:\n{e}", parent=self)
         else:
             messagebox.showinfo(
                 "Brak pliku", "Brak plików audio dla tej linii.", parent=self)
@@ -1376,17 +1384,11 @@ class SubtitleStudioApp(ctk.CTk):
             return
 
         # Sprawdź, czy którykolwiek plik jest odtwarzany
-        if PYGAME_AVAILABLE:
-            try:
-                if pygame.mixer.music.get_busy():
-                    # Sprawdź, czy odtwarzany plik jest jednym z tych do usunięcia
-                    # (Pygame nie udostępnia ścieżki, więc musimy to pominąć - użytkownik musi zatrzymać)
-                    messagebox.showwarning("Plik w użyciu",
-                                           "Audio jest odtwarzane. Zatrzymaj je (np. klikając Play dla innej linii) przed usunięciem.",
-                                           parent=self)
-                    return
-            except Exception:
-                pass
+        if self.current_audio_process and self.current_audio_process.poll() is None:
+             messagebox.showwarning("Plik w użyciu",
+                                   "Audio jest odtwarzane. Zatrzymaj je (np. klikając Play dla innej linii) przed usunięciem.",
+                                   parent=self)
+             return
 
         # Potwierdzenie
         file_list_str = "\n".join([f.name for f, rdy in files])
@@ -1419,15 +1421,11 @@ class SubtitleStudioApp(ctk.CTk):
 
     def _delete_single_file_with_check(self, file_path: Path):
         """Internal helper to delete a single file with safety checks."""
-        if PYGAME_AVAILABLE:
-            try:
-                if pygame.mixer.music.get_busy():
-                    messagebox.showwarning("Plik w użyciu",
-                                           "Nie można usunąć pliku podczas odtwarzania. Zatrzymaj je i spróbuj ponownie.",
-                                           parent=self)
-                    return
-            except Exception:
-                pass
+        if self.current_audio_process and self.current_audio_process.poll() is None:
+             messagebox.showwarning("Plik w użyciu",
+                                   "Nie można usunąć pliku podczas odtwarzania. Zatrzymaj je i spróbuj ponownie.",
+                                   parent=self)
+             return
 
         self.stop_audio()  # Zatrzymaj i zwolnij
 
@@ -1681,15 +1679,11 @@ class SubtitleStudioApp(ctk.CTk):
         else:
             task()
 
-        if PYGAME_AVAILABLE and self.is_audio_playing:
-            try:
-                if not pygame.mixer.music.get_busy():
-                    # Playback finished, unload the file
-                    self.stop_audio()
-            except pygame.error as e:
-                # Mixer might be uninitialized during close
-                print(f"Pygame error checking music status: {e}")
-                self.is_audio_playing = False
+        if self.current_audio_process:
+            # poll() zwraca None jeśli proces nadal działa
+            if self.current_audio_process.poll() is not None:
+                # Proces zakończony
+                self.current_audio_process = None
 
         self.after(100, self.check_queue)
 
