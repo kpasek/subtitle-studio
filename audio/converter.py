@@ -61,12 +61,6 @@ def convert_directory(dir_path: Path, workers: int, speed: float, filters: dict)
             if not out.exists():
                 futures.append(executor.submit(
                     convert_file, f, out, speed, filters))
-
-            out2 = ready_dir / f"{f.stem.replace('output1', 'output2')}.ogg"
-            if not out2.exists():
-                filters['speed'] = filters.get('speed', speed) * 1.2
-                futures.append(executor.submit(
-                    convert_file, f, out2, speed, filters))
         concurrent.futures.wait(futures)
 
     print("\n✅ Konwersja zakończona.")
