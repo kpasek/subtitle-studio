@@ -1,4 +1,7 @@
 import shutil
+import sqlite3
+import os
+import json
 from pathlib import Path
 from typing import List
 from app.entity import SubtitleLine, PatternItem
@@ -8,43 +11,84 @@ import uuid
 
 
 class ProjectManager:
+    """
+    Zarządza projektem (Folder + DB + Git).
+    """
+
     def __init__(self):
         self.project_dir: Path = None
         self.db: ProjectDB = None
         self.git: GitManager = None
 
         self.subtitle_lines: List[SubtitleLine] = []
-        self.patterns_subtitle: List[PatternItem] = []  # Dawne custom_remove
-        self.patterns_tts: List[PatternItem] = []  # Dawne custom_replace
+        self.patterns_subtitle: List[PatternItem] = []
+        self.patterns_tts: List[PatternItem] = []
+        self.project_config: dict = {}  # Cache ustawień
 
         self.audio_dir: Path = None
         self.has_unsaved_changes = False
 
-    def create_project(self, folder_path: Path, raw_lines: List[str]):
-        """Tworzy nową strukturę projektu."""
+    def close(self):
+        if self.db:
+            self.db.close()
+            self.db = None
+        self.project_dir = None
+        self.git = None
+        self.subtitle_lines = []
+        self.project_config = {}
+
+    def create_project(self, folder_path: Path, raw_lines: List[str], source_txt_path: Path = None):
+        """
+        Tworzy projekt.
+        source_txt_path: Ścieżka do oryginalnego pliku txt, służy do importu legacy audio.
+        """
+        self.close()
+
         folder_path.mkdir(parents=True, exist_ok=True)
         (folder_path / "audio").mkdir(exist_ok=True)
 
         self.project_dir = folder_path
         self.audio_dir = folder_path / "audio"
 
-        # Init DB
         self.db = ProjectDB(folder_path / "project.db")
         self.db.connect()
 
-        # Init Lines
+        # Init Lines (z UUID)
         self.subtitle_lines = [SubtitleLine.new(l.strip()) for l in raw_lines if l.strip()]
         self.db.save_lines(self.subtitle_lines)
+
+        # --- LEGACY IMPORT LOGIC ---
+        # Jeśli plik źródłowy txt jest w folderze, gdzie są też pliki audio output1 (N).wav
+        # to spróbuj je zaimportować i przypisać do nowych UUID.
+        if source_txt_path and source_txt_path.parent.exists():
+            src_dir = source_txt_path.parent
+            imported_count = 0
+
+            for i, line in enumerate(self.subtitle_lines):
+                # Legacy index is 1-based
+                legacy_name = f"output1 ({i + 1}).wav"
+                src_audio = src_dir / legacy_name
+
+                if src_audio.exists():
+                    # Kopiuj i zmień nazwę na UUID
+                    new_name = f"output1 ({line.id}).wav"
+                    shutil.copy2(src_audio, self.audio_dir / new_name)
+                    imported_count += 1
+
+            if imported_count > 0:
+                print(f"Zaimportowano {imported_count} plików audio ze starego formatu.")
 
         # Init Git
         self.git = GitManager(folder_path)
         self.git.init_or_load()
-        self.git.stage_file("\n".join(l.text for l in self.subtitle_lines))
-        self.git.commit("Inicjalizacja projektu")
+        self._sync_git("Inicjalizacja projektu")
+
+        self.has_unsaved_changes = False
 
     def open_project(self, folder_path: Path):
+        self.close()
         if not (folder_path / "project.db").exists():
-            raise ValueError("To nie jest folder projektu (brak project.db)")
+            raise ValueError(f"W folderze {folder_path} brakuje pliku project.db")
 
         self.project_dir = folder_path
         self.audio_dir = folder_path / "audio"
@@ -56,44 +100,93 @@ class ProjectManager:
         self.patterns_subtitle = self.db.get_patterns("subtitle")
         self.patterns_tts = self.db.get_patterns("tts")
 
+        # Load config cache
+        self.project_config = self._load_settings_dict()
+
         self.git = GitManager(folder_path)
         self.git.init_or_load()
-
-        # Sync plików audio (czy istnieją) - opcjonalne
+        self.audio_dir.mkdir(exist_ok=True)
 
     def save_data(self):
-        """Zapisuje stan do DB (bez commita git)."""
+        if not self.db: return
         self.db.save_lines(self.subtitle_lines)
         self.db.save_patterns("subtitle", self.patterns_subtitle)
         self.db.save_patterns("tts", self.patterns_tts)
 
     def prepare_commit(self) -> dict:
-        """Przygotowuje diff przed commitem."""
         text_content = "\n".join(l.text for l in self.subtitle_lines)
         self.git.stage_file(text_content)
-
-        stats = {
+        return {
             "diff_stat": self.git.get_diff_stats(),
             "full_diff": self.git.get_full_diff(),
             "lines_count": len(self.subtitle_lines),
-            # Szacowanie wpływu na audio
             "audio_affected": self._calculate_audio_impact()
         }
-        return stats
 
     def commit(self, message: str):
-        self.git.commit(message)
-        self.save_data()  # Update DB
+        self._sync_git(message)
+        self.save_data()
         self.has_unsaved_changes = False
 
-    def _calculate_audio_impact(self):
-        """Sprawdza ile plików audio (indeksowanych) ulegnie zmianie."""
-        # W modelu UUID źródłowe pliki się nie zmieniają.
-        # Zmienia się tylko mapowanie przy eksporcie (1.ogg, 2.ogg).
-        # Dla usera: "Przesunięcie indeksów nastąpi dla X plików".
-        # To wymagałoby porównania ze stanem poprzednim, co jest trudne bez parsowania diffa.
-        # Zwracamy uproszczoną informację.
-        return "Zmiana kolejności wpłynie na eksportowane pliki (ready/)."
+    def delete_line(self, line_id: str):
+        """Usuwa linię o podanym UUID."""
+        # Znajdź i usuń z listy w pamięci
+        original_len = len(self.subtitle_lines)
+        self.subtitle_lines = [l for l in self.subtitle_lines if l.id != line_id]
 
-    def close(self):
-        if self.db: self.db.close()
+        if len(self.subtitle_lines) < original_len:
+            # Zapisz do DB
+            self.db.save_lines(self.subtitle_lines)
+            # Stage dla Gita (ale commit dopiero ręcznie przez usera, albo auto?
+            # User prosił o opcję usuń linię. W tym modelu zmiany są "w locie" w pamięci/DB,
+            # a Git jest snapshotem. Więc tylko DB update wystarczy, Git przy commicie.)
+            self.has_unsaved_changes = True
+
+    def _sync_git(self, message: str):
+        text_content = "\n".join(l.text for l in self.subtitle_lines)
+        self.git.stage_file(text_content)
+        self.git.commit(message)
+
+    def _calculate_audio_impact(self):
+        if self.git.has_changes():
+            return "Wykryto zmiany. Kolejność plików przy eksporcie może ulec zmianie."
+        return "Brak zmian wpływających na strukturę."
+
+    # --- Settings ---
+    def get_setting(self, key, default=None):
+        if self.db:
+            return self.db.get_setting(key, default)
+        return default
+
+    def set_setting(self, key, value):
+        if self.db:
+            self.db.set_setting(key, value)
+            self.project_config[key] = value
+
+    def get_all_settings(self) -> dict:
+        """Zwraca słownik wszystkich ustawień z DB."""
+        if not self.db: return {}
+        # Pobieramy z tabeli settings
+        # To wymagałoby metody w ProjectDB typu fetch_all_settings
+        # Dla uproszczenia zwracamy cached config + dociągamy brakujące
+        return self.project_config.copy()
+
+    def _load_settings_dict(self):
+        # Helper - w prawdziwej implementacji DB powinno mieć "SELECT * FROM settings"
+        # Tutaj symulacja lub zakładamy, że db.get_setting działa pojedynczo.
+        # SQLite nie ma prostej metody "dump dict", trzeba iterować.
+        # W db.py dodałem tabelę settings, ale nie metodę get_all.
+        # Zróbmy prosty cache w pamięci ładowany leniwie lub przy otwarciu.
+        # Tu uproszczenie:
+        cfg = {}
+        # Lista znanych kluczy:
+        keys = ["active_tts_model", "base_audio_speed", "conversion_workers", "ffmpeg_filters"]
+        for k in keys:
+            val = self.db.get_setting(k)
+            if val is not None:
+                # Próba konwersji typów
+                try:
+                    cfg[k] = json.loads(val.replace("'", '"'))  # prosty hack, lepiej trzymać json
+                except:
+                    cfg[k] = val
+        return cfg

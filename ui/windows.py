@@ -3,10 +3,10 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import csv
 import webbrowser
-from typing import List, Callable, Optional
+from typing import List, Callable
 
-from ui.dialogs import SelectBuiltinDialog
 from app.entity import PatternItem
+from ui.dialogs import SelectBuiltinDialog
 
 
 class PatternWindow(ctk.CTkToplevel):
@@ -18,12 +18,16 @@ class PatternWindow(ctk.CTkToplevel):
                  pattern_type: str, on_update: Callable):
         super().__init__(master)
         self.title(title)
-        self.geometry("450x600")
+        self.geometry("500x600")
+
+        # Fix na chowanie się okna pod spód
         self.transient(master)
+        self.lift()
+        self.focus_force()
 
         self.app = master
         self.pattern_list = pattern_list
-        self.pattern_type = pattern_type
+        self.pattern_type = pattern_type  # 'subtitle' lub 'tts'
         self.on_update = on_update
 
         self._create_widgets()
@@ -39,29 +43,21 @@ class PatternWindow(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(self)
         btn_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
 
+        # Przyciski akcji - teraz uporządkowane, bez duplikatów
         ctk.CTkButton(btn_frame, text="Dodaj ręcznie", command=self.add_pattern).pack(side="left", expand=True,
                                                                                       fill="x", padx=2)
-        ctk.CTkButton(btn_frame, text="Importuj CSV", command=self.import_csv).pack(side="left", expand=True, fill="x",
-                                                                                    padx=2)
         ctk.CTkButton(btn_frame, text="Wybierz wbudowane", command=self.open_builtin).pack(side="left", expand=True,
                                                                                            fill="x", padx=2)
-        ctk.CTkButton(btn_frame, text="Importuj CSV", command=self.import_csv).pack(side="left", expand=True, fill="x",
-                                                                                    padx=2)
-
-    def open_builtin(self):
-        SelectBuiltinDialog(self, self.pattern_type, self._add_builtin_patterns)
-
-    def _add_builtin_patterns(self, items):
-        for item in items:
-            # Unikaj duplikatów
-            if not any(x.pattern == item.pattern for x in self.pattern_list):
-                self.pattern_list.append(item)
-        self.refresh_list()
-        self.on_update()
+        ctk.CTkButton(btn_frame, text="Import CSV", command=self.import_csv).pack(side="left", expand=True, fill="x",
+                                                                                  padx=2)
 
     def refresh_list(self):
         for widget in self.scroll_frame.winfo_children():
             widget.destroy()
+
+        if not self.pattern_list:
+            ctk.CTkLabel(self.scroll_frame, text="Brak wzorców. Dodaj nowe.", text_color="gray").pack(pady=10)
+            return
 
         for item in self.pattern_list:
             self._add_row_ui(item)
@@ -78,13 +74,15 @@ class PatternWindow(ctk.CTkToplevel):
 
         ctk.CTkCheckBox(row, text="", variable=chk_var, command=toggle, width=24).pack(side="left", padx=5)
 
-        text = f"'{item.pattern}'"
+        # Formatowanie tekstu
+        desc = f"Pattern: {item.pattern}"
         if item.replace:
-            text += f" -> '{item.replace}'"
-        if not item.case_sensitive:
-            text += " (Aa)"
+            desc += f"  ->  {item.replace}"
+        if item.name:
+            desc = f"[{item.name}] {desc}"
 
-        ctk.CTkLabel(row, text=text, anchor="w").pack(side="left", padx=5, expand=True, fill="x")
+        lbl = ctk.CTkLabel(row, text=desc, anchor="w")
+        lbl.pack(side="left", padx=5, expand=True, fill="x")
 
         def delete():
             if item in self.pattern_list:
@@ -97,10 +95,29 @@ class PatternWindow(ctk.CTkToplevel):
 
     def add_pattern(self):
         # Delegacja do metod z GUI (ze względu na kompatybilność z PatternEditorWindow)
-        if self.pattern_type == 'remove':
+        # Mapowanie typu 'subtitle' -> 'remove', 'tts' -> 'replace' dla starych edytorów
+        legacy_type = 'remove' if self.pattern_type == 'subtitle' else 'replace'
+
+        if legacy_type == 'remove':
             self.app.open_add_remove_pattern(callback=lambda: [self.refresh_list(), self.on_update()])
         else:
             self.app.open_add_replace_pattern(callback=lambda: [self.refresh_list(), self.on_update()])
+
+    def open_builtin(self):
+        # Otwiera dialog wyboru
+        SelectBuiltinDialog(self, self.pattern_type, self._add_builtin_patterns)
+
+    def _add_builtin_patterns(self, items):
+        added_count = 0
+        for item in items:
+            # Sprawdź czy już nie istnieje taki pattern
+            if not any(x.pattern == item.pattern for x in self.pattern_list):
+                self.pattern_list.append(item)
+                added_count += 1
+
+        if added_count > 0:
+            self.refresh_list()
+            self.on_update()
 
     def import_csv(self):
         path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])

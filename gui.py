@@ -2,12 +2,12 @@ import multiprocessing
 import os
 import shutil
 import json
-import subprocess
 import threading
 import webbrowser
 import requests
 import re
 import ctypes
+import subprocess
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -15,17 +15,17 @@ from pathlib import Path
 import queue
 from datetime import datetime
 
-from app.project import ProjectManager # Nowa klasa
-from ui.dialogs import CommitDialog, TTSGenerationDialog, ConversionDialog
-
-# Importy z aplikacji
-from app.state import ProjectStateManager
+# --- CORE IMPORTS ---
+from app.project import ProjectManager
 from app.text_processing import apply_remove_patterns, apply_replace_patterns
-from app.ui_windows import PatternWindow, AboutWindow
 from app.utils import is_installed
 from app.settings import SettingsWindow
 
-# Audio / Generators
+# --- UI IMPORTS ---
+from ui.windows import PatternWindow, AboutWindow
+from ui.dialogs import CommitDialog, TTSGenerationDialog, ConversionDialog
+
+# --- AUDIO IMPORTS ---
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from audio.pattern_editor import PatternEditorWindow
 from audio.generation_queue import GenerationQueueWindow
@@ -45,9 +45,9 @@ except Exception:
     pass
 # -----------------------
 
-APP_TITLE = "Subtitle Studio 2.1 Refactored"
-APP_VERSION = "2.1.2"
-APP_CONFIG_FILE = Path.cwd() / ".subtitle_studio_config.json"
+APP_TITLE = "Subtitle Studio 2.3 (Pro)"
+APP_VERSION = "2.3.0"
+GLOBAL_CONFIG_FILE = Path.home() / ".subtitle_studio_global.json"
 
 VIEW_MODE_TTS = "TTS (Podmiany)"
 VIEW_MODE_CLEAN = "Czyste (Game Reader)"
@@ -60,7 +60,6 @@ class SubtitleStudioApp(ctk.CTk):
         self.title(APP_TITLE)
         self.geometry("1600x900")
 
-
         # Managers
         self.project = ProjectManager()
         self.gen_manager = GenerationManager.get_instance()
@@ -68,32 +67,34 @@ class SubtitleStudioApp(ctk.CTk):
         # UI State Variables
         self.view_mode = tk.StringVar(value=VIEW_MODE_TTS)
         self.search_text = tk.StringVar()
+        self.sync_scroll_enabled = tk.BooleanVar(value=True)  # Domyślnie włączone
 
         self.global_config = {}
         self.queue = queue.Queue()
         self.latest_version_info = None
         self.update_btn = None
+        self.is_scrolling = False  # flaga do sync scrolla
 
-        # Setup
+        # Init
         self._load_global_config()
         self._apply_theme()
         self._create_menu()
         self._create_layout()
         self._bind_shortcuts()
 
-        # Async tasks
+        # Background tasks
         self.check_queue_loop()
         threading.Thread(target=self._check_for_updates, daemon=True).start()
 
-        # Load last project
+        # Auto-open last project
         last_proj = self.global_config.get("last_project")
         if last_proj and os.path.exists(last_proj):
-            try:
-                self.open_project(last_proj)
-            except:
-                pass
+            # Używamy after, żeby GUI zdążyło się narysować
+            self.after(500, lambda: self.open_project(Path(last_proj)))
 
-    # --- UI Construction ---
+    # --------------------------------------------------------------------------
+    # UI CONSTRUCTION
+    # --------------------------------------------------------------------------
 
     def _create_menu(self):
         menubar = tk.Menu(self)
@@ -101,7 +102,7 @@ class SubtitleStudioApp(ctk.CTk):
         # --- Plik ---
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Nowy projekt (Ctrl+N)", command=self.new_project)
-        file_menu.add_command(label="Otwórz projekt (.json)", command=self.open_project)
+        file_menu.add_command(label="Otwórz projekt (Folder)", command=self.open_project)
 
         recent_menu = tk.Menu(file_menu, tearoff=0)
         recent = self.global_config.get("recent_projects", [])
@@ -112,17 +113,20 @@ class SubtitleStudioApp(ctk.CTk):
                 recent_menu.add_command(label=path, command=lambda p=path: self.open_project(p))
         file_menu.add_cascade(label="Ostatnie projekty", menu=recent_menu)
 
-        file_menu.add_command(label="Zapisz projekt (Ctrl+S)", command=self.save_project)
         file_menu.add_separator()
-        file_menu.add_command(label="Ustawienia Globalne", command=self.open_global_settings)
         file_menu.add_command(label="Ustawienia Projektu", command=self.open_project_settings)
-        file_menu.add_separator()
+        file_menu.add_command(label="Ustawienia Globalne", command=self.open_global_settings)
         file_menu.add_command(label="Wyjście", command=self.on_close)
         menubar.add_cascade(label="Plik", menu=file_menu)
 
+        # --- Widok ---
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_checkbutton(label="Synchronizuj przewijanie", variable=self.sync_scroll_enabled)
+        menubar.add_cascade(label="Widok", menu=view_menu)
+
         # --- Audio ---
         audio_menu = tk.Menu(menubar, tearoff=0)
-        audio_menu.add_command(label="Wybierz katalog audio", command=self.choose_audio_dir)
+        audio_menu.add_command(label="Otwórz folder audio", command=self.open_audio_folder)
         audio_menu.add_separator()
         audio_menu.add_command(label="Generuj wszystko TTS (Ctrl+Shift+G)", command=self.generate_audio_tts)
         audio_menu.add_command(label="Konwertuj audio (WAV->OGG)", command=self.generate_audio_convert)
@@ -135,11 +139,6 @@ class SubtitleStudioApp(ctk.CTk):
         export_menu = tk.Menu(menubar, tearoff=0)
         export_menu.add_command(label="Eksport dla Game Reader", command=self.export_game_reader)
         export_menu.add_command(label="Eksport dla Lektor", command=self.export_lektor)
-        export_menu.add_separator()
-        export_menu.add_command(label="Eksport wzorców usuwających (CSV)",
-                                command=lambda: self.export_patterns('remove'))
-        export_menu.add_command(label="Eksport wzorców podmieniających (CSV)",
-                                command=lambda: self.export_patterns('replace'))
         menubar.add_cascade(label="Eksport", menu=export_menu)
 
         # --- Pomoc ---
@@ -158,36 +157,62 @@ class SubtitleStudioApp(ctk.CTk):
         paned = tk.PanedWindow(container, orient=tk.HORIZONTAL, sashwidth=6, bg="#2b2b2b")
         paned.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Preview
+        # Preview (Lewy)
         frame_left = ctk.CTkFrame(paned)
         paned.add(frame_left)
         ctk.CTkLabel(frame_left, text="PODGLĄD (ReadOnly)", font=("Arial", 12, "bold")).pack(pady=2)
         self.txt_preview = ctk.CTkTextbox(frame_left, state="disabled")
         self.txt_preview.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # Editor
+        # Editor (Prawy)
         frame_right = ctk.CTkFrame(paned)
         paned.add(frame_right)
         self.lbl_editor = ctk.CTkLabel(frame_right, text="EDYTORY (Robocza)", font=("Arial", 12, "bold"))
         self.lbl_editor.pack(pady=2)
+
         self.txt_editor = ctk.CTkTextbox(frame_right)
         self.txt_editor.pack(fill="both", expand=True, padx=2, pady=2)
 
+        # --- SCROLL SYNC SETUP ---
+        self._setup_sync_scroll(self.txt_editor, self.txt_preview)
+        self._setup_sync_scroll(self.txt_preview, self.txt_editor)
+
         self.lbl_status = ctk.CTkLabel(self, text="Gotowy", anchor="w")
         self.lbl_status.pack(side="bottom", fill="x", padx=10)
+
+    def _setup_sync_scroll(self, source, target):
+        """Synchronizacja scrollowania (hook yview)."""
+        # Pobieramy oryginalny yview widgetu tekstowego
+        orig_yview = source._textbox.yview
+
+        def new_yview(*args):
+            # Wywołaj oryginał
+            res = orig_yview(*args)
+            # Jeśli włączona synchronizacja i nie jesteśmy w pętli
+            if self.sync_scroll_enabled.get() and not self.is_scrolling:
+                self.is_scrolling = True
+                try:
+                    # Przekaż to samo polecenie do drugiego okna
+                    target._textbox.yview(*args)
+                finally:
+                    self.is_scrolling = False
+            return res
+
+        # Podmień metodę w instancji
+        source._textbox.yview = new_yview
 
     def _create_toolbar(self, parent):
         toolbar = ctk.CTkFrame(parent, height=40)
         toolbar.pack(fill="x", side="top", padx=5, pady=5)
 
-        # Lewa strona
+        # Lewa
         frame_left = ctk.CTkFrame(toolbar, fg_color="transparent")
         frame_left.pack(side="left", fill="x", expand=True)
 
         ctk.CTkLabel(frame_left, text="Wzorce:").pack(side="left", padx=5)
-        ctk.CTkButton(frame_left, text="Wycinające", width=80,
+        ctk.CTkButton(frame_left, text="Lista Napisów", width=100,
                       command=lambda: self.open_patterns('remove')).pack(side="left", padx=2)
-        ctk.CTkButton(frame_left, text="Podmieniające", width=80,
+        ctk.CTkButton(frame_left, text="Lista TTS", width=100,
                       command=lambda: self.open_patterns('replace')).pack(side="left", padx=2)
 
         ctk.CTkLabel(frame_left, text="| Widok:").pack(side="left", padx=10)
@@ -195,9 +220,7 @@ class SubtitleStudioApp(ctk.CTk):
                           command=self.refresh_ui, width=130).pack(side="left", padx=2)
 
         ctk.CTkLabel(frame_left, text="| Szukaj:").pack(side="left", padx=10)
-
-        # Wyszukiwarka - rozszerzalna
-        self.ent_search = ctk.CTkEntry(frame_left, textvariable=self.search_text, placeholder_text="Filtruj...")
+        self.ent_search = ctk.CTkEntry(frame_left, textvariable=self.search_text, placeholder_text="Tekst lub 15*")
         self.ent_search.pack(side="left", padx=2, fill="x", expand=True)
         self.ent_search.bind("<Return>", self.perform_search)
 
@@ -205,391 +228,375 @@ class SubtitleStudioApp(ctk.CTk):
         ctk.CTkButton(frame_left, text="X", width=30, fg_color="gray", command=self.clear_search).pack(side="left",
                                                                                                        padx=2)
 
-        # Prawa strona (Commit)
+        # Prawa
         frame_right = ctk.CTkFrame(toolbar, fg_color="transparent")
         frame_right.pack(side="right", padx=5)
 
-        ctk.CTkButton(frame_right, text="Commit (Ctrl+K)", fg_color="green", width=120,
-                      command=self.commit_changes).pack(side="left", padx=10)
+        ctk.CTkButton(frame_right, text="Ustawienia", width=80, fg_color="#444",
+                      command=self.open_project_settings).pack(side="left", padx=5)
 
-        self.combo_history = ctk.CTkOptionMenu(frame_right, values=["Brak"], command=self.restore_history, width=150)
-        self.combo_history.pack(side="left", padx=5)
+        ctk.CTkButton(frame_right, text="Commit (GIT)", fg_color="green", width=100,
+                      command=self.commit_changes).pack(side="left", padx=10)
 
         self.update_btn = ctk.CTkButton(frame_right, text="Update!", fg_color="#006400", width=80,
                                         command=self._download_update)
 
     def _bind_shortcuts(self):
         self.bind("<Control-n>", lambda e: self.new_project())
-        self.bind("<Control-s>", lambda e: self.save_project())
         self.bind("<Control-k>", lambda e: self.commit_changes())
         self.bind("<Control-g>", lambda e: self.generate_current_line())
         self.bind("<Control-G>", lambda e: self.generate_audio_tts())
         self.bind("<Control-space>", lambda e: self.play_current_line_audio())
         self.bind("<Escape>", lambda e: self.clear_search())
+        self.bind("<Control-x>", lambda e: self.delete_current_line())
 
-    # --- Project Management ---
+    # --------------------------------------------------------------------------
+    # CORE LOGIC
+    # --------------------------------------------------------------------------
 
     def new_project(self):
         if self.project.has_unsaved_changes:
-            if not messagebox.askyesno("Uwaga", "Niezapisane zmiany. Kontynuować?"): return
+            if not messagebox.askyesno("Uwaga", "Masz niezatwierdzone zmiany. Kontynuować?"): return
 
-        # Wybierz plik tekstowy
-        txt_path = filedialog.askopenfilename(title="Wybierz napisy", filetypes=[("Tekst", "*.txt *.srt")])
+        txt_path = filedialog.askopenfilename(title="Wybierz plik z napisami (txt/srt)",
+                                              filetypes=[("Tekst", "*.txt *.srt")])
         if not txt_path: return
 
-        # Wybierz folder docelowy dla projektu
-        dest_folder = filedialog.askdirectory(title="Wybierz pusty folder na nowy projekt")
+        messagebox.showinfo("Nowy Projekt", "Wybierz PUSTY folder docelowy.")
+        dest_folder = filedialog.askdirectory(title="Folder projektu")
         if not dest_folder: return
+
+        # Opcjonalne sprawdzenie czy folder pusty
+        dest_path = Path(dest_folder)
+        if any(dest_path.iterdir()):
+            if not messagebox.askyesno("Folder niepusty",
+                                       "Wybrany folder nie jest pusty. Czy na pewno chcesz w nim utworzyć projekt?"):
+                return
 
         try:
             with open(txt_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
-            self.project.create_project(Path(dest_folder), lines)
-            self._on_project_loaded()
-            self.set_status(f"Utworzono projekt w: {dest_folder}")
+            # Tworzymy projekt (importując audio jeśli istnieje w źródle)
+            self.project.create_project(Path(dest_folder), lines, source_txt_path=Path(txt_path))
+
+            # Przypisz domyślny model globalny
+            def_model = self.global_config.get("default_tts_model", "XTTS")
+            self.project.set_setting("active_tts_model", def_model)
+
+            self._project_loaded_action()
+            self.set_status(f"Utworzono projekt w: {Path(dest_folder).name}")
+
         except Exception as e:
             messagebox.showerror("Błąd", str(e))
 
     def open_project(self, path=None):
+        if self.project.has_unsaved_changes:
+            if not messagebox.askyesno("Uwaga", "Niezapisane zmiany. Porzucić?"): return
+
         if not path:
             path = filedialog.askdirectory(title="Wybierz folder projektu")
         if not path: return
 
+        path_obj = Path(path)
         try:
-            self.project.open_project(Path(path))
-            self._on_project_loaded()
-            self.set_status(f"Otwarto: {Path(path).name}")
+            self.project.open_project(path_obj)
+            self._project_loaded_action()
+            self.set_status(f"Wczytano projekt: {path_obj.name}")
         except Exception as e:
-            messagebox.showerror("Błąd", f"Nie można otworzyć projektu:\n{e}")
+            messagebox.showerror("Błąd", f"Nie udało się otworzyć projektu:\n{e}")
 
-    def _on_project_loaded(self):
+    def _project_loaded_action(self):
         self._add_recent_project(str(self.project.project_dir))
         self.refresh_editor_from_state()
         self.refresh_ui()
 
-    def save_project(self):
-        # W modelu DB/Git zapis jest ciągły lub przy commicie.
-        # Ten przycisk może służyć do zapisu samej bazy (ustawień/wzorców) bez commita git.
-        self.project.save_data()
-        self.set_status("Zapisano dane projektu (DB).")
-
     def commit_changes(self):
+        if not self.project.project_dir: return
         if self.search_text.get():
-            return messagebox.showwarning("Błąd", "Wyczyść filtr przed commitem.")
+            messagebox.showwarning("Uwaga", "Wyczyść filtr wyszukiwania przed commitem.")
+            return
 
-        # Pobierz tekst z edytora
+        # Pobranie tekstu z GUI
         raw_text = self.txt_editor.get("1.0", "end-1c")
         new_lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
 
-        # Aktualizuj stan w pamięci (reconcile)
+        # Aktualizacja modelu (reconcile)
         from app.text_processing import reconcile_lines
         self.project.subtitle_lines = reconcile_lines(self.project.subtitle_lines, new_lines)
 
-        # Przygotuj statystyki dla okna dialogowego
+        # Statystyki diffa
         stats = self.project.prepare_commit()
 
-        # Pokaż okno
+        # Dialog
         CommitDialog(self, stats, lambda: self._do_commit())
 
     def _do_commit(self):
-        self.project.commit("Aktualizacja dialogów z GUI")
-        self.set_status("Zatwierdzono zmiany (Git Commit).")
-
-    # --- Single Line Logic (Generate/Play) ---
-
-    def _get_current_line_data(self):
-        """Zwraca (SubtitleLine) dla linii pod kursorem."""
-        if not self.project.subtitle_lines: return None
-
         try:
-            index = self.txt_editor.index("insert")
-            row = int(index.split('.')[0]) - 1  # 0-indexed
-        except:
-            return None
+            self.project.commit("Update from Studio GUI")
+            self.set_status("Zatwierdzono zmiany (Git Commit).")
+        except Exception as e:
+            messagebox.showerror("Błąd Git", str(e))
 
-        query = self.search_text.get().lower()
-        lines = self.project.subtitle_lines
-
-        if query:
-            visible_indices = [i for i, l in enumerate(lines) if query in l.text.lower()]
-            if 0 <= row < len(visible_indices):
-                real_idx = visible_indices[row]
-                return lines[real_idx]
-        else:
-            if 0 <= row < len(lines):
-                return lines[row]
-        return None
-
-    def generate_current_line(self):
-        line = self._get_current_line_data()
-        if not line: return self.set_status("Nie wybrano linii.")
-
-        if not self.project.audio_dir:
-            return messagebox.showwarning("Błąd", "Wybierz katalog audio (Menu -> Audio -> Wybierz katalog).")
-
-        clean_text = self._process_text_for_tts(line.text)
-        if not clean_text: return self.set_status("Pusta linia po czyszczeniu.")
-
-        job = GenerationJob(
-            project_path=str(self.project.project_path or "Temp"),
-            audio_dir=self.project.audio_dir,
-            lines_to_generate=[(line.id, clean_text)],
-            tts_model_name=self.project.project_config.get('active_tts_model', 'XTTS'),
-            tts_config=self.global_config,
-            converter_config={}
-        )
-        self.gen_manager.add_job(job)
-        self.set_status(f"Generowanie: {clean_text[:30]}...")
-        self.show_queue_window()
-
-    def play_current_line_audio(self):
+    def delete_current_line(self):
+        """Usuwa aktualnie wybraną linię."""
         line = self._get_current_line_data()
         if not line: return
 
-        if not self.project.audio_dir:
-            return messagebox.showwarning("Błąd", "Nie wybrano katalogu audio.")
+        if messagebox.askyesno("Usuń linię", f"Czy usunąć linię:\n{line.text[:50]}...?"):
+            self.project.delete_line(line.id)
+            self.refresh_ui()
+            self.set_status("Usunięto linię.")
 
-        # Logika szukania pliku (zachowana, skoro działa poprawnie)
-        uuid_filename_ready = f"output1 ({line.id}).ogg"
-        uuid_filename_raw = f"output1 ({line.id}).wav"
-
-        legacy_filename_raw = None
-        legacy_filename_ready = None
-
-        try:
-            line_idx = self.project.subtitle_lines.index(line)
-            legacy_filename_raw = f"output1 ({line_idx + 1}).wav"
-            legacy_filename_ready = f"output1 ({line_idx + 1}).ogg"
-        except ValueError:
-            pass
-
-        search_order = [
-            self.project.audio_dir / "ready" / uuid_filename_ready,
-            self.project.audio_dir / uuid_filename_raw,
-        ]
-
-        if legacy_filename_ready:
-            search_order.append(self.project.audio_dir / "ready" / legacy_filename_ready)
-            search_order.append(self.project.audio_dir / legacy_filename_raw)
-
-        file_to_play = None
-        for path in search_order:
-            if path and path.exists():
-                file_to_play = path
-                break
-
-        if file_to_play:
-            self.set_status(f"Odtwarzanie: {file_to_play.name}")
-            try:
-                # Konfiguracja ukrywania okna konsoli na Windows
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    # startupinfo.dwFlags |= subprocess.STARTUPF_USESHOWWINDOW
-
-                # Komenda ffplay:
-                # -nodisp: brak okna graficznego (tylko audio)
-                # -autoexit: zamknij proces po zakończeniu pliku
-                # -hide_banner: mniej śmieci w logach (opcjonalne)
-                cmd = ["ffplay", "-nodisp", "-autoexit", "-hide_banner", str(file_to_play)]
-
-                # Uruchomienie w tle (Popen nie blokuje GUI)
-                subprocess.Popen(
-                    cmd,
-                    startupinfo=startupinfo,
-                    stdout=subprocess.DEVNULL,  # Przekierowanie wyjścia w nicość
-                    stderr=subprocess.DEVNULL
-                )
-            except FileNotFoundError:
-                messagebox.showerror("Błąd",
-                                     "Nie znaleziono programu ffplay. Upewnij się, że FFmpeg jest zainstalowany i dodany do PATH.")
-            except Exception as e:
-                print(f"Błąd odtwarzania: {e}")
-                messagebox.showerror("Błąd", f"Nie udało się odtworzyć pliku:\n{e}")
-        else:
-            self.set_status("Brak pliku audio.")
-            if messagebox.askyesno("Brak audio", "Nie znaleziono pliku audio dla tej linii.\nWygenerować teraz?"):
-                self.generate_current_line()
-
-    def _process_text_for_tts(self, raw_text):
-        rem = [p for p in self.project.custom_remove if p.enabled]
-        rep = [p for p in self.project.custom_replace if p.enabled]
-
-        clean = apply_remove_patterns([raw_text], rem)
-        if clean:
-            return apply_replace_patterns(clean, rep)[0].strip()
-        return ""
-
-    # --- Bulk Audio & Export ---
+    # --------------------------------------------------------------------------
+    # AUDIO & EXPORT
+    # --------------------------------------------------------------------------
 
     def generate_audio_tts(self):
-        if not self.project.audio_dir: return
+        if not self.project.audio_dir:
+            return messagebox.showwarning("Info", "Brak otwartego projektu.")
 
-        model = self.global_config.get('active_tts_model', 'Nieznany')
+        # Pobieramy model z ustawień projektu
+        model = self.project.get_setting("active_tts_model", "XTTS")
         count = len(self.project.subtitle_lines)
 
         TTSGenerationDialog(self, count, model, self._run_tts_job)
 
     def _run_tts_job(self, clear_previous):
         if clear_previous:
-            # Logika czyszczenia folderu audio
+            # Tu można dodać logikę czyszczenia (deleter.py)
             pass
 
-            # Przygotowanie danych (jak wcześniej, ale używając self.project.patterns_tts itp.)
-        # ... logic ...
-        self.gen_manager.add_job(...)  # Job creation
+        lines_data = []
+        rem = [p for p in self.project.patterns_subtitle if p.enabled]
+        rep = [p for p in self.project.patterns_tts if p.enabled]
+
+        for line in self.project.subtitle_lines:
+            clean = apply_remove_patterns([line.text], rem)
+            if clean:
+                final = apply_replace_patterns(clean, rep)[0].strip()
+                if final:
+                    lines_data.append((line.id, final))
+
+        if not lines_data:
+            return messagebox.showinfo("Info", "Brak linii po przefiltrowaniu.")
+
+        # Pobieramy model z projektu do Joba
+        model = self.project.get_setting("active_tts_model", "XTTS")
+
+        job = GenerationJob(
+            project_path=str(self.project.project_dir),
+            audio_dir=self.project.audio_dir,
+            lines_to_generate=lines_data,
+            tts_model_name=model,
+            tts_config=self.global_config,
+            converter_config={}
+        )
+        self.gen_manager.add_job(job)
         self.show_queue_window()
 
     def generate_audio_convert(self):
         if not self.project.audio_dir: return
+        count = len(list(self.project.audio_dir.glob("output1 (*).wav")))
 
-        count = len(list(self.project.audio_dir.glob("*.wav")))  # Uproszczone zliczanie
-        ConversionDialog(self, count, self._run_convert_job)
+        filters = self.global_config.get('ffmpeg_filters', {})
+        ConversionDialog(self, count, filters, self._run_convert_job)
 
     def _run_convert_job(self, options):
-        # options['out1'], options['clear'] ...
-        # Tworzenie ConversionJob z uwzględnieniem flag
-        # ... logic ...
-        self.gen_manager.add_job(...)
+        # options: out1, out2, clear
+        config = {
+            'base_audio_speed': self.project.get_setting('base_audio_speed', 1.1),
+            'conversion_workers': self.global_config.get('conversion_workers', 4),
+            'ffmpeg_filters': self.global_config.get('ffmpeg_filters', {}),
+            'generate_out1': options['out1'],
+            'generate_out2': options['out2'],
+            'clear_ready': options['clear']
+        }
+
+        job = ConversionJob(
+            project_path=str(self.project.project_dir),
+            audio_dir=self.project.audio_dir,
+            converter_config=config
+        )
+        self.gen_manager.add_job(job)
         self.show_queue_window()
 
+    def generate_current_line(self):
+        line = self._get_current_line_data()
+        if not line: return self.set_status("Nie wybrano linii.")
+
+        rem = [p for p in self.project.patterns_subtitle if p.enabled]
+        rep = [p for p in self.project.patterns_tts if p.enabled]
+        clean = apply_remove_patterns([line.text], rem)
+
+        if not clean: return self.set_status("Pusta linia.")
+        final = apply_replace_patterns(clean, rep)[0].strip()
+
+        model = self.project.get_setting("active_tts_model", "XTTS")
+
+        job = GenerationJob(
+            project_path=str(self.project.project_dir),
+            audio_dir=self.project.audio_dir,
+            lines_to_generate=[(line.id, final)],
+            tts_model_name=model,
+            tts_config=self.global_config,
+            converter_config={}
+        )
+        self.gen_manager.add_job(job)
+        self.show_queue_window()
+
+    def play_current_line_audio(self):
+        line = self._get_current_line_data()
+        if not line: return
+        if not self.project.audio_dir: return
+
+        # Szukamy po UUID
+        base_name = f"output1 ({line.id})"
+        search_paths = [
+            self.project.audio_dir / "ready" / f"{base_name}.ogg",
+            self.project.audio_dir / f"{base_name}.wav"
+        ]
+
+        file_to_play = next((p for p in search_paths if p.exists()), None)
+
+        if file_to_play:
+            self.set_status(f"Odtwarzanie: {file_to_play.name}")
+            try:
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTUPF_USESHOWWINDOW
+
+                subprocess.Popen(
+                    ["ffplay", "-nodisp", "-autoexit", "-hide_banner", str(file_to_play)],
+                    startupinfo=startupinfo,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Błąd odtwarzania (ffplay):\n{e}")
+        else:
+            if messagebox.askyesno("Brak audio", "Nie znaleziono pliku. Wygenerować?"):
+                self.generate_current_line()
+
+    # --------------------------------------------------------------------------
+    # EXPORT
+    # --------------------------------------------------------------------------
+
     def export_game_reader(self):
-        self._generic_export("Game Reader", copy_audio=False)
+        self._run_export("Game Reader", copy_audio=False)
 
     def export_lektor(self):
-        dest = self._generic_export("Lektor", copy_audio=True)
-        if dest:
-            cfg = {
-                "version": "1.0",
-                "source_text": "subtitles.txt",
-                "audio_folder": "audio",
-                "font_size": 24,
-                "bg_color": "#000000",
-                "text_color": "#FFFFFF"
-            }
-            with open(dest / "lektor_config.json", "w") as f:
-                json.dump(cfg, f, indent=4)
+        path = self._run_export("Lektor", copy_audio=True)
+        if path:
+            with open(path / "lektor_config.json", "w") as f:
+                json.dump({"version": "1.0", "source": "subtitles.txt"}, f)
 
-    def _generic_export(self, app_name, copy_audio=False):
-        if not self.project.audio_dir:
-            messagebox.showwarning("Błąd", "Brak katalogu audio.")
-            return None
+    def _run_export(self, name, copy_audio):
+        if not self.project.project_dir: return None
 
-        dest_str = filedialog.askdirectory(title=f"Eksport dla {app_name}")
-        if not dest_str: return None
-        dest_path = Path(dest_str)
+        dest = filedialog.askdirectory(title=f"Eksport dla {name}")
+        if not dest: return None
+        dest_path = Path(dest)
 
+        # 1. Tekst
         lines = self.project.subtitle_lines
-        rem_pats = [p for p in self.project.custom_remove if p.enabled]
+        rem = [p for p in self.project.patterns_subtitle if p.enabled]
 
-        clean_lines_text = []
+        final_lines = []
         valid_indices = []
 
         for i, line in enumerate(lines):
-            processed = apply_remove_patterns([line.text], rem_pats)
-            if processed:
-                clean_lines_text.append(processed[0])
+            clean = apply_remove_patterns([line.text], rem)
+            if clean:
+                final_lines.append(clean[0])
                 valid_indices.append(i)
 
-        if not clean_lines_text:
-            messagebox.showwarning("Błąd", "Brak linii po oczyszczeniu.")
-            return None
-
         with open(dest_path / "subtitles.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(clean_lines_text))
+            f.write("\n".join(final_lines))
 
-        audio_dest = dest_path / "audio"
-        if copy_audio and audio_dest.exists(): shutil.rmtree(audio_dest)
-        audio_dest.mkdir(exist_ok=True)
+        # 2. Audio
+        if copy_audio:
+            (dest_path / "audio").mkdir(exist_ok=True)
 
         ready_dir = self.project.audio_dir / "ready"
-        if not ready_dir.exists():
-            messagebox.showwarning("Ostrzeżenie", "Folder 'ready' nie istnieje. Używam plików RAW jeśli dostępne.")
-            ready_dir = self.project.audio_dir
+        count = 0
 
-        success_count = 0
-        for seq_idx, line_idx in enumerate(valid_indices):
-            line_uuid = lines[line_idx].id
+        for seq, original_idx in enumerate(valid_indices):
+            uuid = lines[original_idx].id
+            src = ready_dir / f"output1 ({uuid}).ogg"
 
-            # Wyszukiwanie pliku źródłowego (UUID lub Index)
-            # 1. UUID
-            src_file = ready_dir / f"output1 ({line_uuid}).ogg"
-            if not src_file.exists():
-                src_file = self.project.audio_dir / f"output1 ({line_uuid}).wav"
+            if src.exists():
+                dst_name = f"{seq + 1}.ogg"
+                # Zawsze kopiuj, nawet dla GR, bo nazwy muszą być sekwencyjne
+                shutil.copy2(src, dest_path / "audio" / dst_name)
+                count += 1
 
-            # 2. Legacy Index Fallback (jeśli nadal nie znaleziono)
-            if not src_file.exists():
-                src_file = ready_dir / f"output1 ({line_idx + 1}).ogg"
-            if not src_file.exists():
-                src_file = self.project.audio_dir / f"output1 ({line_idx + 1}).wav"
-
-            dst_ext = src_file.suffix if src_file.exists() else ".ogg"
-            dst_file = audio_dest / f"{seq_idx + 1}{dst_ext}"
-
-            if src_file.exists():
-                shutil.copy2(src_file, dst_file)
-                success_count += 1
-            else:
-                print(f"Brak pliku audio dla linii {line_idx + 1} (ID: {line_uuid})")
-
-        messagebox.showinfo("Sukces",
-                            f"Wyeksportowano do {dest_path}.\nSkopiowano audio: {success_count}/{len(valid_indices)}")
+        messagebox.showinfo("Eksport", f"Zakończono.\nLinii: {len(final_lines)}\nAudio: {count}")
         return dest_path
 
-    def export_patterns(self, ptype):
-        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
-        if path:
-            self.project.export_patterns_to_csv(Path(path), ptype)
-            self.set_status("Wyeksportowano wzorce.")
-
-    # --- UI Helpers & Search ---
-
-    def perform_search(self, event=None):
-        self.refresh_ui(filter_active=True)
-
-    def clear_search(self):
-        self.search_text.set("")
-        self.refresh_ui(filter_active=False)
+    # --------------------------------------------------------------------------
+    # UI UPDATE & HELPERS
+    # --------------------------------------------------------------------------
 
     def refresh_ui(self, event=None, filter_active=False):
+        if not self.project.subtitle_lines:
+            self._clear_editors()
+            return
+
         query = self.search_text.get().lower()
         lines = self.project.subtitle_lines
 
-        # Filtrowanie
+        visible_indices = []
+
+        # WYSZUKIWARKA
         if query:
-            visible_indices = [i for i, l in enumerate(lines) if query in l.text.lower()]
+            # Wildcard numeru (np. 15*)
+            if re.match(r"^\d+\*?$", query):
+                prefix = query.replace("*", "")
+                for i, l in enumerate(lines):
+                    if str(i + 1).startswith(prefix):
+                        visible_indices.append(i)
+            else:
+                # Tekst
+                visible_indices = [i for i, l in enumerate(lines) if query in l.text.lower()]
         else:
             visible_indices = list(range(len(lines)))
 
         is_filtered = len(visible_indices) < len(lines)
 
-        # Update Editora
-        current_state = self.txt_editor._textbox.cget("state")
+        # Wyłącz sync podczas update
+        was_sync = self.sync_scroll_enabled.get()
+        self.sync_scroll_enabled.set(False)
+
+        try:
+            self._update_editor_content(visible_indices, is_filtered)
+            self._update_preview_content(visible_indices)
+        finally:
+            self.sync_scroll_enabled.set(was_sync)
 
         if is_filtered:
-            # Tryb Filtrowania -> ReadOnly
-            self.txt_editor.configure(state="normal")
-            self.txt_editor.delete("1.0", "end")
-            self.txt_editor.insert("1.0", "\n".join(lines[i].text for i in visible_indices))
-            self.txt_editor.configure(state="disabled")
             self.lbl_editor.configure(text=f"EDYTORY (Filtr: {len(visible_indices)})", text_color="orange")
         else:
-            # Tryb Normalny -> Editable
-            # Odśwież tylko jeśli edytor był wcześniej zablokowany (czyli wychodzimy z filtra)
-            # lub jeśli jest pusty (start)
-            if current_state == "disabled":
-                self.refresh_editor_from_state()
             self.lbl_editor.configure(text="EDYTORY (Robocza)", text_color=("black", "white"))
 
-        # Update Preview
-        rem = [p for p in self.project.custom_remove if p.enabled]
-        rep = [p for p in self.project.custom_replace if
-               p.enabled] if self.view_mode.get() == VIEW_MODE_TTS else []
+    def _update_editor_content(self, indices, is_filtered):
+        # Pobieramy pełny tekst
+        lines_text = "\n".join(self.project.subtitle_lines[i].text for i in indices)
+
+        self.txt_editor.configure(state="normal")
+        self.txt_editor.delete("1.0", "end")
+        self.txt_editor.insert("1.0", lines_text)
+
+        if is_filtered:
+            self.txt_editor.configure(state="disabled")
+
+    def _update_preview_content(self, indices):
+        rem = [p for p in self.project.patterns_subtitle if p.enabled]
+        rep = [p for p in self.project.patterns_tts if p.enabled] if self.view_mode.get() == VIEW_MODE_TTS else []
 
         out = []
-        for idx in visible_indices:
-            raw = lines[idx].text
+        for idx in indices:
+            raw = self.project.subtitle_lines[idx].text
             clean = apply_remove_patterns([raw], rem)
             if clean:
                 final = apply_replace_patterns(clean, rep)[0]
@@ -602,47 +609,68 @@ class SubtitleStudioApp(ctk.CTk):
         self.txt_preview.insert("1.0", "\n".join(out))
         self.txt_preview.configure(state="disabled")
 
-    def refresh_editor_from_state(self):
+    def _clear_editors(self):
         self.txt_editor.configure(state="normal")
         self.txt_editor.delete("1.0", "end")
-        self.txt_editor.insert("1.0", self.project.get_raw_text())
+        self.txt_preview.configure(state="normal")
+        self.txt_preview.delete("1.0", "end")
+        self.txt_preview.configure(state="disabled")
+        self.lbl_editor.configure(text="EDYTORY (Pusty projekt)")
 
-    def update_history_combo(self):
-        vals = [f"[{i + 1}] {s.description}" for i, s in enumerate(self.project.history)]
-        self.combo_history.configure(values=vals or ["Brak"])
-        if self.project.current_history_index >= 0:
-            self.combo_history.set(vals[self.project.current_history_index])
+    def _get_current_line_data(self):
+        if not self.project.subtitle_lines: return None
+        try:
+            index = self.txt_editor.index("insert")
+            row = int(index.split('.')[0]) - 1
+        except:
+            return None
 
-    def restore_history(self, val):
-        if val == "Brak": return
-        idx = int(val.split("]")[0][1:]) - 1
-        self.project.restore_snapshot(idx)
-        self.refresh_editor_from_state()
-        self.refresh_ui()
+        query = self.search_text.get().lower()
+        lines = self.project.subtitle_lines
+        visible = []
+
+        if query:
+            if re.match(r"^\d+\*?$", query):
+                prefix = query.replace("*", "")
+                visible = [i for i, l in enumerate(lines) if str(i + 1).startswith(prefix)]
+            else:
+                visible = [i for i, l in enumerate(lines) if query in l.text.lower()]
+        else:
+            visible = range(len(lines))
+
+        if 0 <= row < len(visible):
+            return lines[visible[row]]
+        return None
 
     def set_status(self, text):
         self.lbl_status.configure(text=text)
 
-    # --- Windows & Dialogs ---
+    def apply_theme_settings(self):
+        self._apply_theme()
+
+    def perform_search(self, event=None):
+        self.refresh_ui(filter_active=True)
+
+    def clear_search(self, event=None):
+        self.search_text.set("")
+        self.refresh_ui()
 
     def open_patterns(self, ptype):
-        if ptype == 'remove':
-            target = self.project.patterns_subtitle
-            title = "Lista napisów (Wzorce czyszczące)"
-        else:
-            target = self.project.patterns_tts
-            title = "Lista TTS (Wzorce podmiany)"
-
-        from app.ui_windows import PatternWindow  # Import tu, żeby uniknąć cyklu
-        PatternWindow(self, title, target, ptype, lambda: self.refresh_ui())
-
-    def open_global_settings(self):
-        SettingsWindow(self, self.project.project_config.get('torch_installed', False), mode='global')
+        target_list = self.project.patterns_subtitle if ptype == 'remove' else self.project.patterns_tts
+        type_key = 'subtitle' if ptype == 'remove' else 'tts'
+        title = "Lista Napisów" if ptype == 'remove' else "Lista TTS"
+        PatternWindow(self, title, target_list, type_key, lambda: self.refresh_ui())
 
     def open_project_settings(self):
-        if not self.project.project_path:
-            return messagebox.showwarning("Błąd", "Najpierw otwórz lub zapisz projekt.")
+        if not self.project.project_dir:
+            return messagebox.showwarning("Błąd", "Brak otwartego projektu.")
         SettingsWindow(self, False, mode='project')
+
+    def open_global_settings(self):
+        SettingsWindow(self, False, mode='global')
+
+    def open_audio_folder(self):
+        if self.project.audio_dir: os.startfile(self.project.audio_dir)
 
     def show_queue_window(self):
         GenerationQueueWindow(self)
@@ -650,19 +678,17 @@ class SubtitleStudioApp(ctk.CTk):
     def show_about(self):
         AboutWindow(self, APP_VERSION)
 
-    def choose_audio_dir(self):
-        d = filedialog.askdirectory()
-        if d: self.project.audio_dir = Path(d)
-
-    # --- Config & Updates ---
-
     def _load_global_config(self):
-        if APP_CONFIG_FILE.exists():
+        if GLOBAL_CONFIG_FILE.exists():
             try:
-                with open(APP_CONFIG_FILE, "r") as f:
+                with open(GLOBAL_CONFIG_FILE, "r") as f:
                     self.global_config = json.load(f)
             except:
                 self.global_config = {}
+        # Defaults fallback
+        from app.settings import DEFAULT_CONFIG
+        for k, v in DEFAULT_CONFIG.items():
+            if k not in self.global_config: self.global_config[k] = v
 
     def _add_recent_project(self, path):
         recent = self.global_config.get("recent_projects", [])
@@ -670,32 +696,28 @@ class SubtitleStudioApp(ctk.CTk):
         recent.insert(0, path)
         self.global_config["recent_projects"] = recent[:5]
         self.global_config["last_project"] = path
-        with open(APP_CONFIG_FILE, "w") as f:
+        with open(GLOBAL_CONFIG_FILE, "w") as f:
             json.dump(self.global_config, f, indent=2)
         self._create_menu()
 
     def _apply_theme(self):
         ctk.set_appearance_mode(self.global_config.get('appearance_mode', 'System'))
-        ctk.set_default_color_theme(self.global_config.get('color_theme', 'blue'))
 
     def _check_for_updates(self):
         if not PACKAGING_AVAILABLE: return
         try:
             url = "https://api.github.com/repos/kpasek/subtitle-studio/releases/latest"
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url, timeout=3)
             if resp.status_code == 200:
                 data = resp.json()
-                remote_ver = version.parse(data['tag_name'])
-                curr_ver = version.parse(APP_VERSION)
-                if remote_ver > curr_ver:
+                if version.parse(data['tag_name']) > version.parse(APP_VERSION):
                     self.latest_version_info = data['html_url']
                     self.queue.put(lambda: self.update_btn.pack(side="left", padx=5))
         except:
             pass
 
     def _download_update(self):
-        if self.latest_version_info:
-            webbrowser.open(self.latest_version_info)
+        if self.latest_version_info: webbrowser.open(self.latest_version_info)
 
     def check_queue_loop(self):
         try:
@@ -707,31 +729,33 @@ class SubtitleStudioApp(ctk.CTk):
 
     def on_close(self):
         if self.project.has_unsaved_changes:
-            if not messagebox.askyesno("Zamykanie", "Masz niezapisane zmiany. Wyjść?"): return
+            if not messagebox.askyesno("Wyjście", "Masz niezatwierdzone zmiany. Wyjść?"): return
+        self.project.close()
         self.quit()
 
-    # Helpers
+    def refresh_editor_from_state(self):
+        self.txt_editor.configure(state="normal")
+        self.txt_editor.delete("1.0", "end")
+        if self.project.subtitle_lines:
+            self.txt_editor.insert("1.0", "\n".join(l.text for l in self.project.subtitle_lines))
+
+    # Compatibility Helpers
     def open_add_remove_pattern(self, callback):
-        PatternEditorWindow(self, 'remove', lambda n, o, t: self._pat_cb(n, self.project.custom_remove, callback),
+        PatternEditorWindow(self, 'remove', lambda n, o, t: self._pat_cb(n, self.project.patterns_subtitle, callback),
                             None)
 
     def open_add_replace_pattern(self, callback):
-        PatternEditorWindow(self, 'replace',
-                            lambda n, o, t: self._pat_cb(n, self.project.custom_replace, callback), None)
+        PatternEditorWindow(self, 'replace', lambda n, o, t: self._pat_cb(n, self.project.patterns_tts, callback), None)
 
     def _pat_cb(self, new_p, target_list, cb):
         target_list.append(new_p)
+        self.project.save_data()
         cb()
 
     def save_global_config(self, data):
         self.global_config.update(data)
-        with open(APP_CONFIG_FILE, "w") as f:
+        with open(GLOBAL_CONFIG_FILE, "w") as f:
             json.dump(self.global_config, f, indent=2)
-        self._apply_theme()
-
-    def set_project_config(self, key, val):
-        self.project.project_config[key] = val
-        self.project.has_unsaved_changes = True
 
 
 if __name__ == '__main__':
