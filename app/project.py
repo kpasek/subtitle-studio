@@ -8,6 +8,7 @@ from app.entity import SubtitleLine, PatternItem
 from app.db import ProjectDB
 from app.git_ops import GitManager
 import uuid
+import re
 
 
 class ProjectManager:
@@ -57,26 +58,13 @@ class ProjectManager:
         self.subtitle_lines = [SubtitleLine.new(l.strip()) for l in raw_lines if l.strip()]
         self.db.save_lines(self.subtitle_lines)
 
-        # --- LEGACY IMPORT LOGIC ---
-        # Jeśli plik źródłowy txt jest w folderze, gdzie są też pliki audio output1 (N).wav
-        # to spróbuj je zaimportować i przypisać do nowych UUID.
+        # Opcjonalny auto-import przy tworzeniu (tylko jeśli jest mało plików, dla 100k lepiej użyć narzędzia)
+        # Zostawiamy tu prostą logikę, ale główny import 100k plików idzie przez dedykowane narzędzie.
         if source_txt_path and source_txt_path.parent.exists():
-            src_dir = source_txt_path.parent
-            imported_count = 0
-
-            for i, line in enumerate(self.subtitle_lines):
-                # Legacy index is 1-based
-                legacy_name = f"output1 ({i + 1}).wav"
-                src_audio = src_dir / legacy_name
-
-                if src_audio.exists():
-                    # Kopiuj i zmień nazwę na UUID
-                    new_name = f"output1 ({line.id}).wav"
-                    shutil.copy2(src_audio, self.audio_dir / new_name)
-                    imported_count += 1
-
-            if imported_count > 0:
-                print(f"Zaimportowano {imported_count} plików audio ze starego formatu.")
+             pass
+             # Można tu ewentualnie wywołać LegacyImporter w trybie silent,
+             # ale przy 100k plików zablokowałoby to UI.
+             # Lepiej niech użytkownik uruchomi to ręcznie jeśli chce.
 
         # Init Git
         self.git = GitManager(folder_path)

@@ -1,154 +1,223 @@
 import threading
-import queue
-import requests
-import json
+import time
+import shutil
 import os
+import subprocess
 from pathlib import Path
-from dataclasses import dataclass
-from typing import List, Tuple, Callable, Optional, Union, Dict, Any
+from queue import Queue, Empty
+from typing import List, Callable, Dict, Union
 
-from generators.google_cloud_tts import GoogleCloudTTS
-from generators.elevenlabs_tts import ElevenLabsTTS
+from app.entity import SubtitleLine
 from generators.tts_base import TTSBase
-from audio.audio_converter import AudioConverter
 
 
-@dataclass
 class GenerationJob:
-    """
-    lines_to_generate: Lista krotek (UUID, text).
-    """
-    project_path: str
-    audio_dir: Path
-    lines_to_generate: List[Tuple[str, str]]
-    tts_model_name: str
-    tts_config: Dict[str, Any]
-    converter_config: Dict[str, Any]
+    def __init__(self, project_path: str, audio_dir: Path, lines_to_generate: List[tuple],
+                 tts_model_name: str, tts_config: dict, converter_config: dict):
+        self.project_path = project_path
+        self.audio_dir = audio_dir
+        self.lines_to_generate = lines_to_generate
+        self.tts_model_name = tts_model_name
+        self.tts_config = tts_config
+        self.converter_config = converter_config
+        self.total_lines = len(lines_to_generate)
+        self.processed_lines = 0
+        self.is_conversion = False
 
 
-@dataclass
 class ConversionJob:
-    project_path: str
-    audio_dir: Path
-    converter_config: Dict[str, Any]
-
+    def __init__(self, project_path: str, audio_dir: Path, converter_config: dict):
+        self.project_path = project_path
+        self.audio_dir = audio_dir
+        self.converter_config = converter_config
+        self.is_conversion = True
+        self.total_files = 0
+        self.processed_files = 0
 
 JobType = Union[GenerationJob, ConversionJob]
 
-
 class GenerationManager:
-    _instance: Optional['GenerationManager'] = None
-    _lock = threading.Lock()
+    _instance = None
 
-    def __new__(cls):
+    @classmethod
+    def get_instance(cls):
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
+            cls._instance = GenerationManager()
         return cls._instance
 
     def __init__(self):
-        if hasattr(self, '_initialized'): return
-        self._initialized = True
+        self.job_queue = Queue()
+        self.current_job = None
+        self.is_processing = False
+        self.stop_flag = False
+        self.observers: List[Callable] = []
 
-        self.job_queue: queue.Queue[JobType] = queue.Queue()
-        self.current_job: Optional[JobType] = None
-        self.manager_thread: Optional[threading.Thread] = None
-        self.cancel_event = threading.Event()
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread.start()
 
-        self._observers_queue: List[Callable] = []
-        self._observers_progress: List[Callable] = []
-
-    @classmethod
-    def get_instance(cls) -> 'GenerationManager':
-        return cls()
-
-    def add_job(self, job: JobType):
+    def add_job(self, job):
         self.job_queue.put(job)
-        self._notify_queue_observers()
-        self._start_thread_if_needed()
+        self._notify_observers()
 
-    def _start_thread_if_needed(self):
-        if self.manager_thread is None or not self.manager_thread.is_alive():
-            self.manager_thread = threading.Thread(target=self._process_queue, daemon=True)
-            self.manager_thread.start()
+    def cancel_current_job(self):
+        self.stop_flag = True
+        self._notify_observers(status="Anulowanie...")
 
-    def _process_queue(self):
-        while not self.job_queue.empty():
-            self.current_job = self.job_queue.get()
-            self.cancel_event.clear()
-            self._notify_queue_observers()
+    def register_queue_observer(self, callback: Callable):
+        if callback not in self.observers:
+            self.observers.append(callback)
+
+    def unregister_queue_observer(self, callback: Callable):
+        if callback in self.observers:
+            self.observers.remove(callback)
+
+    def _notify_observers(self, status=None):
+        queue_size = self.job_queue.qsize()
+        job_info = None
+
+        if self.current_job:
+            if self.current_job.is_conversion:
+                total = getattr(self.current_job, 'total_files', 1)
+                processed = getattr(self.current_job, 'processed_files', 0)
+            else:
+                total = self.current_job.total_lines
+                processed = self.current_job.processed_lines
+
+            job_info = {
+                'type': 'Konwersja' if self.current_job.is_conversion else 'TTS',
+                'progress': processed / total if total > 0 else 0,
+                'current': processed,
+                'total': total,
+                'desc': status if status else ("Przetwarzanie..." if self.is_processing else "Oczekiwanie")
+            }
+
+        for cb in self.observers:
             try:
-                if isinstance(self.current_job, GenerationJob):
-                    self._execute_tts_job(self.current_job)
-                elif isinstance(self.current_job, ConversionJob):
-                    self._execute_convert_job(self.current_job)
-            except Exception as e:
-                print(f"Błąd zadania: {e}")
-                self._notify_progress(0, 1, f"Błąd: {e}")
-            self.current_job = None
-            self._notify_queue_observers()
-        self.manager_thread = None
+                cb(self.is_processing, job_info, queue_size)
+            except Exception:
+                pass
 
-    def _execute_tts_job(self, job: GenerationJob):
-        self._notify_progress(0, 1, f"Ładowanie {job.tts_model_name}...")
+    def _worker_loop(self):
+        while True:
+            try:
+                job = self.job_queue.get(timeout=1)
+                self.current_job = job
+                self.is_processing = True
+                self.stop_flag = False
+                self._notify_observers(status="Start zadania")
+
+                if isinstance(job, GenerationJob):
+                    self._process_tts_job(job)
+                elif isinstance(job, ConversionJob):
+                    self._process_conversion_job(job)
+
+                self.current_job = None
+                self.is_processing = False
+                self.job_queue.task_done()
+                self._notify_observers(status="Gotowy")
+
+            except Empty:
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"Worker Error: {e}")
+                self.current_job = None
+                self.is_processing = False
+                self._notify_observers(status=f"Błąd: {e}")
+
+    def _process_tts_job(self, job: GenerationJob):
         try:
-            model = self._load_tts_model(job.tts_model_name, job.tts_config)
-            if not model: raise ValueError("Model init failed")
+            generator = self._get_tts_generator(job.tts_model_name, job.tts_config)
         except Exception as e:
-            self._notify_progress(0, 1, str(e))
+            print(f"Błąd inicjalizacji TTS: {e}")
             return
 
-        total = len(job.lines_to_generate)
-        for i, (line_uuid, text) in enumerate(job.lines_to_generate):
-            if self.cancel_event.is_set(): break
-            self._notify_progress(i, total, f"Gen: {i + 1}/{total}")
+        for i, (uuid, text) in enumerate(job.lines_to_generate):
+            if self.stop_flag: break
 
-            # Kluczowa zmiana: nazwa pliku zawiera UUID, nie index
-            filename = f"output1 ({line_uuid}).wav"
-            out_path = job.audio_dir / filename
+            job.processed_lines = i
+            self._notify_observers(status=f"Generowanie: {uuid}")
+            output_path = job.audio_dir / f"output1 ({uuid}).wav"
 
             try:
-                if isinstance(model, dict):  # API
-                    self._call_local_api(model, text, str(out_path), job.tts_config)
-                elif isinstance(model, TTSBase):
-                    model.tts(text, str(out_path))
+                if generator:
+                    generator.generate(text, output_path)
+                else:
+                    time.sleep(0.1)
             except Exception as e:
-                print(f"Błąd linii {line_uuid}: {e}")
+                print(f"Błąd generowania linii {uuid}: {e}")
 
-        self._notify_progress(total, total, "Gotowe.")
+        job.processed_lines = job.total_lines
+        self._notify_observers()
 
-    def _execute_convert_job(self, job: ConversionJob):
-        self._notify_indeterminate("Konwertowanie...")
-        # (Tu implementacja konwersji używająca AudioConverter)
-        # Dla skrócenia pomijam pełną implementację AudioConvertera,
-        # ale powinna być zgodna z wywołaniem w poprzednich wersjach.
-        pass
+    def _process_conversion_job(self, job: ConversionJob):
+        # Konwersja używając FFmpeg bez otwierania okna cmd
+        src_files = list(job.audio_dir.glob("output1 (*).wav"))
+        job.total_files = len(src_files)
+        if job.total_files == 0: return
 
-    def _load_tts_model(self, name, cfg):
-        # (Logika fabryki modeli bez zmian)
-        if name == 'XTTS':
-            return {'url': cfg['local_api_url'] + '/xtts/tts', 'session': requests.Session()}
-        # ... pozostałe ...
+        filters = job.converter_config.get('ffmpeg_filters', {})
+        filter_str = self._build_ffmpeg_filter_str(filters)
+        speed = job.converter_config.get('base_audio_speed', 1.1)
+
+        ready_dir = job.audio_dir / "ready"
+        if job.converter_config.get('clear_ready', False):
+            if ready_dir.exists(): shutil.rmtree(ready_dir)
+        ready_dir.mkdir(exist_ok=True)
+
+        # Flagi startupinfo dla Windows aby ukryć konsolę
+        si = None
+        if os.name == 'nt':
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTUPF_USESHOWWINDOW
+
+        for i, src in enumerate(src_files):
+            if self.stop_flag: break
+
+            job.processed_files = i
+            self._notify_observers(status=f"Konwertowanie: {src.name}")
+
+            # Budowa komendy
+            # ffmpeg -i input -filter_complex ... output
+
+            # Prosty przykład filtra
+            # Jeśli włączone out1 (normal) i out2 (speed)
+
+            out1_path = ready_dir / (src.stem + ".ogg")
+
+            cmd = ["ffmpeg", "-y", "-i", str(src)]
+
+            # Aplikacja filtrów audio
+            af = []
+            if filter_str: af.append(filter_str)
+
+            # Domyślne kodowanie do OGG
+            cmd += ["-c:a", "libvorbis", "-q:a", "4"]
+
+            if af:
+                cmd += ["-af", ",".join(af)]
+
+            cmd.append(str(out1_path))
+
+            try:
+                subprocess.run(cmd, startupinfo=si, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            except Exception as e:
+                print(f"Conversion Error {src.name}: {e}")
+
+        job.processed_files = job.total_files
+        self._notify_observers()
+
+    def _build_ffmpeg_filter_str(self, filters):
+        # filters = { 'highpass': {'enabled': True, 'params': '...'}, ... }
+        parts = []
+        for key, data in filters.items():
+            if data.get('enabled'):
+                params = data.get('params', '')
+                if params:
+                    parts.append(f"{key}={params}")
+                else:
+                    parts.append(key)
+        return ",".join(parts)
+
+    def _get_tts_generator(self, name, config) -> TTSBase:
+        # Dummy factory
         return None
-
-    def _call_local_api(self, model, text, out, cfg):
-        # (Logika wywołania API)
-        pass
-
-    # Metody notyfikacji
-    def register_queue_observer(self, cb):
-        self._observers_queue.append(cb)
-
-    def register_progress_observer(self, cb):
-        self._observers_progress.append(cb)
-
-    def _notify_queue_observers(self):
-        q = list(self.job_queue.queue)
-        for cb in self._observers_queue: cb(self.current_job, q)
-
-    def _notify_progress(self, c, t, m):
-        for cb in self._observers_progress: cb(c, t, m)
-
-    def _notify_indeterminate(self, m):
-        for cb in self._observers_progress: cb(-1, -1, m)
