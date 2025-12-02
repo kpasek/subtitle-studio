@@ -31,26 +31,24 @@ class PatternItem:
 
 @dataclass(slots=True)
 class SubtitleLine:
-    """
-    Reprezentuje pojedynczą linię dialogową z unikalnym identyfikatorem (UUID).
-    Dzięki UUID zmiana treści nie gubi powiązania z plikiem audio.
-    """
     id: str
     text: str
+    tts_override: Optional[str] = None  # Nowe pole
 
     @staticmethod
     def new(text: str) -> 'SubtitleLine':
-        """Tworzy nową linię z losowym UUID."""
         return SubtitleLine(id=str(uuid.uuid4()), text=text)
 
     def to_json(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        return data
 
     @classmethod
     def from_json(cls, d: dict) -> 'SubtitleLine':
         return cls(
             id=d.get("id", str(uuid.uuid4())),
-            text=d.get("text", "")
+            text=d.get("text", ""),
+            tts_override=d.get("tts_override", None)
         )
 
 

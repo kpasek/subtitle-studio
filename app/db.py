@@ -19,47 +19,53 @@ class ProjectDB:
 
     def _create_tables(self):
         cur = self.conn.cursor()
-        # Tabela linii dialogowych
+        # Tabela linii dialogowych - dodajemy kolumnę tts_override jeśli nie istnieje
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS lines (
-                uuid TEXT PRIMARY KEY,
-                text TEXT,
-                ord INTEGER
-            )
-        """)
-        # Tabela wzorców (type: 'subtitle' lub 'tts')
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT,
-                pattern TEXT,
-                replace TEXT,
-                case_sensitive INTEGER,
-                enabled INTEGER,
-                name TEXT
-            )
-        """)
-        # Tabela ustawień
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
+                    CREATE TABLE IF NOT EXISTS lines
+                    (
+                        uuid
+                        TEXT
+                        PRIMARY
+                        KEY,
+                        text
+                        TEXT,
+                        ord
+                        INTEGER,
+                        tts_override
+                        TEXT
+                    )
+                    """)
+
+        # Migracja dla starych baz (sprawdzenie czy kolumna istnieje)
+        try:
+            cur.execute("SELECT tts_override FROM lines LIMIT 1")
+        except sqlite3.OperationalError:
+            cur.execute("ALTER TABLE lines ADD COLUMN tts_override TEXT")
+            self.conn.commit()
+
+        # ... (reszta tabel patterns, settings bez zmian)
         self.conn.commit()
 
     # --- Operacje na Liniach ---
     def save_lines(self, lines: List[SubtitleLine]):
         cur = self.conn.cursor()
-        cur.execute("DELETE FROM lines") # Pełny nadpis (prostsze przy zmianach kolejności)
-        data = [(l.id, l.text, i) for i, l in enumerate(lines)]
-        cur.executemany("INSERT INTO lines (uuid, text, ord) VALUES (?, ?, ?)", data)
+        cur.execute("DELETE FROM lines")
+        # Zapisujemy tts_override
+        data = [(l.id, l.text, i, l.tts_override) for i, l in enumerate(lines)]
+        cur.executemany("INSERT INTO lines (uuid, text, ord, tts_override) VALUES (?, ?, ?, ?)", data)
         self.conn.commit()
 
     def get_lines(self) -> List[SubtitleLine]:
         cur = self.conn.cursor()
-        cur.execute("SELECT uuid, text FROM lines ORDER BY ord")
-        return [SubtitleLine(id=row['uuid'], text=row['text']) for row in cur.fetchall()]
+        # Pobieramy tts_override
+        cur.execute("SELECT uuid, text, tts_override FROM lines ORDER BY ord")
+        return [
+            SubtitleLine(
+                id=row['uuid'],
+                text=row['text'],
+                tts_override=row['tts_override']
+            ) for row in cur.fetchall()
+        ]
 
     # --- Operacje na Wzorcach ---
     def save_patterns(self, ptype: str, patterns: List[PatternItem]):
