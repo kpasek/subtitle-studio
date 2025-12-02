@@ -22,7 +22,7 @@ datas += [
 block_cipher = None
 
 a = Analysis(
-    ['gui.py'],
+    ['studio.py'],
     pathex=[],
     binaries=[],
     datas=datas,

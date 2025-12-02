@@ -6,7 +6,7 @@ set -e
 # -------------------------
 
 APP_NAME="SubtitleStudio"
-ENTRY_FILE="gui.py"
+ENTRY_FILE="studio.py"
 BUILD_DIR="build"
 
 # Opcjonalnie: aktywuj wirtualne środowisko, jeśli masz

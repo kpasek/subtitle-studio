@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 if TYPE_CHECKING:
-    from gui import SubtitleStudioApp
+    from studio import SubtitleStudioApp
 
 
 class AudioRenameWindow(ctk.CTkToplevel):

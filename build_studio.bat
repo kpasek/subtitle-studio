@@ -2,7 +2,7 @@
 setlocal
 
 set APP_NAME=SubtitleStudio
-set MAIN_SCRIPT=gui.py
+set MAIN_SCRIPT=studio.py
 set DIST_DIR=dist
 
 echo [INFO] --- Budowanie Subtitle Studio (GUI) ---
