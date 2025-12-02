@@ -12,10 +12,10 @@ if TYPE_CHECKING:
 
 
 class LegacyImporterWindow(ctk.CTkToplevel):
-    def __init__(self, master, project_manager: 'ProjectManager'):
+    def __init__(self, master, project_manager):
         super().__init__(master)
         self.project = project_manager
-        self.title("Import Audio (Legacy)")
+        self.title("Import Audio")
         self.geometry("600x450")
         self.transient(master)
         self.grab_set()
@@ -113,39 +113,43 @@ class LegacyImporterWindow(ctk.CTkToplevel):
         try:
             self.update_ui_safe(status="Skanowanie plików źródłowych...", progress=0)
 
-            # 1. Mapowanie linii: index (1-based) -> UUID
-            # lines[0] -> ID linii 1, lines[1] -> ID linii 2...
-            # Legacy audio: output1 (1).wav odpowiada lines[0]
-            index_map = {i + 1: line.id for i, line in enumerate(self.project.subtitle_lines)}
+            # 1. Mapowanie linii: ID -> ID (bo szukamy pliku o nazwie [ID].wav)
+            valid_ids = {line.id for line in self.project.subtitle_lines}
 
-            if not index_map:
-                self.update_ui_safe(status="Błąd: Projekt nie zawiera linii dialogowych.")
+            if not valid_ids:
+                self.update_ui_safe(status="Błąd: Projekt nie zawiera linii dialogowych z nadanymi ID.")
                 self.finish_thread()
                 return
 
             # 2. Skanowanie folderu
-            # Szukamy output1 (N).wav / mp3 / ogg
-            pattern = re.compile(r"^output1\s*\((\d+)\)\.(wav|mp3|ogg)$", re.IGNORECASE)
-
+            # Szukamy plików o nazwie: numeryczna.wav/mp3/ogg
             tasks = []  # Lista krotek: (source_path, dest_path)
 
             try:
-                # Scandir jest szybki
+                # Wzorce do sprawdzenia:
+                # 1. Nowy format: [ID].[ext]
+                # 2. Stary format (Legacy): output1 (N).[ext] (choć to jest mniej ważne przy nowej konwencji ID)
+
+                # Zostajemy przy prostej konwencji numerycznej.
+
                 with os.scandir(self.source_dir) as it:
                     for entry in it:
                         if self.stop_event.is_set(): break
                         if entry.is_file():
-                            match = pattern.match(entry.name)
-                            if match:
-                                num = int(match.group(1))
-                                ext = match.group(2).lower()
+                            name = entry.name.lower()
+                            stem = os.path.splitext(name)[0]
+                            ext = os.path.splitext(name)[1]
 
-                                # Sprawdź czy mamy taką linię w projekcie
-                                if num in index_map:
-                                    uuid = index_map[num]
-                                    dest_name = f"output1 ({uuid}).{ext}"
+                            # Sprawdzamy, czy nazwa pliku jest czystą liczbą (nowy format ID)
+                            if stem.isdigit() and ext in ['.wav', '.mp3', '.ogg']:
+                                fid = int(stem)
+
+                                if fid in valid_ids:
+                                    # Generujemy docelową ścieżkę w formacie [ID].[ext]
+                                    dest_name = f"{fid}{ext}"
                                     dest_path = self.project.audio_dir / dest_name
                                     tasks.append((Path(entry.path), dest_path))
+
             except Exception as e:
                 self.update_ui_safe(status=f"Błąd skanowania: {e}")
                 self.finish_thread()

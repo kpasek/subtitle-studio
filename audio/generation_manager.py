@@ -124,40 +124,40 @@ class GenerationManager:
                 self.is_processing = False
                 self._notify_observers(status=f"Błąd: {e}")
 
-    def _process_tts_job(self, job: GenerationJob):
+    def _process_tts_job(self, job):
         try:
             generator = self._get_tts_generator(job.tts_model_name, job.tts_config)
-        except Exception as e:
-            print(f"Błąd inicjalizacji TTS: {e}")
+        except Exception:
             return
 
-        for i, (uuid, text) in enumerate(job.lines_to_generate):
+        for i, (line_id, text) in enumerate(job.lines_to_generate):
             if self.stop_flag: break
 
-            job.processed_lines = i
-            self._notify_observers(status=f"Generowanie: {uuid}")
-            output_path = job.audio_dir / f"output1 ({uuid}).wav"
+            # ZMIANA: Nazwa pliku to po prostu {id}.wav
+            output_path = job.audio_dir / f"{line_id}.wav"
+
+            self._notify_observers(status=f"Generowanie ID: {line_id}")
 
             try:
                 if generator:
-                    generator.generate(text, output_path)
-                else:
-                    time.sleep(0.1)
+                    generator.tts(text, str(output_path))
             except Exception as e:
-                print(f"Błąd generowania linii {uuid}: {e}")
+                print(f"Błąd TTS {line_id}: {e}")
 
-        job.processed_lines = job.total_lines
-        self._notify_observers()
+            job.processed_lines = i + 1
+            self._notify_observers()
 
     def _process_conversion_job(self, job: ConversionJob):
         # Konwersja używając FFmpeg bez otwierania okna cmd
-        src_files = list(job.audio_dir.glob("output1 (*).wav"))
+        all_files = list(job.audio_dir.glob("*.wav")) + list(job.audio_dir.glob("*.mp3"))
+        src_files = [f for f in all_files if f.stem.isdigit()]  # Tylko numeryczne nazwy
+
         job.total_files = len(src_files)
-        if job.total_files == 0: return
+        ready_dir = job.audio_dir / "ready"
+        ready_dir.mkdir(exist_ok=True)
 
         filters = job.converter_config.get('ffmpeg_filters', {})
         filter_str = self._build_ffmpeg_filter_str(filters)
-        speed = job.converter_config.get('base_audio_speed', 1.1)
 
         ready_dir = job.audio_dir / "ready"
         if job.converter_config.get('clear_ready', False):
@@ -168,21 +168,14 @@ class GenerationManager:
         si = None
         if os.name == 'nt':
             si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTUPF_USESHOWWINDOW
 
         for i, src in enumerate(src_files):
             if self.stop_flag: break
 
-            job.processed_files = i
-            self._notify_observers(status=f"Konwertowanie: {src.name}")
+            out_path = ready_dir / (src.stem + ".ogg")
 
-            # Budowa komendy
-            # ffmpeg -i input -filter_complex ... output
-
-            # Prosty przykład filtra
-            # Jeśli włączone out1 (normal) i out2 (speed)
-
-            out1_path = ready_dir / (src.stem + ".ogg")
+            job.processed_files = i + 1
+            self._notify_observers(status=f"Konwersja: {src.name}")
 
             cmd = ["ffmpeg", "-y", "-i", str(src)]
 
@@ -196,7 +189,8 @@ class GenerationManager:
             if af:
                 cmd += ["-af", ",".join(af)]
 
-            cmd.append(str(out1_path))
+            cmd.append(str(out_path))
+
 
             try:
                 subprocess.run(cmd, startupinfo=si, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)

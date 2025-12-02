@@ -33,7 +33,6 @@ from audio.deleter import AudioDeleterWindow
 from audio.audio_renamer import AudioRenameWindow
 from audio.legacy_importer import LegacyImporterWindow
 
-# Optional Packaging
 try:
     from packaging import version
 
@@ -41,19 +40,17 @@ try:
 except ImportError:
     PACKAGING_AVAILABLE = False
 
-# --- WINDOWS DPI FIX ---
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
     pass
-# -----------------------
 
-APP_TITLE = "Subtitle Studio 2.3 (Pro)"
-APP_VERSION = "2.3.5"
+APP_TITLE = "Subtitle Studio 2.4 (New DB)"
+APP_VERSION = "2.4.0"
 GLOBAL_CONFIG_FILE = Path.home() / ".subtitle_studio_global.json"
 
-VIEW_MODE_TTS = "TTS (Podmiany)"
-VIEW_MODE_CLEAN = "Czyste (Game Reader)"
+VIEW_MODE_TTS = "Widok: TTS (Lektor)"
+VIEW_MODE_CLEAN = "Widok: Napisy (Game Reader)"
 
 
 class SubtitleStudioApp(ctk.CTk):
@@ -63,22 +60,18 @@ class SubtitleStudioApp(ctk.CTk):
         self.title(APP_TITLE)
         self.geometry("1600x900")
 
-        # Managers
         self.project = ProjectManager()
         self.gen_manager = GenerationManager.get_instance()
 
-        # UI State Variables
         self.view_mode = tk.StringVar(value=VIEW_MODE_TTS)
         self.search_text = tk.StringVar()
         self.sync_scroll_enabled = tk.BooleanVar(value=True)
-        self._syncing = False
 
         self.global_config = {}
         self.queue = queue.Queue()
         self.latest_version_info = None
         self.update_btn = None
 
-        # Init
         self._load_global_config()
         self._apply_theme()
         self._create_menu()
@@ -88,11 +81,8 @@ class SubtitleStudioApp(ctk.CTk):
         saved_sync = self.global_config.get("sync_scroll", True)
         self.sync_scroll_enabled = tk.BooleanVar(value=saved_sync)
 
-        # Background tasks
         self.check_queue_loop()
         threading.Thread(target=self._check_for_updates, daemon=True).start()
-
-        # Auto-open last project
         self.after(500, self._auto_load_last_project)
 
     def _auto_load_last_project(self):
@@ -106,13 +96,11 @@ class SubtitleStudioApp(ctk.CTk):
 
     def _create_menu(self):
         menubar = tk.Menu(self)
-
         # --- Plik ---
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Nowy projekt (Ctrl+N)", command=self.new_project)
         file_menu.add_command(label="Otwórz projekt (Ctrl+O)", command=self.open_project)
         file_menu.add_command(label="Ostatnie projekty (Ctrl+E)", command=self.open_recent_projects_dialog)
-
         file_menu.add_separator()
         file_menu.add_command(label="Ustawienia Projektu", command=self.open_project_settings)
         file_menu.add_command(label="Ustawienia Globalne", command=self.open_global_settings)
@@ -161,40 +149,34 @@ class SubtitleStudioApp(ctk.CTk):
         self.paned = tk.PanedWindow(container, orient=tk.HORIZONTAL, sashwidth=6, bg="#2b2b2b")
         self.paned.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Preview (Lewy) - bez zmian
+        # Preview (Lewy) - Tu pokażemy Oryginał
         frame_left = ctk.CTkFrame(self.paned)
         self.paned.add(frame_left)
-        ctk.CTkLabel(frame_left, text="PODGLĄD (ReadOnly)", font=("Arial", 12, "bold")).pack(pady=2)
+        ctk.CTkLabel(frame_left, text="ORYGINAŁ (Podgląd)", font=("Arial", 12, "bold")).pack(pady=2)
         self.txt_preview = ctk.CTkTextbox(frame_left, state="disabled")
         self.txt_preview.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # Editor (Prawy) - ZMODYFIKOWANY
+        # Editor (Prawy) - Tu edytujemy w zależności od trybu
         frame_right = ctk.CTkFrame(self.paned)
         self.paned.add(frame_right)
-        self.lbl_editor = ctk.CTkLabel(frame_right, text="EDYTORY (Robocza)", font=("Arial", 12, "bold"))
+        self.lbl_editor = ctk.CTkLabel(frame_right, text="EDYCJA", font=("Arial", 12, "bold"))
         self.lbl_editor.pack(pady=2)
 
-        # Kontener na edytor + numery linii
         editor_container = ctk.CTkFrame(frame_right, fg_color="transparent")
         editor_container.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # Panel numerów linii
-        self.txt_linenums = ctk.CTkTextbox(editor_container, width=60, state="disabled",
-                                           text_color="gray", fg_color="transparent", activate_scrollbars=False)
+        self.txt_linenums = ctk.CTkTextbox(editor_container, width=60, state="disabled", text_color="gray",
+                                           fg_color="transparent", activate_scrollbars=False)
         self.txt_linenums.pack(side="left", fill="y", padx=(0, 2))
 
         self.txt_editor = ctk.CTkTextbox(editor_container)
         self.txt_editor.pack(side="left", fill="both", expand=True)
-
-        # Bind scrollowania dla numerów linii
         self.txt_editor._textbox.config(yscrollcommand=self._on_editor_scroll)
 
         self.after(100, lambda: self.paned.sash_place(0, 530, 0))
         self._setup_cursor_sync()
 
-        # Zapis ustawienia sync przy zmianie
         self.sync_scroll_enabled.trace_add("write", self._save_sync_setting)
-
         self.lbl_status = ctk.CTkLabel(self, text="Gotowy", anchor="w")
         self.lbl_status.pack(side="bottom", fill="x", padx=10)
 
@@ -248,33 +230,20 @@ class SubtitleStudioApp(ctk.CTk):
         frame_left.pack(side="left", fill="x", expand=True)
 
         ctk.CTkLabel(frame_left, text="Wzorce:").pack(side="left", padx=5)
-        ctk.CTkButton(frame_left, text="Lista Napisów", width=100,
-                      command=lambda: self.open_patterns('remove')).pack(side="left", padx=2)
-        ctk.CTkButton(frame_left, text="Lista TTS", width=100,
-                      command=lambda: self.open_patterns('replace')).pack(side="left", padx=2)
+        ctk.CTkButton(frame_left, text="Lista Napisów", width=100, command=lambda: self.open_patterns('remove')).pack(
+            side="left", padx=2)
+        ctk.CTkButton(frame_left, text="Lista TTS", width=100, command=lambda: self.open_patterns('replace')).pack(
+            side="left", padx=2)
 
-        ctk.CTkButton(frame_left, text="Podgląd zmian", width=100, fg_color="#555",
-                      command=self.open_applied_patterns_preview).pack(side="left", padx=10)
-
-        ctk.CTkLabel(frame_left, text="| Widok:").pack(side="left", padx=10)
+        ctk.CTkLabel(frame_left, text="|").pack(side="left", padx=10)
         ctk.CTkOptionMenu(frame_left, variable=self.view_mode, values=[VIEW_MODE_TTS, VIEW_MODE_CLEAN],
-                          command=self.refresh_ui, width=130).pack(side="left", padx=2)
-
-        ctk.CTkLabel(frame_left, text="| Szukaj:").pack(side="left", padx=10)
-        self.ent_search = ctk.CTkEntry(frame_left, textvariable=self.search_text, placeholder_text="Tekst lub 15*")
-        self.ent_search.pack(side="left", padx=2, fill="x", expand=True)
-        self.ent_search.bind("<Return>", self.perform_search)
-
-        ctk.CTkButton(frame_left, text="Szukaj", width=50, command=self.perform_search).pack(side="left", padx=2)
+                          command=self.refresh_ui, width=180).pack(side="left", padx=2)
 
         frame_right = ctk.CTkFrame(toolbar, fg_color="transparent")
         frame_right.pack(side="right", padx=5)
 
-        ctk.CTkButton(frame_right, text="Zatwierdź zmiany", fg_color="green", width=120,
+        ctk.CTkButton(frame_right, text="Zatwierdź i Przelicz", fg_color="green", width=140,
                       command=self.commit_changes).pack(side="left", padx=10)
-
-        self.update_btn = ctk.CTkButton(frame_right, text="Update!", fg_color="#006400", width=80,
-                                        command=self._download_update)
 
     def _bind_shortcuts(self):
         self.bind("<Control-n>", lambda e: self.new_project())
@@ -297,34 +266,21 @@ class SubtitleStudioApp(ctk.CTk):
     # --------------------------------------------------------------------------
 
     def new_project(self):
-        if self.project.has_unsaved_changes:
-            if not messagebox.askyesno("Uwaga", "Masz niezatwierdzone zmiany. Kontynuować?"): return
-
-        txt_path = filedialog.askopenfilename(title="Wybierz plik z napisami (txt/srt)",
-                                              filetypes=[("Tekst", "*.txt *.srt")])
+        txt_path = filedialog.askopenfilename(title="Wybierz plik z napisami", filetypes=[("Tekst", "*.txt *.srt")])
         if not txt_path: return
 
-        messagebox.showinfo("Nowy Projekt", "Wybierz PUSTY folder docelowy.")
-        dest_folder = filedialog.askdirectory(title="Folder projektu")
+        dest_folder = filedialog.askdirectory(title="Wybierz PUSTY folder projektu")
         if not dest_folder: return
-
-        dest_path = Path(dest_folder)
-        if any(dest_path.iterdir()):
-            if not messagebox.askyesno("Folder niepusty",
-                                       "Wybrany folder nie jest pusty. Czy na pewno chcesz w nim utworzyć projekt?"):
-                return
 
         try:
             with open(txt_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
+            # Nowa logika tworzenia projektu
             self.project.create_project(Path(dest_folder), lines, source_txt_path=Path(txt_path))
-            def_model = self.global_config.get("default_tts_model", "XTTS")
-            self.project.set_setting("active_tts_model", def_model)
 
             self._project_loaded_action()
-            self.set_status(f"Utworzono projekt w: {Path(dest_folder).name}")
-
+            self.set_status(f"Utworzono projekt (ID-based): {Path(dest_folder).name}")
         except Exception as e:
             messagebox.showerror("Błąd", str(e))
 
@@ -361,70 +317,35 @@ class SubtitleStudioApp(ctk.CTk):
         self.refresh_ui()
 
     def commit_changes(self):
+        """
+        1. Zbiera tekst z edytora i aktualizuje odpowiednie pole w bazie (MANUAL).
+        2. Uruchamia aplikowanie wzorców (PATTERN) na zaktualizowanym tekście.
+        3. Zapisuje zmiany do bazy.
+        """
         if not self.project.project_dir: return
-        if self.search_text.get():
-            messagebox.showwarning("Uwaga", "Wyczyść filtr wyszukiwania przed zatwierdzeniem.")
+
+        # 1. Pobierz tekst z edytora
+        raw_text = self.txt_editor.get("1.0", "end-1c")
+        editor_lines = raw_text.splitlines()
+
+        # Sprawdzenie spójności liczby linii
+        if len(editor_lines) != len(self.project.subtitle_lines):
+            messagebox.showerror("Błąd",
+                                 "Liczba linii w edytorze nie zgadza się z liczbą linii w bazie.\nNie można zapisać zmian masowo.")
             return
 
-        raw_text_editor = self.txt_editor.get("1.0", "end-1c")
-        editor_lines = [l for l in raw_text_editor.splitlines()]
+        mode = 'tts' if self.view_mode.get() == VIEW_MODE_TTS else 'subtitle'
 
-        if self.view_mode.get() == VIEW_MODE_TTS:
-            rem_patterns = [p for p in self.project.patterns_subtitle if p.enabled]
-            rep_patterns = [p for p in self.project.patterns_tts if p.enabled]
+        # 2. Aktualizacja ręcznych zmian w pamięci
+        for i, text in enumerate(editor_lines):
+            self.project.update_manual_edit(i, text, mode)
 
-            changed_count = 0
+        # 3. Zastosowanie wzorców i zapis do DB
+        # Zgodnie z wymaganiem: "Zatwierdzanie zmian ma stosować dodane wzorce... i oznaczyć jako zastosowane"
+        changed_count = self.project.apply_patterns_and_save(mode)
 
-            if len(editor_lines) != len(self.project.subtitle_lines):
-                if not messagebox.askyesno("Uwaga",
-                                           "Liczba linii w edytorze TTS różni się od oryginału.\nZmiany mogą zostać źle przypisane. Kontynuować?"):
-                    return
-
-            for i, line in enumerate(self.project.subtitle_lines):
-                if i >= len(editor_lines): break
-
-                user_text = editor_lines[i].strip()
-
-                clean_step = apply_remove_patterns([line.text], rem_patterns)
-                auto_tts = ""
-                if clean_step:
-                    auto_tts = apply_replace_patterns(clean_step, rep_patterns)[0].strip()
-
-                if user_text != auto_tts:
-                    if line.tts_override != user_text:
-                        line.tts_override = user_text
-                        changed_count += 1
-                else:
-                    if line.tts_override is not None:
-                        line.tts_override = None
-                        changed_count += 1
-
-            self.project.save_data()
-            self.set_status(f"Zaktualizowano ręczne zmiany TTS: {changed_count}")
-            self.refresh_ui()
-            return
-
-        new_lines_stripped = [l.strip() for l in editor_lines if l.strip()]
-
-        from app.text_processing import reconcile_lines
-        self.project.subtitle_lines = reconcile_lines(self.project.subtitle_lines, new_lines_stripped)
-
-        rem_patterns = [p for p in self.project.patterns_subtitle if p.enabled]
-        if rem_patterns:
-            cleaned_lines_obj = []
-            for line in self.project.subtitle_lines:
-                cleaned_text = apply_remove_patterns([line.text], rem_patterns)
-                if cleaned_text:
-                    line.text = cleaned_text[0]
-                    cleaned_lines_obj.append(line)
-                else:
-                    line.text = ""
-                    cleaned_lines_obj.append(line)
-            self.project.subtitle_lines = cleaned_lines_obj
-            self.refresh_editor_from_state()
-
-        stats = self.project.prepare_commit()
-        CommitDialog(self, stats, lambda: self._do_commit())
+        self.set_status(f"Zapisano zmiany. Wzorce zmieniły {changed_count} linii.")
+        self.refresh_ui()
 
     def _do_commit(self):
         try:
@@ -519,31 +440,22 @@ class SubtitleStudioApp(ctk.CTk):
         self.show_queue_window()
 
     def generate_current_line(self):
+        # Pobranie ID linii z pozycji kursora
         line = self._get_current_line_data()
-        if not line: return self.set_status("Nie wybrano linii.")
+        if not line: return
 
-        rem = [p for p in self.project.patterns_subtitle if p.enabled]
-        rep = [p for p in self.project.patterns_tts if p.enabled]
-        clean = apply_remove_patterns([line.text], rem)
-
-        if not clean: return self.set_status("Pusta linia.")
-        final = apply_replace_patterns(clean, rep)[0].strip()
-
-        base_name = f"output1 ({line.id})"
-        for ext in [".wav", ".mp3", ".ogg"]:
-            f = self.project.audio_dir / (base_name + ext)
-            if f.exists():
-                try:
-                    os.remove(f)
-                except:
-                    pass
+        # Tekst do generowania to zawsze tts_text (finalny)
+        text_to_speak = line.tts_text
+        if not text_to_speak.strip():
+            return messagebox.showinfo("Info", "Pusty tekst TTS.")
 
         model = self.project.get_setting("active_tts_model", "XTTS")
 
+        # Job generowania
         job = GenerationJob(
             project_path=str(self.project.project_dir),
             audio_dir=self.project.audio_dir,
-            lines_to_generate=[(line.id, final)],
+            lines_to_generate=[(line.id, text_to_speak)],  # ID teraz jest int
             tts_model_name=model,
             tts_config=self.global_config,
             converter_config={}
@@ -554,34 +466,28 @@ class SubtitleStudioApp(ctk.CTk):
     def play_current_line_audio(self):
         line = self._get_current_line_data()
         if not line: return
-        if not self.project.audio_dir: return
 
-        base_name = f"output1 ({line.id})"
-        search_paths = [
-            self.project.audio_dir / "ready" / f"{base_name}.ogg",
-            self.project.audio_dir / f"{base_name}.wav"
+        # Szukamy [id].wav lub [id].ogg
+        # Pliki mogą być w głównym folderze lub w ready (po konwersji)
+        candidates = [
+            self.project.audio_dir / f"{line.id}.wav",
+            self.project.audio_dir / f"{line.id}.mp3",
+            self.project.audio_dir / "ready" / f"{line.id}.ogg"
         ]
 
-        file_to_play = next((p for p in search_paths if p.exists()), None)
+        found = next((f for f in candidates if f.exists()), None)
 
-        if file_to_play:
-            self.set_status(f"Odtwarzanie: {file_to_play.name}")
+        if found:
+            self.set_status(f"Odtwarzanie: {found.name}")
             try:
-                # Flaga CREATE_NO_WINDOW na Windows (bit 27 = 0x08000000)
-                # StartupInfo dla subprocess
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTUPF_USESHOWWINDOW
-
-                subprocess.Popen(
-                    ["ffplay", "-nodisp", "-autoexit", "-hide_banner", str(file_to_play)],
-                    startupinfo=si,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
+                subprocess.Popen(["ffplay", "-nodisp", "-autoexit", "-hide_banner", str(found)],
+                                 startupinfo=si, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception as e:
-                messagebox.showerror("Błąd", f"Błąd odtwarzania (ffplay):\n{e}")
+                print(e)
         else:
-            if messagebox.askyesno("Brak audio", "Nie znaleziono pliku. Wygenerować?"):
-                self.generate_current_line()
+            self.set_status("Brak pliku audio.")
 
     def open_mass_delete(self):
         if not self.project.project_dir: return
@@ -654,36 +560,46 @@ class SubtitleStudioApp(ctk.CTk):
             self._clear_editors()
             return
 
-        query = self.search_text.get().lower()
         lines = self.project.subtitle_lines
-        visible_indices = []
+        # Tu można dodać logikę filtrowania (search), na razie proste odświeżenie całości
+        indices = range(len(lines))
 
-        if query:
-            if re.match(r"^\d+\*?$", query):
-                prefix = query.replace("*", "")
-                for i, l in enumerate(lines):
-                    if str(i + 1).startswith(prefix):
-                        visible_indices.append(i)
+        self.txt_editor.configure(state="normal")
+        self.txt_linenums.configure(state="normal")
+        self.txt_preview.configure(state="normal")
+
+        self.txt_editor.delete("1.0", "end")
+        self.txt_linenums.delete("1.0", "end")
+        self.txt_preview.delete("1.0", "end")
+
+        editor_content = []
+        preview_content = []
+        nums = []
+
+        is_tts_view = (self.view_mode.get() == VIEW_MODE_TTS)
+        mode_label = "TTS" if is_tts_view else "NAPISY"
+        self.lbl_editor.configure(text=f"EDYCJA: {mode_label}")
+
+        for i in indices:
+            line = lines[i]
+
+            # Oryginał zawsze w podglądzie
+            preview_content.append(f"{line.id} | {line.original_text}")
+            nums.append(str(line.id))
+
+            # Edytor w zależności od trybu
+            if is_tts_view:
+                editor_content.append(line.tts_text)
             else:
-                visible_indices = [i for i, l in enumerate(lines) if query in l.text.lower()]
-        else:
-            visible_indices = list(range(len(lines)))
+                editor_content.append(line.subtitle_text)
 
-        is_filtered = len(visible_indices) < len(lines)
-        was_sync = self.sync_scroll_enabled.get()
-        # Tymczasowo wyłącz sync, aby uniknąć skakania przy update
-        self.sync_scroll_enabled.set(False)
+        self.txt_preview.insert("1.0", "\n".join(preview_content))
+        self.txt_editor.insert("1.0", "\n".join(editor_content))
+        self.txt_linenums.insert("1.0", "\n".join(nums))
 
-        try:
-            self._update_editor_content(visible_indices, is_filtered)
-            self._update_preview_content(visible_indices)
-        finally:
-            self.sync_scroll_enabled.set(was_sync)
-
-        if is_filtered:
-            self.lbl_editor.configure(text=f"EDYTORY (Filtr: {len(visible_indices)})", text_color="orange")
-        else:
-            self.lbl_editor.configure(text="EDYTORY (Robocza)", text_color=("black", "white"))
+        self.txt_editor.configure(state="normal")  # User can edit
+        self.txt_preview.configure(state="disabled")
+        self.txt_linenums.configure(state="disabled")
 
     def _update_editor_content(self, indices, is_filtered):
         self.txt_editor.configure(state="normal")
@@ -761,28 +677,13 @@ class SubtitleStudioApp(ctk.CTk):
         self.lbl_editor.configure(text="EDYTORY (Pusty projekt)")
 
     def _get_current_line_data(self):
-        if not self.project.subtitle_lines: return None
         try:
             index = self.txt_editor.index("insert")
             row = int(index.split('.')[0]) - 1
+            if 0 <= row < len(self.project.subtitle_lines):
+                return self.project.subtitle_lines[row]
         except:
-            return None
-
-        query = self.search_text.get().lower()
-        lines = self.project.subtitle_lines
-        visible = []
-
-        if query:
-            if re.match(r"^\d+\*?$", query):
-                prefix = query.replace("*", "")
-                visible = [i for i, l in enumerate(lines) if str(i + 1).startswith(prefix)]
-            else:
-                visible = [i for i, l in enumerate(lines) if query in l.text.lower()]
-        else:
-            visible = range(len(lines))
-
-        if 0 <= row < len(visible):
-            return lines[visible[row]]
+            pass
         return None
 
     def set_status(self, text):
