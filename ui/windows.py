@@ -1,284 +1,160 @@
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
+import csv
+import webbrowser
 from typing import List, Callable
+
 from app.entity import PatternItem
-from app.text_processing import apply_remove_patterns
 from ui.dialogs import SelectBuiltinDialog
 
 
-class AboutWindow(ctk.CTkToplevel):
-    def __init__(self, master, version):
-        super().__init__(master)
-        self.title("O programie")
-        self.geometry("400x300")
-        self.transient(master)
-
-        self.lift()
-        self.attributes("-topmost", True)
-        self.after(100, lambda: self.attributes("-topmost", False))
-
-        ctk.CTkLabel(self, text="Subtitle Studio", font=("Arial", 20, "bold")).pack(pady=20)
-        ctk.CTkLabel(self, text=f"Wersja: {version}").pack()
-        ctk.CTkLabel(self, text="Autor: Kamil Pasek").pack(pady=5)
-
-        ctk.CTkLabel(self, text="Narzędzie do tworzenia lektora w grach\nz wykorzystaniem AI TTS.",
-                     justify="center").pack(pady=20)
-
-        ctk.CTkButton(self, text="OK", command=self.destroy).pack(pady=10)
-
-
-class RecentProjectsWindow(ctk.CTkToplevel):
-    def __init__(self, master):
-        super().__init__(master)
-        self.app = master
-        self.title("Ostatnie projekty")
-        self.geometry("600x400")
-        self.transient(master)
-        self.grab_set()
-
-        self.lift()
-        self.focus_force()
-
-        header = ctk.CTkFrame(self)
-        header.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(header, text="Historia projektów", font=("", 16, "bold")).pack(side="left", padx=10)
-        ctk.CTkButton(header, text="Wyczyść całą listę", fg_color="red", width=120,
-                      command=self.clear_all).pack(side="right", padx=5)
-
-        self.scroll = ctk.CTkScrollableFrame(self)
-        self.scroll.pack(fill="both", expand=True, padx=10, pady=5)
-
-        self.refresh_list()
-
-        ctk.CTkButton(self, text="Zamknij", command=self.destroy, fg_color="gray").pack(pady=10)
-
-    def refresh_list(self):
-        for w in self.scroll.winfo_children():
-            w.destroy()
-
-        recent = self.app.global_config.get("recent_projects", [])
-
-        if not recent:
-            ctk.CTkLabel(self.scroll, text="Brak ostatnich projektów.", text_color="gray").pack(pady=20)
-            return
-
-        for path_str in recent:
-            row = ctk.CTkFrame(self.scroll)
-            row.pack(fill="x", pady=2)
-
-            btn_open = ctk.CTkButton(row, text=path_str, anchor="w", fg_color="transparent", border_width=1,
-                                     text_color=("black", "white"),
-                                     command=lambda p=path_str: self.open_and_close(p))
-            btn_open.pack(side="left", fill="x", expand=True, padx=2)
-
-            btn_del = ctk.CTkButton(row, text="X", width=30, fg_color="#550000", hover_color="red",
-                                    command=lambda p=path_str: self.remove_entry(p))
-            btn_del.pack(side="right", padx=2)
-
-    def open_and_close(self, path):
-        from pathlib import Path
-        self.app.open_project(Path(path))
-        self.destroy()
-
-    def remove_entry(self, path):
-        recent = self.app.global_config.get("recent_projects", [])
-        if path in recent:
-            recent.remove(path)
-            self.app.save_global_config({"recent_projects": recent})
-            self.refresh_list()
-
-    def clear_all(self):
-        if messagebox.askyesno("Potwierdź", "Czy na pewno chcesz wyczyścić całą historię?"):
-            self.app.save_global_config({"recent_projects": []})
-            self.refresh_list()
-
-
 class PatternWindow(ctk.CTkToplevel):
-    def __init__(self, master, title: str, patterns_list: List[PatternItem], pattern_type: str,
-                 on_close_callback: Callable):
-        super().__init__(master)
-        self.master_app = master
-        self.title(title)
-        self.geometry("600x500")
-        self.transient(master)
-        self.grab_set()
+    """
+    Pływające okno do zarządzania listą wzorców.
+    """
 
-        # Wymuszamy pojawienie się na wierzchu
+    def __init__(self, master, title: str, pattern_list: List[PatternItem],
+                 pattern_type: str, on_update: Callable):
+        super().__init__(master)
+        self.title(title)
+        self.geometry("500x600")
+
+        # Fix na chowanie się okna pod spód
+        self.transient(master)
         self.lift()
         self.focus_force()
-        self.attributes("-topmost", True)
-        self.after(100, lambda: self.attributes("-topmost", False))
 
-        self.patterns = patterns_list
-        self.pattern_type = pattern_type
-        self.on_close_callback = on_close_callback
+        self.app = master
+        self.pattern_list = pattern_list
+        self.pattern_type = pattern_type  # 'subtitle' lub 'tts'
+        self.on_update = on_update
 
-        top_frame = ctk.CTkFrame(self)
-        top_frame.pack(fill="x", padx=10, pady=10)
-
-        ctk.CTkButton(top_frame, text="Dodaj Nowy", command=self.add_new).pack(side="left", padx=5)
-        ctk.CTkButton(top_frame, text="Wybierz z wbudowanych", command=self.add_builtin).pack(side="left", padx=5)
-        ctk.CTkButton(top_frame, text="Zamknij", fg_color="gray", command=self.close).pack(side="right", padx=5)
-
-        self.scroll = ctk.CTkScrollableFrame(self)
-        self.scroll.pack(fill="both", expand=True, padx=10, pady=5)
-
+        self._create_widgets()
         self.refresh_list()
 
-    def refresh_list(self):
-        for w in self.scroll.winfo_children():
-            w.destroy()
+    def _create_widgets(self):
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        if not self.patterns:
-            ctk.CTkLabel(self.scroll, text="Brak wzorców.").pack(pady=20)
+        self.scroll_frame = ctk.CTkScrollableFrame(self)
+        self.scroll_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        btn_frame = ctk.CTkFrame(self)
+        btn_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+
+        # Przyciski akcji - teraz uporządkowane, bez duplikatów
+        ctk.CTkButton(btn_frame, text="Dodaj ręcznie", command=self.add_pattern).pack(side="left", expand=True,
+                                                                                      fill="x", padx=2)
+        ctk.CTkButton(btn_frame, text="Wybierz wbudowane", command=self.open_builtin).pack(side="left", expand=True,
+                                                                                           fill="x", padx=2)
+        ctk.CTkButton(btn_frame, text="Import CSV", command=self.import_csv).pack(side="left", expand=True, fill="x",
+                                                                                  padx=2)
+
+    def refresh_list(self):
+        for widget in self.scroll_frame.winfo_children():
+            widget.destroy()
+
+        if not self.pattern_list:
+            ctk.CTkLabel(self.scroll_frame, text="Brak wzorców. Dodaj nowe.", text_color="gray").pack(pady=10)
             return
 
-        for idx, pat in enumerate(self.patterns):
-            row = ctk.CTkFrame(self.scroll)
-            row.pack(fill="x", pady=2)
+        for item in self.pattern_list:
+            self._add_row_ui(item)
 
-            var = tk.BooleanVar(value=pat.enabled)
-            cb = ctk.CTkCheckBox(row, text="", width=20, variable=var,
-                                 command=lambda p=pat, v=var: self.toggle_pattern(p, v))
-            cb.pack(side="left", padx=5)
+    def _add_row_ui(self, item: PatternItem):
+        row = ctk.CTkFrame(self.scroll_frame)
+        row.pack(fill="x", pady=2)
 
-            info = f"[{pat.name}]" if pat.name else f"RegEx: {pat.pattern}"
-            lbl = ctk.CTkLabel(row, text=info, anchor="w")
-            lbl.pack(side="left", padx=5, fill="x", expand=True)
+        chk_var = tk.BooleanVar(value=item.enabled)
 
-            if pat.replacement:
-                ctk.CTkLabel(row, text=f"-> '{pat.replacement}'", text_color="gray").pack(side="left", padx=5)
+        def toggle():
+            item.enabled = chk_var.get()
+            self.on_update()
 
-            ctk.CTkButton(row, text="Edytuj", width=50, command=lambda p=pat: self.edit_pattern(p)).pack(side="right",
-                                                                                                         padx=2)
-            ctk.CTkButton(row, text="Usuń", width=50, fg_color="red",
-                          command=lambda p=pat: self.delete_pattern(p)).pack(side="right", padx=2)
+        ctk.CTkCheckBox(row, text="", variable=chk_var, command=toggle, width=24).pack(side="left", padx=5)
 
-            if idx > 0:
-                ctk.CTkButton(row, text="▲", width=30, command=lambda i=idx: self.move_pattern(i, -1)).pack(
-                    side="right", padx=1)
-            if idx < len(self.patterns) - 1:
-                ctk.CTkButton(row, text="▼", width=30, command=lambda i=idx: self.move_pattern(i, 1)).pack(side="right",
-                                                                                                           padx=1)
+        # Formatowanie tekstu
+        desc = f"Pattern: {item.pattern}"
+        if item.replace:
+            desc += f"  ->  {item.replace}"
+        if item.name:
+            desc = f"[{item.name}] {desc}"
 
-    def toggle_pattern(self, pat, var):
-        pat.enabled = var.get()
-        self.master_app.project.save_data()
+        lbl = ctk.CTkLabel(row, text=desc, anchor="w")
+        lbl.pack(side="left", padx=5, expand=True, fill="x")
 
-    def move_pattern(self, index, direction):
-        new_index = index + direction
-        if 0 <= new_index < len(self.patterns):
-            self.patterns[index], self.patterns[new_index] = self.patterns[new_index], self.patterns[index]
-            self.master_app.project.save_data()
+        def delete():
+            if item in self.pattern_list:
+                self.pattern_list.remove(item)
             self.refresh_list()
+            self.on_update()
 
-    def delete_pattern(self, pat):
-        if messagebox.askyesno("Potwierdź", "Usunąć ten wzorzec?"):
-            self.patterns.remove(pat)
-            self.master_app.project.save_data()
+        ctk.CTkButton(row, text="X", width=30, fg_color="#c42b1c", hover_color="#8f1f14", command=delete).pack(
+            side="right", padx=2)
+
+    def add_pattern(self):
+        # Delegacja do metod z GUI (ze względu na kompatybilność z PatternEditorWindow)
+        # Mapowanie typu 'subtitle' -> 'remove', 'tts' -> 'replace' dla starych edytorów
+        legacy_type = 'remove' if self.pattern_type == 'subtitle' else 'replace'
+
+        if legacy_type == 'remove':
+            self.app.open_add_remove_pattern(callback=lambda: [self.refresh_list(), self.on_update()])
+        else:
+            self.app.open_add_replace_pattern(callback=lambda: [self.refresh_list(), self.on_update()])
+
+    def open_builtin(self):
+        # Otwiera dialog wyboru
+        SelectBuiltinDialog(self, self.pattern_type, self._add_builtin_patterns)
+
+    def _add_builtin_patterns(self, items):
+        added_count = 0
+        for item in items:
+            # Sprawdź czy już nie istnieje taki pattern
+            if not any(x.pattern == item.pattern for x in self.pattern_list):
+                self.pattern_list.append(item)
+                added_count += 1
+
+        if added_count > 0:
             self.refresh_list()
+            self.on_update()
 
-    def add_new(self):
-        from audio.pattern_editor import PatternEditorWindow
-        def on_save(name, pattern, repl):
-            # Tu tworzymy nowy obiekt, a nie używamy callbacku app
-            item = PatternItem(None, name, pattern, repl, True, self.pattern_type)
-            self.patterns.append(item)
-            self.master_app.project.save_data()
-            self.refresh_list()
-
-        # Tworzymy okno edytora jako dziecko tego okna (PatternWindow)
-        win = PatternEditorWindow(self, self.pattern_type, on_save, None)
-        win.wait_visibility()
-        win.grab_set()
-        win.lift()
-        win.attributes("-topmost", True)  # MUSI być nad oknem listy
-
-    def edit_pattern(self, pat):
-        from audio.pattern_editor import PatternEditorWindow
-        def on_save(name, pattern, repl):
-            pat.name = name
-            pat.pattern = pattern
-            pat.replacement = repl
-            self.master_app.project.save_data()
-            self.refresh_list()
-
-        win = PatternEditorWindow(self, self.pattern_type, on_save, pat)
-        win.wait_visibility()
-        win.grab_set()
-        win.lift()
-        win.attributes("-topmost", True)
-
-    def add_builtin(self):
-        def on_selected(items):
-            for item in items:
-                new_item = PatternItem(str(item.id), item.name, item.pattern, item.replacement, True, item.type)
-                self.patterns.append(new_item)
-            self.master_app.project.save_data()
-            self.refresh_list()
-
-        win = SelectBuiltinDialog(self, self.pattern_type, on_selected)
-        win.wait_visibility()
-        win.grab_set()
-        win.lift()
-        win.attributes("-topmost", True)
-
-    def close(self):
-        self.on_close_callback()
-        self.destroy()
+    def import_csv(self):
+        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
+        if path:
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    count = 0
+                    for row in reader:
+                        if len(row) >= 1:
+                            pat = row[0].strip()
+                            rep = row[1].strip() if len(row) > 1 else ""
+                            if pat:
+                                self.pattern_list.append(PatternItem(pattern=pat, replace=rep))
+                                count += 1
+                messagebox.showinfo("Import", f"Zaimportowano {count} wzorców.")
+                self.refresh_list()
+                self.on_update()
+            except Exception as e:
+                messagebox.showerror("Błąd", str(e))
 
 
-class AppliedPatternsPreviewWindow(ctk.CTkToplevel):
-    def __init__(self, master, lines, patterns):
+class AboutWindow(ctk.CTkToplevel):
+    """Okno informacji o programie."""
+
+    def __init__(self, master, version: str):
         super().__init__(master)
-        self.title("Podgląd zastosowania wzorców")
-        self.geometry("1000x600")
+        self.title("O programie Subtitle Studio")
+        self.geometry("400x250")
         self.transient(master)
-        self.lift()
-        self.focus_force()
 
-        paned = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashwidth=6, bg="#2b2b2b")
-        paned.pack(fill="both", expand=True, padx=5, pady=5)
+        ctk.CTkLabel(self, text="Subtitle Studio", font=("", 20, "bold")).pack(pady=(20, 5))
+        ctk.CTkLabel(self, text=f"Wersja: {version}").pack(pady=5)
+        ctk.CTkLabel(self, text="Twórca: Kamil Pasek").pack(pady=5)
 
-        f1 = ctk.CTkFrame(paned)
-        paned.add(f1)
-        ctk.CTkLabel(f1, text="Oryginał (Edytor)", font=("bold", 12)).pack(pady=5)
-        txt1 = ctk.CTkTextbox(f1, wrap="none")
-        txt1.pack(fill="both", expand=True, padx=2, pady=2)
+        repo_lbl = ctk.CTkLabel(self, text="GitHub Repository", text_color="#3b8ed0", cursor="hand2")
+        repo_lbl.pack(pady=5)
+        repo_lbl.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/kpasek/subtitle-studio"))
 
-        f2 = ctk.CTkFrame(paned)
-        paned.add(f2)
-        ctk.CTkLabel(f2, text="Po zastosowaniu wzorców (To zostanie zatwierdzone)", font=("bold", 12),
-                     text_color="orange").pack(pady=5)
-        txt2 = ctk.CTkTextbox(f2, wrap="none")
-        txt2.pack(fill="both", expand=True, padx=2, pady=2)
-
-        orig_content = []
-        clean_content = []
-
-        for i, line in enumerate(lines):
-            orig_content.append(f"{i + 1:03} | {line.text}")
-            clean = apply_remove_patterns([line.text], patterns)
-            res = clean[0] if clean else "[USUNIĘTA]"
-            clean_content.append(f"{i + 1:03} | {res}")
-
-        txt1.insert("1.0", "\n".join(orig_content))
-        txt1.configure(state="disabled")
-
-        txt2.insert("1.0", "\n".join(clean_content))
-        txt2.configure(state="disabled")
-
-        # Sync
-        txt1._textbox.configure(yscrollcommand=lambda *a: (txt1._scrollbar.set(*a), txt2.yview_moveto(a[0])))
-        txt2._textbox.configure(yscrollcommand=lambda *a: (txt2._scrollbar.set(*a), txt1.yview_moveto(a[0])))
-
-        def mouse_scroll(event):
-            if hasattr(event, "delta") and event.delta:  # Windows
-                delta = int(-1 * (event.delta / 120))
-                txt1.yview_scroll(delta, "units")
-                txt2.yview_scroll(delta, "units")
-                return "break"
-
-        txt1.bind("<MouseWheel>", mouse_scroll)
-        txt2.bind("<MouseWheel>", mouse_scroll)
+        ctk.CTkButton(self, text="Zamknij", command=self.destroy).pack(pady=20)

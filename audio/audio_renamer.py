@@ -13,9 +13,7 @@ if TYPE_CHECKING:
 
 class AudioRenameWindow(ctk.CTkToplevel):
     """
-    Okno do przesuwania/dopasowywania plików audio.
-    Użytkownik podaje numer linii w tekście i numer pliku audio, który powinien do niej pasować.
-    Aplikacja wylicza przesunięcie.
+    Okno do masowej zmiany nazw plików audio (przesuwanie ID).
     """
 
     def __init__(self, parent, audio_dir: Path):
@@ -24,35 +22,27 @@ class AudioRenameWindow(ctk.CTkToplevel):
         self.audio_dir = audio_dir
 
         self.title("Dopasuj identyfikatory audio")
-        self.geometry("550x300")
+        self.geometry("450x250")
         self.resizable(False, False)
 
         self.grab_set()
         self.transient(parent)
+
         self.grid_columnconfigure(0, weight=1)
 
-        # Informacja
-        ctk.CTkLabel(self, text="Dopasowanie numeracji audio", font=("", 14, "bold")).pack(pady=10)
-        ctk.CTkLabel(self, text="Przykład: Audio 'output1 (5).wav' ma pasować do Linii nr 10.\n"
-                                "Wpisz poniżej: Linia: 10, Audio: 5. (Przesunięcie = +5)",
-                     text_color="gray").pack(pady=5)
+        ctk.CTkLabel(self, text="Zmień nazwy plików audio od wiersza (ID):").pack(
+            pady=(10, 2), padx=10)
+        self.ent_start_id = ctk.CTkEntry(self, placeholder_text="np. 123")
+        self.ent_start_id.pack(fill="x", padx=10)
 
-        # Formularz
-        form_frame = ctk.CTkFrame(self)
-        form_frame.pack(fill="x", padx=20, pady=10)
-
-        ctk.CTkLabel(form_frame, text="Docelowy numer linii w napisach:").grid(row=0, column=0, padx=10, pady=5,
-                                                                               sticky="e")
-        self.ent_target_line = ctk.CTkEntry(form_frame, width=100)
-        self.ent_target_line.grid(row=0, column=1, padx=10, pady=5, sticky="w")
-
-        ctk.CTkLabel(form_frame, text="Aktualny numer w nazwie pliku audio:").grid(row=1, column=0, padx=10, pady=5,
-                                                                                   sticky="e")
-        self.ent_current_file = ctk.CTkEntry(form_frame, width=100)
-        self.ent_current_file.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(self, text="O wartość (ilość wierszy):").pack(
+            pady=(10, 2), padx=10)
+        self.ent_shift = ctk.CTkEntry(
+            self, placeholder_text="np. 1 (przesunie 123->124) lub -1 (przesunie 123->122)")
+        self.ent_shift.pack(fill="x", padx=10)
 
         self.btn_run = ctk.CTkButton(
-            self, text="Oblicz i zmień nazwy", command=self.start_rename_task)
+            self, text="Wykonaj zmianę nazw", command=self.start_rename_task)
         self.btn_run.pack(pady=20, padx=10)
 
         self.status_label = ctk.CTkLabel(self, text="", text_color="gray")
@@ -63,89 +53,110 @@ class AudioRenameWindow(ctk.CTkToplevel):
 
     def set_controls_state(self, state: str):
         self.btn_run.configure(state=state)
-        self.ent_target_line.configure(state=state)
-        self.ent_current_file.configure(state=state)
+        self.ent_start_id.configure(state=state)
+        self.ent_shift.configure(state=state)
 
     def start_rename_task(self):
         try:
-            target_line = int(self.ent_target_line.get())
-            current_file_id = int(self.ent_current_file.get())
+            start_id = int(self.ent_start_id.get())
+            shift = int(self.ent_shift.get())
         except ValueError:
-            self.update_status("Błąd: Wprowadzone wartości muszą być liczbami.", color="red")
+            self.update_status(
+                "Błąd: Wprowadzone wartości muszą być liczbami.", color="red")
             return
 
-        offset = target_line - current_file_id
-
-        if offset == 0:
-            self.update_status("Błąd: Przesunięcie wynosi 0. Pliki są już zgodne?", color="yellow")
+        if shift == 0:
+            self.update_status(
+                "Błąd: Wartość przesunięcia nie może być 0.", color="red")
+            return
+        if start_id <= 0:
+            self.update_status(
+                "Błąd: ID początkowe musi być większe od 0.", color="red")
             return
 
         self.set_controls_state("disabled")
-        self.update_status(f"Pracuję... (Przesunięcie: {offset:+d})", color="cyan")
+        self.update_status(f"Pracuję... (Przesunięcie: {shift})", color="cyan")
 
-        # Uruchom w wątku
+        # Uruchom w wątku, aby nie blokować GUI
         threading.Thread(
             target=self._rename_files_task,
-            args=(current_file_id, offset),
+            args=(start_id, shift),
             daemon=True
         ).start()
 
-    def _rename_files_task(self, start_from_id: int, offset: int):
+    def _rename_files_task(self, start_id: int, shift: int):
         try:
             search_dirs = [self.audio_dir, self.audio_dir / "ready"]
-            file_pattern = re.compile(r"^(output[12])\s*\(\s*(\d+)\s*\)(\.(?:wav|mp3|ogg))$", re.IGNORECASE)
+            # Wzór: output1 (123).wav LUB output2 (456).ogg
+            file_pattern = re.compile(
+                r"^(output[12])\s*\(\s*(\d+)\s*\)(\.(?:wav|mp3|ogg))$", re.IGNORECASE)
 
             all_files_info = []
-
-            # 1. Zbierz wszystkie pliki
             for dir_path in search_dirs:
-                if not dir_path.is_dir(): continue
+                if not dir_path.is_dir():
+                    continue
                 for f in dir_path.iterdir():
                     if f.is_file():
                         match = file_pattern.match(f.name)
                         if match:
                             prefix, id_str, suffix = match.groups()
                             file_id = int(id_str)
-                            # Zbieramy tylko te od punktu startowego w górę
-                            if file_id >= start_from_id:
-                                all_files_info.append((f, prefix, file_id, suffix.lower()))
+                            all_files_info.append(
+                                (f, prefix, file_id, suffix.lower()))
 
-            if not all_files_info:
+            # Filtruj pliki, które należy zmienić (ID >= start_id)
+            files_to_rename = [
+                f_info for f_info in all_files_info if f_info[2] >= start_id]
+
+            if not files_to_rename:
                 self.parent_app.queue.put(
-                    lambda: self.update_status("Nie znaleziono plików do zmiany.", color="yellow"))
+                    lambda: self.update_status("Nie znaleziono plików pasujących do kryteriów.", color="yellow"))
                 return
 
-            # 2. Sortowanie bezpieczne
-            # Jeśli przesuwamy w górę (np. +5), musimy zmieniać od końca (największe ID pierwsze)
-            # Jeśli w dół (-5), od początku (najmniejsze ID pierwsze)
-            sort_reverse = True if offset > 0 else False
-            all_files_info.sort(key=lambda x: x[2], reverse=sort_reverse)
+            # KLUCZOWA LOGIKA: Sortuj w zależności od kierunku przesunięcia
+            # Jeśli dodajemy (shift > 0), idziemy od końca (reverse=True)
+            # Jeśli odejmujemy (shift < 0), idziemy od początku (reverse=False)
+            sort_reverse = True if shift > 0 else False
+            files_to_rename.sort(key=lambda x: x[2], reverse=sort_reverse)
 
             renamed_count = 0
+            skipped_count = 0
 
-            for (old_path, prefix, old_id, suffix) in all_files_info:
-                new_id = old_id + offset
+            for (old_path, prefix, old_id, suffix) in files_to_rename:
+                new_id = old_id + shift
 
                 if new_id <= 0:
-                    print(f"Pominięto {old_path.name}: Nowe ID {new_id} <= 0.")
+                    print(
+                        f"Pominięto {old_path.name}: Nowe ID ({new_id}) jest nieprawidłowe.")
+                    skipped_count += 1
                     continue
 
                 new_name = f"{prefix} ({new_id}){suffix}"
                 new_path = old_path.parent / new_name
 
                 if new_path.exists():
-                    # Teoretycznie przy sortowaniu nie powinno wystąpić, chyba że nadpisujemy pliki spoza zakresu edycji
-                    # W tym prostym narzędziu lepiej pominąć niż zniszczyć dane
-                    print(f"Konflikt: {new_path} już istnieje.")
-                    continue
+                    # To nie powinno się zdarzyć przy poprawnym sortowaniu, ale to zabezpieczenie
+                    raise IOError(
+                        f"Konflikt! Plik {new_path.name} już istnieje. Przerwano.")
 
-                os.rename(old_path, new_path)
-                renamed_count += 1
+                if old_path.exists():  # Sprawdź czy plik źródłowy wciąż istnieje
+                    os.rename(old_path, new_path)
+                    renamed_count += 1
+                else:
+                    # To mogłoby się zdarzyć, gdyby plik został już przeniesiony (np. output1 (123).wav i output1 (123).ogg)
+                    # Ale nasz wzorzec łapie tylko jeden plik na raz. To jest OK.
+                    print(f"Pominięto (źródło nie istnieje): {old_path.name}")
 
-            msg = f"Zakończono. Zmieniono nazwę: {renamed_count} plików."
-            self.parent_app.queue.put(lambda: self.update_status(msg, color="green"))
+            msg = f"Zakończono. Zmieniono nazwę: {renamed_count} plików. Pominięto: {skipped_count}."
+            self.parent_app.queue.put(
+                lambda: self.update_status(msg, color="green"))
 
         except Exception as e:
-            self.parent_app.queue.put(lambda: self.update_status(f"Błąd: {str(e)}", color="red"))
+            error_msg = f"Błąd: {e}"
+            print(error_msg)
+            self.parent_app.queue.put(
+                lambda: self.update_status(error_msg, color="red"))
         finally:
-            self.parent_app.queue.put(lambda: self.set_controls_state("normal"))
+            # Zawsze odblokuj kontrolki
+            self.parent_app.queue.put(
+                lambda: self.set_controls_state("normal"))

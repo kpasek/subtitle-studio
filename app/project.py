@@ -1,15 +1,18 @@
+import shutil
+import sqlite3
+import os
+import json
 from pathlib import Path
 from typing import List
 from app.entity import SubtitleLine, PatternItem
 from app.db import ProjectDB
 from app.git_ops import GitManager
-from app.text_processing import  apply_replace_patterns
+import uuid
 
 
 class ProjectManager:
     """
     Zarządza projektem (Folder + DB + Git).
-    Nowa wersja obsługująca strukturę 3-tabelową.
     """
 
     def __init__(self):
@@ -18,12 +21,10 @@ class ProjectManager:
         self.git: GitManager = None
 
         self.subtitle_lines: List[SubtitleLine] = []
-
-        # Wzorce trzymamy w pamięci
         self.patterns_subtitle: List[PatternItem] = []
         self.patterns_tts: List[PatternItem] = []
+        self.project_config: dict = {}  # Cache ustawień
 
-        self.project_config: dict = {}
         self.audio_dir: Path = None
         self.has_unsaved_changes = False
 
@@ -34,16 +35,12 @@ class ProjectManager:
         self.project_dir = None
         self.git = None
         self.subtitle_lines = []
-        self.patterns_subtitle = []
-        self.patterns_tts = []
         self.project_config = {}
 
     def create_project(self, folder_path: Path, raw_lines: List[str], source_txt_path: Path = None):
         """
-        Tworzy projekt w nowej strukturze.
-        1. Inicjalizuje bazę.
-        2. Wstawia surowe linie do `original_lines` i domyślnie kopiuje je do tabel `modified`.
-        3. Przeładowuje linie z bazy, aby uzyskać nadane ID (Integer).
+        Tworzy projekt.
+        source_txt_path: Ścieżka do oryginalnego pliku txt, służy do importu legacy audio.
         """
         self.close()
 
@@ -56,17 +53,32 @@ class ProjectManager:
         self.db = ProjectDB(folder_path / "project.db")
         self.db.connect()
 
-        # Tworzenie obiektów w pamięci
-        # SubtitleLine.new ustawia ID na None, baza nada auto-increment
-        init_lines = [SubtitleLine.new(l.strip(), idx) for idx, l in enumerate(raw_lines) if l.strip()]
+        # Init Lines (z UUID)
+        self.subtitle_lines = [SubtitleLine.new(l.strip()) for l in raw_lines if l.strip()]
+        self.db.save_lines(self.subtitle_lines)
 
-        # Zapis do bazy (to nada ID)
-        self.db.save_lines(init_lines)
+        # --- LEGACY IMPORT LOGIC ---
+        # Jeśli plik źródłowy txt jest w folderze, gdzie są też pliki audio output1 (N).wav
+        # to spróbuj je zaimportować i przypisać do nowych UUID.
+        if source_txt_path and source_txt_path.parent.exists():
+            src_dir = source_txt_path.parent
+            imported_count = 0
 
-        # Przeładowanie z bazy, aby mieć poprawne ID w pamięci
-        self.subtitle_lines = self.db.get_lines()
+            for i, line in enumerate(self.subtitle_lines):
+                # Legacy index is 1-based
+                legacy_name = f"output1 ({i + 1}).wav"
+                src_audio = src_dir / legacy_name
 
-        # Inicjalizacja Gita
+                if src_audio.exists():
+                    # Kopiuj i zmień nazwę na UUID
+                    new_name = f"output1 ({line.id}).wav"
+                    shutil.copy2(src_audio, self.audio_dir / new_name)
+                    imported_count += 1
+
+            if imported_count > 0:
+                print(f"Zaimportowano {imported_count} plików audio ze starego formatu.")
+
+        # Init Git
         self.git = GitManager(folder_path)
         self.git.init_or_load()
         self._sync_git("Inicjalizacja projektu")
@@ -84,11 +96,11 @@ class ProjectManager:
         self.db = ProjectDB(folder_path / "project.db")
         self.db.connect()
 
-        # Wczytanie danych
         self.subtitle_lines = self.db.get_lines()
         self.patterns_subtitle = self.db.get_patterns("subtitle")
         self.patterns_tts = self.db.get_patterns("tts")
 
+        # Load config cache
         self.project_config = self._load_settings_dict()
 
         self.git = GitManager(folder_path)
@@ -96,92 +108,19 @@ class ProjectManager:
         self.audio_dir.mkdir(exist_ok=True)
 
     def save_data(self):
-        """Zapisuje aktualny stan linii i wzorców do bazy."""
         if not self.db: return
         self.db.save_lines(self.subtitle_lines)
-        self.db.save_patterns(self.patterns_subtitle)  # Zapisuje listę subtitle
-        self.db.save_patterns(self.patterns_tts)  # Zapisuje listę tts
-
-    def apply_patterns_and_save(self, mode: str):
-        """
-        Aplikuje aktywne wzorce do odpowiedniej kolumny tekstowej
-        i oznacza wzorce jako zastosowane (applied=True).
-        mode: 'subtitle' lub 'tts'
-        """
-        patterns = self.patterns_subtitle if mode == 'subtitle' else self.patterns_tts
-
-        # Filtrujemy tylko włączone wzorce
-        active_patterns = [p for p in patterns if p.enabled]
-        if not active_patterns:
-            return 0
-
-        count_changed = 0
-
-        # Iterujemy po liniach
-        for line in self.subtitle_lines:
-            old_text = line.subtitle_text if mode == 'subtitle' else line.tts_text
-
-            # Logika aplikowania
-            # Dla subtitle używamy 'remove' (czyli replace na pusty ciąg, lub replace jeśli zdefiniowany)
-            # Dla tts używamy 'replace'
-            # Funkcje pomocnicze text_processing obsługują to generycznie,
-            # ale tutaj musimy zaktualizować konkretne pole w obiekcie.
-
-            # Używamy funkcji pomocniczej na pojedynczym stringu
-            # Uwaga: helpery przyjmują listę, więc pakujemy w listę
-            if mode == 'subtitle':
-                # Subtitle (Game Reader) - zazwyczaj czyszczenie
-                # Tutaj zakładamy, że patterns_subtitle mogą usuwać lub podmieniać
-                res = apply_replace_patterns([old_text], active_patterns)
-                new_text = res[0]
-
-                if new_text != old_text:
-                    line.subtitle_text = new_text
-                    line.subtitle_change_source = "PATTERN"
-                    count_changed += 1
-            else:
-                # TTS - podmiana pod lektora
-                res = apply_replace_patterns([old_text], active_patterns)
-                new_text = res[0]
-
-                if new_text != old_text:
-                    line.tts_text = new_text
-                    line.tts_change_source = "PATTERN"
-                    count_changed += 1
-
-        # Oznaczamy wzorce jako zastosowane
-        for p in active_patterns:
-            p.applied = True
-
-        self.save_data()
-        return count_changed
-
-    def update_manual_edit(self, line_index: int, new_text: str, mode: str):
-        """Aktualizuje tekst po edycji ręcznej."""
-        if line_index < 0 or line_index >= len(self.subtitle_lines):
-            return
-
-        line = self.subtitle_lines[line_index]
-
-        if mode == 'subtitle':
-            if line.subtitle_text != new_text:
-                line.subtitle_text = new_text
-                line.subtitle_change_source = "MANUAL"
-        elif mode == 'tts':
-            if line.tts_text != new_text:
-                line.tts_text = new_text
-                line.tts_change_source = "MANUAL"
+        self.db.save_patterns("subtitle", self.patterns_subtitle)
+        self.db.save_patterns("tts", self.patterns_tts)
 
     def prepare_commit(self) -> dict:
-        # Generujemy podgląd pliku tekstowego (używamy wersji subtitle/original jako referencji dla Gita)
-        # Git ma śledzić historię zmian tekstowych.
-        text_content = "\n".join(l.subtitle_text for l in self.subtitle_lines)
+        text_content = "\n".join(l.text for l in self.subtitle_lines)
         self.git.stage_file(text_content)
         return {
             "diff_stat": self.git.get_diff_stats(),
             "full_diff": self.git.get_full_diff(),
             "lines_count": len(self.subtitle_lines),
-            "audio_affected": "Sprawdź spójność ID"
+            "audio_affected": self._calculate_audio_impact()
         }
 
     def commit(self, message: str):
@@ -189,10 +128,29 @@ class ProjectManager:
         self.save_data()
         self.has_unsaved_changes = False
 
+    def delete_line(self, line_id: str):
+        """Usuwa linię o podanym UUID."""
+        # Znajdź i usuń z listy w pamięci
+        original_len = len(self.subtitle_lines)
+        self.subtitle_lines = [l for l in self.subtitle_lines if l.id != line_id]
+
+        if len(self.subtitle_lines) < original_len:
+            # Zapisz do DB
+            self.db.save_lines(self.subtitle_lines)
+            # Stage dla Gita (ale commit dopiero ręcznie przez usera, albo auto?
+            # User prosił o opcję usuń linię. W tym modelu zmiany są "w locie" w pamięci/DB,
+            # a Git jest snapshotem. Więc tylko DB update wystarczy, Git przy commicie.)
+            self.has_unsaved_changes = True
+
     def _sync_git(self, message: str):
-        text_content = "\n".join(l.subtitle_text for l in self.subtitle_lines)
+        text_content = "\n".join(l.text for l in self.subtitle_lines)
         self.git.stage_file(text_content)
         self.git.commit(message)
+
+    def _calculate_audio_impact(self):
+        if self.git.has_changes():
+            return "Wykryto zmiany. Kolejność plików przy eksporcie może ulec zmianie."
+        return "Brak zmian wpływających na strukturę."
 
     # --- Settings ---
     def get_setting(self, key, default=None):
@@ -206,14 +164,29 @@ class ProjectManager:
             self.project_config[key] = value
 
     def get_all_settings(self) -> dict:
+        """Zwraca słownik wszystkich ustawień z DB."""
+        if not self.db: return {}
+        # Pobieramy z tabeli settings
+        # To wymagałoby metody w ProjectDB typu fetch_all_settings
+        # Dla uproszczenia zwracamy cached config + dociągamy brakujące
         return self.project_config.copy()
 
     def _load_settings_dict(self):
+        # Helper - w prawdziwej implementacji DB powinno mieć "SELECT * FROM settings"
+        # Tutaj symulacja lub zakładamy, że db.get_setting działa pojedynczo.
+        # SQLite nie ma prostej metody "dump dict", trzeba iterować.
+        # W db.py dodałem tabelę settings, ale nie metodę get_all.
+        # Zróbmy prosty cache w pamięci ładowany leniwie lub przy otwarciu.
+        # Tu uproszczenie:
         cfg = {}
+        # Lista znanych kluczy:
         keys = ["active_tts_model", "base_audio_speed", "conversion_workers", "ffmpeg_filters"]
         for k in keys:
             val = self.db.get_setting(k)
             if val is not None:
-                # db.get_setting zwraca już poprawne typy dzięki tabeli settings
-                cfg[k] = val
+                # Próba konwersji typów
+                try:
+                    cfg[k] = json.loads(val.replace("'", '"'))  # prosty hack, lepiej trzymać json
+                except:
+                    cfg[k] = val
         return cfg

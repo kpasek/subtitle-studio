@@ -1,21 +1,19 @@
-from dataclasses import dataclass, asdict
-from typing import Optional
+import uuid
+import time
+from dataclasses import dataclass, asdict, field
+from typing import List, Optional
 
 
-@dataclass
+@dataclass(slots=True)
 class PatternItem:
     """
-    Reprezentuje pojedynczy wzorzec regex.
-    Pole 'applied' wskazuje, czy wzorzec został oznaczony jako zastosowany (zgodnie z wymaganiami).
+    Reprezentuje pojedynczy wzorzec regex (do wycinania lub zamiany).
     """
     pattern: str
     replace: str = ""
     case_sensitive: bool = True
     name: str | None = None
-    enabled: bool = True  # Czy jest aktywny w konfiguracji
-    applied: bool = False  # "informacja wzorzec został już zastosowany"
-    type: str = "subtitle"  # 'subtitle' lub 'tts'
-    id: Optional[int] = None
+    enabled: bool = True
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -27,41 +25,56 @@ class PatternItem:
             replace=d.get("replace", ""),
             case_sensitive=d.get("case_sensitive", True),
             name=d.get("name", None),
-            enabled=d.get("enabled", True),
-            applied=d.get("applied", False),
-            type=d.get("type", "subtitle"),
-            id=d.get("id")
+            enabled=d.get("enabled", True)
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleLine:
     """
-    Złożony obiekt reprezentujący linię w trzech stanach:
-    1. Oryginał (niezmienny po imporcie)
-    2. Wersja pod napisy (Modified Subtitle)
-    3. Wersja pod lektora (Modified TTS)
+    Reprezentuje pojedynczą linię dialogową z unikalnym identyfikatorem (UUID).
+    Dzięki UUID zmiana treści nie gubi powiązania z plikiem audio.
     """
-    id: Optional[int]  # ID z bazy danych (Integer)
-    original_text: str
-
-    # Wersja dla napisów (Game Reader / wyświetlanie)
-    subtitle_text: str
-    # Wersja dla TTS (Generowanie audio)
-    tts_text: str
-
-    subtitle_change_source: str = "NONE"
-    tts_change_source: str = "NONE"
-
-    ord: int = 0  # Kolejność sortowania
+    id: str
+    text: str
 
     @staticmethod
-    def new(text: str, order: int = 0) -> 'SubtitleLine':
-        """Tworzy nową linię. ID zostanie nadane przez bazę danych przy zapisie."""
-        return SubtitleLine(
-            id=None,
-            original_text=text,
-            subtitle_text=text,
-            tts_text=text,
-            ord=order
+    def new(text: str) -> 'SubtitleLine':
+        """Tworzy nową linię z losowym UUID."""
+        return SubtitleLine(id=str(uuid.uuid4()), text=text)
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_json(cls, d: dict) -> 'SubtitleLine':
+        return cls(
+            id=d.get("id", str(uuid.uuid4())),
+            text=d.get("text", "")
+        )
+
+
+@dataclass(slots=True)
+class ProjectSnapshot:
+    """
+    Migawka stanu projektu do obsługi historii (Undo/Redo/Versions).
+    """
+    timestamp: float
+    lines: List[SubtitleLine]
+    description: str = ""
+
+    def to_json(self) -> dict:
+        return {
+            "timestamp": self.timestamp,
+            "lines": [l.to_json() for l in self.lines],
+            "description": self.description
+        }
+
+    @classmethod
+    def from_json(cls, d: dict) -> 'ProjectSnapshot':
+        lines = [SubtitleLine.from_json(l) for l in d.get("lines", [])]
+        return cls(
+            timestamp=d.get("timestamp", 0.0),
+            lines=lines,
+            description=d.get("description", "")
         )
