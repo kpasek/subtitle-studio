@@ -136,7 +136,11 @@ class ConversionDialog(ctk.CTkToplevel):
         self.lift()
         self.focus_force()
         self.on_convert = on_convert
-        self.filter_vars = {}
+        if isinstance(current_filters, str):
+            try:
+                current_filters = json.loads(current_filters)
+            except:
+                current_filters = {}
 
         ctk.CTkLabel(self, text="Opcje Konwersji (ffmpeg)", font=("", 16, "bold")).pack(pady=10)
         ctk.CTkLabel(self, text=f"Znaleziono plików źródłowych: {count}").pack(pady=5)
@@ -167,6 +171,7 @@ class ConversionDialog(ctk.CTkToplevel):
                 is_enabled = current_filters[key].get("enabled", False)
 
             var = tk.BooleanVar(value=is_enabled)
+
             self.filter_vars[key] = (var, default_params)
 
             row = ctk.CTkFrame(filter_frame, fg_color="transparent")

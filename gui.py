@@ -85,6 +85,9 @@ class SubtitleStudioApp(ctk.CTk):
         self._create_layout()
         self._bind_shortcuts()
 
+        saved_sync = self.global_config.get("sync_scroll", True)
+        self.sync_scroll_enabled = tk.BooleanVar(value=saved_sync)
+
         # Background tasks
         self.check_queue_loop()
         threading.Thread(target=self._check_for_updates, daemon=True).start()
@@ -134,6 +137,7 @@ class SubtitleStudioApp(ctk.CTk):
         audio_menu.add_separator()
         audio_menu.add_command(label="Generuj aktualną linię (Ctrl+G)", command=self.generate_current_line)
         audio_menu.add_command(label="Odtwórz aktualną linię (Ctrl+Spacja)", command=self.play_current_line_audio)
+        audio_menu.add_command(label="Usuń duplikaty", command=self.open_remove_duplicates_dialog)  # NOWE
         menubar.add_cascade(label="Audio", menu=audio_menu)
 
         # --- Eksport ---
@@ -152,32 +156,44 @@ class SubtitleStudioApp(ctk.CTk):
     def _create_layout(self):
         container = ctk.CTkFrame(self)
         container.pack(fill="both", expand=True, padx=5, pady=5)
-
         self._create_toolbar(container)
 
         self.paned = tk.PanedWindow(container, orient=tk.HORIZONTAL, sashwidth=6, bg="#2b2b2b")
         self.paned.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Preview (Lewy)
+        # Preview (Lewy) - bez zmian
         frame_left = ctk.CTkFrame(self.paned)
         self.paned.add(frame_left)
         ctk.CTkLabel(frame_left, text="PODGLĄD (ReadOnly)", font=("Arial", 12, "bold")).pack(pady=2)
         self.txt_preview = ctk.CTkTextbox(frame_left, state="disabled")
         self.txt_preview.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # Editor (Prawy)
+        # Editor (Prawy) - ZMODYFIKOWANY
         frame_right = ctk.CTkFrame(self.paned)
         self.paned.add(frame_right)
         self.lbl_editor = ctk.CTkLabel(frame_right, text="EDYTORY (Robocza)", font=("Arial", 12, "bold"))
         self.lbl_editor.pack(pady=2)
 
-        self.txt_editor = ctk.CTkTextbox(frame_right)
-        self.txt_editor.pack(fill="both", expand=True, padx=2, pady=2)
+        # Kontener na edytor + numery linii
+        editor_container = ctk.CTkFrame(frame_right, fg_color="transparent")
+        editor_container.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # Panel numerów linii
+        self.txt_linenums = ctk.CTkTextbox(editor_container, width=60, state="disabled",
+                                           text_color="gray", fg_color="transparent", activate_scrollbars=False)
+        self.txt_linenums.pack(side="left", fill="y", padx=(0, 2))
+
+        self.txt_editor = ctk.CTkTextbox(editor_container)
+        self.txt_editor.pack(side="left", fill="both", expand=True)
+
+        # Bind scrollowania dla numerów linii
+        self.txt_editor._textbox.config(yscrollcommand=self._on_editor_scroll)
 
         self.after(100, lambda: self.paned.sash_place(0, 530, 0))
-
-        # Inicjalizacja synchronizacji kursorowej
         self._setup_cursor_sync()
+
+        # Zapis ustawienia sync przy zmianie
+        self.sync_scroll_enabled.trace_add("write", self._save_sync_setting)
 
         self.lbl_status = ctk.CTkLabel(self, text="Gotowy", anchor="w")
         self.lbl_status.pack(side="bottom", fill="x", padx=10)
@@ -350,14 +366,50 @@ class SubtitleStudioApp(ctk.CTk):
             messagebox.showwarning("Uwaga", "Wyczyść filtr wyszukiwania przed zatwierdzeniem.")
             return
 
-        raw_text = self.txt_editor.get("1.0", "end-1c")
-        new_lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+        raw_text_editor = self.txt_editor.get("1.0", "end-1c")
+        editor_lines = [l for l in raw_text_editor.splitlines()]
+
+        if self.view_mode.get() == VIEW_MODE_TTS:
+            rem_patterns = [p for p in self.project.patterns_subtitle if p.enabled]
+            rep_patterns = [p for p in self.project.patterns_tts if p.enabled]
+
+            changed_count = 0
+
+            if len(editor_lines) != len(self.project.subtitle_lines):
+                if not messagebox.askyesno("Uwaga",
+                                           "Liczba linii w edytorze TTS różni się od oryginału.\nZmiany mogą zostać źle przypisane. Kontynuować?"):
+                    return
+
+            for i, line in enumerate(self.project.subtitle_lines):
+                if i >= len(editor_lines): break
+
+                user_text = editor_lines[i].strip()
+
+                clean_step = apply_remove_patterns([line.text], rem_patterns)
+                auto_tts = ""
+                if clean_step:
+                    auto_tts = apply_replace_patterns(clean_step, rep_patterns)[0].strip()
+
+                if user_text != auto_tts:
+                    if line.tts_override != user_text:
+                        line.tts_override = user_text
+                        changed_count += 1
+                else:
+                    if line.tts_override is not None:
+                        line.tts_override = None
+                        changed_count += 1
+
+            self.project.save_data()
+            self.set_status(f"Zaktualizowano ręczne zmiany TTS: {changed_count}")
+            self.refresh_ui()
+            return
+
+        new_lines_stripped = [l.strip() for l in editor_lines if l.strip()]
 
         from app.text_processing import reconcile_lines
-        self.project.subtitle_lines = reconcile_lines(self.project.subtitle_lines, new_lines)
+        self.project.subtitle_lines = reconcile_lines(self.project.subtitle_lines, new_lines_stripped)
 
         rem_patterns = [p for p in self.project.patterns_subtitle if p.enabled]
-
         if rem_patterns:
             cleaned_lines_obj = []
             for line in self.project.subtitle_lines:
@@ -413,6 +465,11 @@ class SubtitleStudioApp(ctk.CTk):
         rep = [p for p in self.project.patterns_tts if p.enabled]
 
         for line in self.project.subtitle_lines:
+            if line.tts_override is not None:
+                final = line.tts_override.strip()
+                if final:
+                    lines_data.append((line.id, final))
+                continue
             clean = apply_remove_patterns([line.text], rem)
             if clean:
                 final = apply_replace_patterns(clean, rep)[0].strip()
@@ -629,12 +686,46 @@ class SubtitleStudioApp(ctk.CTk):
             self.lbl_editor.configure(text="EDYTORY (Robocza)", text_color=("black", "white"))
 
     def _update_editor_content(self, indices, is_filtered):
-        lines_text = "\n".join(self.project.subtitle_lines[i].text for i in indices)
         self.txt_editor.configure(state="normal")
+        self.txt_linenums.configure(state="normal")
+
         self.txt_editor.delete("1.0", "end")
-        self.txt_editor.insert("1.0", lines_text)
+        self.txt_linenums.delete("1.0", "end")
+
+        content_lines = []
+        linenum_lines = []
+
+        rem_patterns = [p for p in self.project.patterns_subtitle if p.enabled]
+        rep_patterns = [p for p in self.project.patterns_tts if p.enabled]
+
+        for i in indices:
+            line = self.project.subtitle_lines[i]
+
+            # Jeśli tryb TTS - pokaż override lub wygenerowany tekst
+            if self.view_mode.get() == VIEW_MODE_TTS:
+                if line.tts_override is not None:
+                    content_lines.append(line.tts_override)
+                else:
+                    # Generuj live
+                    clean = apply_remove_patterns([line.text], rem_patterns)
+                    if clean:
+                        final = apply_replace_patterns(clean, rep_patterns)[0]
+                        content_lines.append(final)
+                    else:
+                        content_lines.append("")  # Pusta linia (usunięta przez remove)
+            else:
+                # Tryb Czysty - pokaż źródło
+                content_lines.append(line.text)
+
+            linenum_lines.append(str(i + 1))
+
+        self.txt_editor.insert("1.0", "\n".join(content_lines))
+        self.txt_linenums.insert("1.0", "\n".join(linenum_lines))
+
         if is_filtered:
             self.txt_editor.configure(state="disabled")
+
+        self.txt_linenums.configure(state="disabled")
 
     def _update_preview_content(self, indices):
         rem = [p for p in self.project.patterns_subtitle if p.enabled]
@@ -642,8 +733,14 @@ class SubtitleStudioApp(ctk.CTk):
 
         out = []
         for idx in indices:
-            raw = self.project.subtitle_lines[idx].text
-            clean = apply_remove_patterns([raw], rem)
+            line = self.project.subtitle_lines[idx]
+
+            # Zmiana: uwzględnij override w podglądzie
+            if self.view_mode.get() == VIEW_MODE_TTS and line.tts_override is not None:
+                out.append(f"{idx + 1:03} | {line.tts_override} [MANUAL]")
+                continue
+
+            clean = apply_remove_patterns([line.text], rem)
             if clean:
                 final = apply_replace_patterns(clean, rep)[0]
                 out.append(f"{idx + 1:03} | {final}")
@@ -829,6 +926,48 @@ class SubtitleStudioApp(ctk.CTk):
         with open(GLOBAL_CONFIG_FILE, "w") as f:
             json.dump(self.global_config, f, indent=2)
 
+    def _on_editor_scroll(self, *args):
+        """Synchronizuje scrollbar edytora i panel numerów linii."""
+        self.txt_editor._y_scrollbar.set(*args)
+        self.txt_linenums.yview_moveto(args[0])
+
+    def _save_sync_setting(self, *args):
+        """Zapisuje ustawienie synchronizacji."""
+        self.save_global_config({"sync_scroll": self.sync_scroll_enabled.get()})
+
+    def open_remove_duplicates_dialog(self):
+        if not self.project.subtitle_lines:
+            return messagebox.showinfo("Info", "Brak linii w projekcie.")
+
+        seen = set()
+        duplicates_count = 0
+
+        # Symulacja
+        for line in self.project.subtitle_lines:
+            txt = line.text.strip()
+            if txt in seen:
+                duplicates_count += 1
+            else:
+                seen.add(txt)
+
+        if duplicates_count == 0:
+            return messagebox.showinfo("Duplikaty", "Nie znaleziono duplikatów.")
+
+        if messagebox.askyesno("Usuń duplikaty",
+                               f"Znaleziono {duplicates_count} zduplikowanych linii.\nCzy chcesz je usunąć? (Pozostanie pierwsze wystąpienie)."):
+
+            new_lines = []
+            seen_now = set()
+            for line in self.project.subtitle_lines:
+                txt = line.text.strip()
+                if txt not in seen_now:
+                    new_lines.append(line)
+                    seen_now.add(txt)
+
+            self.project.subtitle_lines = new_lines
+            self.project.save_data()
+            self.refresh_ui()
+            self.set_status(f"Usunięto {duplicates_count} duplikatów.")
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
