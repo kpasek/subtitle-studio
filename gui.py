@@ -13,6 +13,7 @@ import queue
 import webbrowser
 import requests
 import subprocess
+import ctypes
 
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -20,10 +21,10 @@ from tkinter import filedialog, messagebox
 from datetime import datetime
 from customtkinter import CTkFrame, CTkScrollableFrame
 
+from app.pattern_manager import PatternManagerWindow
 from app.settings import SettingsWindow
 from app.utils import apply_remove_patterns, apply_replace_patterns, resource_path, is_installed
 from app.entity import PatternItem
-from app.tooltip import CreateToolTip
 
 from audio.audio_renamer import AudioRenameWindow
 from audio.pattern_editor import PatternEditorWindow
@@ -76,6 +77,15 @@ if not FFPLAY_AVAILABLE:
     print("Ostrzeżenie: Nie znaleziono 'ffplay' w zmiennych środowiskowych (PATH). Odtwarzanie audio będzie niedostępne.")
 
 
+if os.name == "nt":
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 class SubtitleStudioApp(ctk.CTk):
     """
     Main application class for Subtitle Studio.
@@ -121,6 +131,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         self.queue = queue.Queue()
         self.queue_window: Optional[GenerationQueueWindow] = None
+        self.pattern_manager_window: Optional[PatternManagerWindow] = None
 
         self.audio_dir: Optional[Path] = None
         self.selected_line_index: Optional[int] = None
@@ -198,6 +209,8 @@ class SubtitleStudioApp(ctk.CTk):
 
         patterns_menu = tk.Menu(menubar, tearoff=0)
         patterns_menu.add_command(
+            label="Menedżer wzorców...", command=self.open_pattern_manager)
+        patterns_menu.add_command(
             label="Importuj wzorce z CSV", command=self.import_patterns_from_csv)
         patterns_menu.add_command(
             label="Eksportuj wzorce do CSV", command=self.export_patterns_to_csv)
@@ -225,20 +238,14 @@ class SubtitleStudioApp(ctk.CTk):
         root_grid = ctk.CTkFrame(self)
         root_grid.pack(fill="both", expand=True, padx=10, pady=10)
         root_grid.grid_rowconfigure(0, weight=1)
-        # Kolumna 0 (prawy panel) może się rozciągać
         root_grid.grid_columnconfigure(0, weight=1)
-        # Kolumna 1 (środkowy panel) ma mieć stałą szerokość - ustawiamy minimalny rozmiar
-        root_grid.grid_columnconfigure(1, minsize=500)
-        # Kolumna 2 (panel wbudowanych wzorców) nie musi się rozszerzać poziomo
-        root_grid.grid_columnconfigure(2, weight=0)
 
-        # --- Preview & Actions ---
+        # --- Preview & Actions (Right Frame z oryginału, teraz Main Frame) ---
         right = ctk.CTkFrame(root_grid)
         right.grid(row=0, column=0, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(4, weight=1)
 
-        # Stats and Apply button
         stats_frame = ctk.CTkFrame(right)
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         ctk.CTkButton(stats_frame, text="Zastosuj wzorce",
@@ -246,11 +253,10 @@ class SubtitleStudioApp(ctk.CTk):
 
         self.update_button = ctk.CTkButton(stats_frame, text="Nowa wersja!",
                                            command=self._download_update,
-                                           fg_color="#006400", hover_color="#004d00")  # Ciemna zieleń
+                                           fg_color="#006400", hover_color="#004d00")
         self.update_button.pack(side="left", padx=5)
         self.update_button.pack_forget()
-        self.lbl_filename = ctk.CTkLabel(
-            stats_frame, text="Brak wczytanego pliku")
+        self.lbl_filename = ctk.CTkLabel(stats_frame, text="Brak wczytanego pliku")
         self.lbl_filename.pack(side="left", anchor="w", padx=5)
 
         self.lbl_count_orig = ctk.CTkLabel(stats_frame, text="Linie org.: 0")
@@ -264,8 +270,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         # Audio buttons
         audio_btn_frame = ctk.CTkFrame(right)
-        audio_btn_frame.grid(
-            row=2, column=0, sticky="ew", pady=(0, 5), padx=5)  # Row 2
+        audio_btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 5), padx=5)
 
         self.play_button = ctk.CTkButton(audio_btn_frame, text="▶️ Odtwórz", width=80, command=self.play_selected_audio,
                                          state="disabled")
@@ -274,8 +279,7 @@ class SubtitleStudioApp(ctk.CTk):
             self.play_button.configure(state="disabled", text="N/A ffplay")
 
         self.audio_select_var = tk.StringVar(value="(brak plików)")
-        self.audio_select = ctk.CTkOptionMenu(
-            audio_btn_frame, variable=self.audio_select_var, values=["(brak plików)"])
+        self.audio_select = ctk.CTkOptionMenu(audio_btn_frame, variable=self.audio_select_var, values=["(brak plików)"])
         self.audio_select.pack(side="left", padx=(4, 8))
 
         self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
@@ -295,102 +299,41 @@ class SubtitleStudioApp(ctk.CTk):
 
         # Search bar
         search_frame = ctk.CTkFrame(right)
-        search_frame.grid(
-            row=3, column=0, sticky="ew", pady=(0, 5), padx=5)  # Row 3
+        search_frame.grid(row=3, column=0, sticky="ew", pady=(0, 5), padx=5)
         search_frame.grid_columnconfigure(0, weight=1)
 
-        self.search_entry = ctk.CTkEntry(
-            search_frame, placeholder_text="Przeszukaj podgląd")
+        self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Przeszukaj podgląd")
         self.search_entry.grid(row=0, column=0, sticky="ew")
         self.search_entry.bind("<Return>", lambda event: self.apply_patterns())
-        self.search_entry.bind(
-            "<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
+        self.search_entry.bind("<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
 
-        self.search_button = ctk.CTkButton(
-            search_frame, text="Szukaj", command=self.apply_patterns)
+        self.search_button = ctk.CTkButton(search_frame, text="Szukaj", command=self.apply_patterns)
         self.search_button.grid(row=0, column=1, padx=(6, 0))
 
         # Preview Textbox
         self.txt_preview = ctk.CTkTextbox(right)
-        self.txt_preview.grid(
-            row=4, column=0, sticky="nsew", padx=5, pady=(0, 5))  # Row 4
+        self.txt_preview.grid(row=4, column=0, sticky="nsew", padx=5, pady=(0, 5))
         self.txt_preview.configure(state=tk.DISABLED)
-        self.txt_preview.tag_config(
-            "selected_line", background="gray25", foreground="white")
+        self.txt_preview.tag_config("selected_line", background="gray25", foreground="white")
         self.txt_preview.bind("<ButtonRelease-1>", self.on_preview_click)
         self.txt_preview.bind("<Double-Button-1>", self.play_selected_audio)
-        self.txt_preview.bind("<Control-Button-1>",
-                              self.add_replace_pattern_from_selection)
-        self.txt_preview.bind(
-            "<Delete>", self.add_remove_pattern_from_selection)
+        self.txt_preview.bind("<Control-Button-1>", self.add_replace_pattern_from_selection)
+        self.txt_preview.bind("<Delete>", self.add_remove_pattern_from_selection)
         self.txt_preview.configure(cursor="hand2")
 
-        self.center_frame = ctk.CTkFrame(root_grid, width=450)
-        try:
-            self.center_frame.grid_propagate(False)
-        except Exception:
-            pass
-
-        self.center_frame.grid_columnconfigure(0, weight=1)
-        self.center_frame.grid(row=0, column=1, sticky="ns", padx=(0, 10))
-        self.center_frame.grid_rowconfigure(1, weight=1)
-        self.center_frame.grid_rowconfigure(4, weight=1)
-
-        ctk.CTkLabel(self.center_frame, text="Własne wzorce wycinające").grid(
-            row=0, column=0, sticky="w", padx=6)
-        self.custom_remove_frame = ctk.CTkScrollableFrame(self.center_frame)
-        self.custom_remove_frame.grid(
-            row=1, column=0, sticky="nsew", padx=6, pady=(2, 6))
-
-        remove_btn_frame = ctk.CTkFrame(self.center_frame)
-        remove_btn_frame.grid(row=2, column=0, sticky="ew", padx=6, pady=4)
-        remove_btn_frame.grid_columnconfigure(0, weight=1)
-        remove_btn_frame.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkButton(remove_btn_frame, text="Dodaj wzorzec", command=self.open_add_remove_pattern).grid(
-            row=0, column=0, sticky="ew", padx=(0, 2))
-        ctk.CTkButton(remove_btn_frame, text="Wyczyść listę", command=lambda: self._clear_custom_list('remove'),
-                      fg_color="gray").grid(row=0, column=1, sticky="ew", padx=(2, 0))
-
-        replace_top_frame = ctk.CTkFrame(self.center_frame)
-        replace_top_frame.grid(row=3, column=0, sticky="ew", pady=(4, 4))
-        lab_rep = ctk.CTkLabel(replace_top_frame,
-                               text="Własne wzorce podmieniające")
-        lab_rep.pack(side="left", anchor="w", fill="x", expand=False, padx=6)
-
-        self.custom_replace_frame = ctk.CTkScrollableFrame(self.center_frame)
-        self.custom_replace_frame.grid(
-            row=4, column=0, sticky="nsew", padx=6, pady=(2, 6))
-
-        replace_btn_frame = ctk.CTkFrame(self.center_frame)
-        replace_btn_frame.grid(row=5, column=0, sticky="ew", padx=6, pady=4)
-        replace_btn_frame.grid_columnconfigure(0, weight=1)
-        replace_btn_frame.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkButton(replace_btn_frame, text="Dodaj wzorzec", command=self.open_add_replace_pattern).grid(
-            row=0, column=0, sticky="ew", padx=(0, 2))
-        ctk.CTkButton(replace_btn_frame, text="Wyczyść listę", command=lambda: self._clear_custom_list('replace'),
-                      fg_color="gray").grid(row=0, column=1, sticky="ew", padx=(2, 0))
-
-        builtin_frame = ctk.CTkFrame(root_grid, width=MAX_COL_WIDTH)
-        builtin_frame.grid(row=0, column=2, sticky="nsew", padx=(0, 10))
-        builtin_frame.grid_columnconfigure(0, weight=1)
-        builtin_frame.grid_rowconfigure(2, weight=1)
-        builtin_frame.grid_rowconfigure(4, weight=1)
-
-        ctk.CTkLabel(builtin_frame, text="Wbudowane wzorce wycinające").grid(
-            row=1, column=0, sticky="we", padx=6)
-        self._create_builtin_list(
-            builtin_frame, self.builtin_remove, self.builtin_remove_state, 2)
-
-        ctk.CTkLabel(builtin_frame, text="Wbudowane wzorce podmieniające").grid(
-            row=3, column=0, sticky="we", padx=6)
-        self._create_builtin_list(
-            builtin_frame, self.builtin_replace, self.builtin_replace_state, 4)
+        # --- USUNIĘTO: Kod tworzący center_frame (listy custom) oraz builtin_frame (listy builtin) ---
+        # Logika tych ramek została przeniesiona do pattern_manager.py
 
         # --- Status Bar ---
         self.status = ctk.CTkLabel(self, text="Gotowy", anchor="w")
         self.status.pack(fill="x", side="bottom", padx=10, pady=(0, 5))
+
+    def open_pattern_manager(self):
+        """Otwiera lub podnosi okno Menedżera Wzorców."""
+        if self.pattern_manager_window is None or not self.pattern_manager_window.winfo_exists():
+            self.pattern_manager_window = PatternManagerWindow(self)
+        else:
+            self.pattern_manager_window.lift()
 
     def build_clean_list_frame(self, parent_frame, row_nr) -> CTkFrame:
         """Helper to create a standard input frame for patterns."""
@@ -451,22 +394,18 @@ class SubtitleStudioApp(ctk.CTk):
         target_list = self.custom_remove if pattern_type == 'remove' else self.custom_replace
 
         if old_pattern:
-            # Tryb edycji: znajdź stary i zastąp
             try:
                 index = target_list.index(old_pattern)
                 target_list[index] = new_pattern
             except ValueError:
-                # Nie znaleziono (nie powinno się zdarzyć), po prostu dodaj
                 target_list.append(new_pattern)
-                print(
-                    f"Ostrzeżenie: Nie znaleziono wzorca '{old_pattern.pattern}' do edycji. Dodano jako nowy.")
         else:
-            # Tryb dodawania
             target_list.append(new_pattern)
 
-        self._refresh_custom_lists()
         self.mark_as_unsaved()
         self.set_status("Zaktualizowano wzorce.")
+
+        self._refresh_custom_lists()
 
     def add_row(self, frame, pattern_item: PatternItem, target_list: List[PatternItem]):
         """Adds a UI row for a pattern."""
@@ -517,22 +456,19 @@ class SubtitleStudioApp(ctk.CTk):
             lbl.configure(text_color="gray50")
 
     def _clear_custom_list(self, pattern_type: str):
-        """Usuwa wszystkie wzorce z wybranej listy (remove lub replace)."""
+        """Usuwa wszystkie wzorce z wybranej listy."""
         target_list = self.custom_remove if pattern_type == 'remove' else self.custom_replace
         list_name = "wycinających" if pattern_type == 'remove' else "podmieniających"
 
         if not target_list:
-            messagebox.showinfo(
-                "Lista jest pusta", f"Lista wzorców {list_name} jest już pusta.", parent=self)
+            messagebox.showinfo("Lista jest pusta", f"Lista wzorców {list_name} jest już pusta.", parent=self)
             return
 
-        if messagebox.askyesno("Potwierdź",
-                               f"Czy na pewno chcesz usunąć WSZYSTKIE ({len(target_list)}) wzorce z listy '{list_name}'?",
-                               parent=self):
+        if messagebox.askyesno("Potwierdź", f"Czy na pewno usunąć WSZYSTKIE ({len(target_list)}) wzorce?", parent=self):
             target_list.clear()
-            self._refresh_custom_lists()
             self.mark_as_unsaved()
             self.set_status(f"Wyczyszczono listę wzorców {list_name}.")
+            self._refresh_custom_lists()
 
     def load_file(self, path: Optional[str] = None, bypass_save_check: bool = False):
         """Loads a subtitle .txt file."""
@@ -633,6 +569,7 @@ class SubtitleStudioApp(ctk.CTk):
             self.current_project_path = None
             self.project_config = {}
             self.has_unsaved_changes = False
+        self._refresh_custom_lists()
 
     def close_project(self):
         """Closes the current project and restarts."""
@@ -760,24 +697,12 @@ class SubtitleStudioApp(ctk.CTk):
             return lines
 
     def _refresh_custom_lists(self):
-        """Recreates the custom pattern UI lists."""
-        for frame_attr in ['custom_remove_frame', 'custom_replace_frame']:
-            if hasattr(self, frame_attr):
-                widget = getattr(self, frame_attr)
-                if widget:
-                    # Usuń dzieci przed zniszczeniem ramki
-                    for child in widget.winfo_children():
-                        child.destroy()
-                    widget.destroy()
-        self.custom_remove_frame = self.build_scroll_list_frame(
-            self.center_frame, 1)
-        for p in self.custom_remove:
-            self.add_row(self.custom_remove_frame, p, self.custom_remove)
-
-        self.custom_replace_frame = self.build_scroll_list_frame(
-            self.center_frame, 4)  # Poprawiony row
-        for p in self.custom_replace:
-            self.add_row(self.custom_replace_frame, p, self.custom_replace)
+        """
+        Zastępcza metoda: jeśli menedżer jest otwarty, odśwież go.
+        Zachowana nazwa, aby nie psuć wywołań w innych miejscach kodu (np. po wczytaniu projektu).
+        """
+        if self.pattern_manager_window and self.pattern_manager_window.winfo_exists():
+            self.pattern_manager_window.refresh_ui()
 
     def _gather_active_patterns(self) -> tuple[List[PatternItem], List[PatternItem]]:
         """Collects all active built-in and custom patterns."""
@@ -1147,6 +1072,7 @@ class SubtitleStudioApp(ctk.CTk):
                     imported_count += 1
 
             if imported_count > 0:
+                self._refresh_custom_lists()
                 self.mark_as_unsaved()
                 messagebox.showinfo(
                     "Import zakończony", f"Zaimportowano {imported_count} wzorców.")
@@ -1747,6 +1673,7 @@ class SubtitleStudioApp(ctk.CTk):
             self.add_row(self.custom_remove_frame,
                          new_pattern, self.custom_remove)
             self.mark_as_unsaved()
+            self._refresh_custom_lists()
 
             self.set_status(
                 f"Dodano wzorzec wycinający: {escaped_pattern[:30]}...")
