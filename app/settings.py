@@ -94,7 +94,6 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(frame_main, text="...", width=40, command=self.select_start_dir).grid(
             row=0, column=2, sticky="e", padx=10, pady=10)
 
-        # *** NOWA SEKCJA: Wątki konwersji ***
         ctk.CTkLabel(frame_main, text="Procesy konwersji audio:").grid(
             row=1, column=0, sticky="w", padx=10, pady=(0, 10))
 
@@ -216,6 +215,20 @@ class SettingsWindow(ctk.CTkToplevel):
                           values=["blue", "green", "dark-blue"],
                           variable=self.color_theme_var).pack(anchor="w", padx=10, pady=(0, 10))
 
+        ctk.CTkLabel(frame_main, text="Format wyjściowy audio:").grid(
+            row=2, column=0, sticky="w", padx=10, pady=(0, 10))
+
+        self.audio_format_var = tk.StringVar(
+            value=self.master.global_config.get('audio_output_format', 'ogg'))
+
+        format_menu = ctk.CTkOptionMenu(
+            frame_main,
+            variable=self.audio_format_var,
+            values=["ogg", "mp3"]
+        )
+        format_menu.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=(0, 10))
+        CreateToolTip(format_menu, "Format docelowy plików w folderze /ready.", wraplength=300)
+
         # Sekcja 4: Filtry FFmpeg
         ctk.CTkLabel(frame, text="Filtry Audio (FFmpeg)", font=("", 16, "bold")).grid(
             row=5, column=0, columnspan=3, sticky="w", padx=10, pady=(20, 5))
@@ -252,15 +265,6 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(frame, text="Ustawienia Projektu", font=("", 16, "bold")).grid(
             row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 5))
 
-        ctk.CTkLabel(frame, text="Bazowe przyspieszenie:").grid(
-            row=1, column=0, sticky="w", padx=10, pady=10)
-        self.base_speed_var = tk.StringVar(
-            value=str(self.master.project_config.get('base_audio_speed', 1.1)))
-        entry_speed = ctk.CTkEntry(frame, textvariable=self.base_speed_var)
-        entry_speed.grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=10)
-        CreateToolTip(
-            entry_speed, "Domyślna prędkość dla audio.", wraplength=300)
-
         ctk.CTkLabel(frame, text="Aktywny model TTS:").grid(
             row=2, column=0, sticky="w", padx=10, pady=10)
         available_models = ["XTTS", "STylish", "ElevenLabs",
@@ -284,7 +288,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self.ent_xtts_voice_project.grid(
             row=4, column=1, padx=(0, 10), pady=5, sticky="ew")
         self.btn_browse_xtts_voice_project = ctk.CTkButton(frame, text="...", width=30,
-                                                           command=lambda: self.select_voice_file(self.xtts_voice_project_path_var))
+                                                           command=lambda: self.select_voice_file(
+                                                               self.xtts_voice_project_path_var))
         self.btn_browse_xtts_voice_project.grid(
             row=4, column=2, padx=10, pady=5)
 
@@ -349,8 +354,9 @@ class SettingsWindow(ctk.CTkToplevel):
 
             global_data = {
                 'start_directory': self.start_dir_var.get(),
-                'conversion_workers': workers,  # Zapisz liczbę wątków
-                'local_api_url': self.local_api_url_var.get(),  # Zapisz URL API
+                'conversion_workers': workers,
+                'local_api_url': self.local_api_url_var.get(),
+                'audio_output_format': self.audio_format_var.get(),
                 'xtts_voice_path': new_voice_path,
                 'elevenlabs_api_key': self.el_api_key_var.get(),
                 'elevenlabs_voice_id': self.el_voice_id_var.get(),
@@ -380,10 +386,6 @@ class SettingsWindow(ctk.CTkToplevel):
             return  # Sanity check
 
         try:
-            speed_str = self.base_speed_var.get().replace(',', '.')
-            speed = float(speed_str)
-            # set_project_config zapisuje i oznacza zmiany
-            self.master.set_project_config('base_audio_speed', speed)
             self.master.set_project_config(
                 'active_tts_model', self.active_model_var.get())
             self.master.set_project_config(

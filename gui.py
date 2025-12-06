@@ -91,7 +91,7 @@ class SubtitleStudioApp(ctk.CTk):
     Main application class for Subtitle Studio.
     Handles the main window, UI, file operations, project management, and audio interactions.
     """
-    APP_VERSION = "0.9.8"
+    APP_VERSION = "0.9.8.1"
 
     def __init__(self):
         super().__init__()
@@ -188,28 +188,28 @@ class SubtitleStudioApp(ctk.CTk):
         gen_menu.add_command(
             label="Generuj dialogi", command=self.enqueue_generate_all)
         gen_menu.add_command(
-            label="Konwertuj audio na ogg", command=self.enqueue_convert_all)
+            label="Konwertuj audio", command=self.enqueue_convert_all)
 
         gen_menu.add_separator()
 
         gen_menu.add_command(
             label="Dopasuj identyfikatory audio", command=self.open_audio_rename_window)
         gen_menu.add_command(
-            label="Usuń wszystkie przekonwertowane pliki (/ready)", command=self.delete_all_converted_audio)
+            label="Usuń przekonwertowane pliki", command=self.delete_all_converted_audio)
 
         gen_menu.add_separator()
         gen_menu.add_command(
-            label="Pobierz napisy dla Game Reader", command=self.download_clean)
+            label="Pobierz napisy", command=self.download_clean)
         gen_menu.add_command(
-            label="Pobierz napisy dla TTS", command=self.download_replace)
+            label="Pobierz napisy TTS", command=self.download_replace)
         gen_menu.add_command(
-            label="Generuj preset dla Game Reader", command=self.generate_game_reader_preset)
+            label="Generuj preset", command=self.generate_game_reader_preset)
 
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
 
         patterns_menu = tk.Menu(menubar, tearoff=0)
         patterns_menu.add_command(
-            label="Menedżer wzorców...", command=self.open_pattern_manager)
+            label="Menedżer wzorców", command=self.open_pattern_manager)
         patterns_menu.add_command(
             label="Importuj wzorce z CSV", command=self.import_patterns_from_csv)
         patterns_menu.add_command(
@@ -1224,8 +1224,6 @@ class SubtitleStudioApp(ctk.CTk):
             # Dodano mp3
             (self.audio_dir / f"output1 ({identifier}).mp3", False),
             (self.audio_dir / f"output1 ({identifier}).ogg", False),
-            (self.audio_dir / "ready" / f"output1 ({identifier}).ogg", True),
-            (self.audio_dir / "ready" / f"output2 ({identifier}).ogg", True)
         ]
         return [(f, ready) for f, ready in candidates if f.exists()]
 
@@ -1413,11 +1411,6 @@ class SubtitleStudioApp(ctk.CTk):
 
     def _gather_converter_config(self) -> dict:
         """Zbiera ustawienia dla konwertera."""
-        try:
-            base_speed = float(
-                self.project_config.get('base_audio_speed', 1.1))
-        except ValueError:
-            base_speed = 1.1
 
         try:
             default_workers = max(1, os.cpu_count() // # type: ignore
@@ -1430,7 +1423,6 @@ class SubtitleStudioApp(ctk.CTk):
             max_workers = default_workers
 
         return {
-            'base_audio_speed': base_speed,
             'ffmpeg_filters': self.global_config.get('ffmpeg_filters', {}),
             'conversion_workers': max_workers
         }
@@ -1537,49 +1529,41 @@ class SubtitleStudioApp(ctk.CTk):
     def enqueue_convert_all(self):
         """Dodaje zadanie samej konwersji do kolejki."""
         if not self.audio_dir or not self.audio_dir.is_dir():
-            messagebox.showwarning(
-                "Brak katalogu", "Najpierw wybierz katalog audio.", parent=self)
+            messagebox.showwarning("Brak katalogu", "Najpierw wybierz katalog audio.", parent=self)
             return
 
+        # Sprawdź czy to Windows i uruchom EXE
         if os.name == 'nt':
             converter_config = self._gather_converter_config()
             workers = converter_config.get("conversion_workers", 4)
-            speed = converter_config.get("base_audio_speed", 1.1)
             filters = converter_config.get("ffmpeg_filters", {})
+            fmt = converter_config.get("audio_output_format", "ogg")
 
             if getattr(sys, 'frozen', False):
-                exe_path = "converter.exe"  # type: ignore
+                exe_path = "converter.exe"
             else:
-                exe_path = Path(__file__).parent / "audio" / "converter.py"
+                # W trybie dev uruchamiamy python audio/converter.py
+                exe_path = str(Path(__file__).parent / "audio" / "converter.py")
+
             cmd = [
                 exe_path,
                 "--path", str(self.audio_dir),
                 "--workers", str(workers),
-                "--speed", str(speed),
+                "--format", fmt,
                 "--filters", json.dumps(filters)
             ]
 
+            # Jeśli dev mode (nie frozen), musimy dodać 'python' na początek listy
+            if not getattr(sys, 'frozen', False):
+                cmd.insert(0, sys.executable)
+
             try:
-                if sys.platform.startswith("win"):
-                    print(["start", "cmd", "/K"] + cmd)
-                    subprocess.Popen(["start", "cmd", "/K"] + cmd, shell=True)
-                elif sys.platform.startswith("linux"):
-                    # Uruchom w nowym terminalu (Linux – obsługa GNOME/KDE)
-                    term_cmd = shutil.which(
-                        "x-terminal-emulator") or shutil.which("gnome-terminal") or shutil.which("konsole")
-                    if term_cmd:
-                        subprocess.Popen([term_cmd, "--"] + cmd)
-                    else:
-                        subprocess.Popen(cmd)
-                elif sys.platform == "darwin":
-                    # macOS – otwarcie w Terminal.app
-                    subprocess.Popen(["open", "-a", "Terminal.app"] + cmd)
-                else:
-                    subprocess.Popen(cmd)
+                creation_flags = subprocess.CREATE_NEW_CONSOLE
+                subprocess.Popen(cmd, creationflags=creation_flags)
+
                 self.set_status("Rozpoczęto konwersję w nowym procesie.")
             except Exception as e:
-                messagebox.showerror(
-                    "Błąd uruchamiania konwersji", str(e), parent=self)
+                messagebox.showerror("Błąd uruchamiania konwersji", str(e), parent=self)
         else:
             if not self.current_project_path:
                 messagebox.showwarning(

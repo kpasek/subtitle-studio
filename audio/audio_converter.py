@@ -1,10 +1,7 @@
 from pydub import AudioSegment
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import math
 from typing import Dict, Optional, Any, Callable
-import subprocess
-import sys
 import threading
 
 
@@ -130,8 +127,8 @@ class AudioConverter:
                 parameters=export_params
             )
         except Exception as e:
-            # Łapiemy błąd, jeśli pydub/ffmpeg zawiedzie
-            print(f"Błąd FFmpeg/Pydub podczas eksportu do {output_file}: {e}")
+            # Łapiemy błąd, jeśli ffmpeg zawiedzie
+            print(f"Błąd FFmpeg podczas eksportu do {output_file}: {e}")
             # Rzuć błąd dalej, aby parse_ogg i _convert_worker go złapały
             raise e
             

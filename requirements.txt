@@ -3,6 +3,5 @@ nltk
 pillow
 google-cloud-texttospeech
 elevenlabs
-pydub
 requests
 packaging

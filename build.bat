@@ -1,23 +1,61 @@
 @echo off
+echo ========================================================
+echo        Subtitle Studio Build Script (PyInstaller)
+echo ========================================================
 
-set DIST_DIR=dist
-set APP_DIR=SubtitleStudio
-set OLD_DIR=SubtitleStudioOld
-
-REM ---------------------------------------------
-REM Obsługa katalogów dist/SubtitleStudio
-REM ---------------------------------------------
-if exist "%DIST_DIR%\%OLD_DIR%" (
-    echo [INFO] Usuwanie starego katalogu "%DIST_DIR%\%OLD_DIR%"...
-    rmdir /s /q "%DIST_DIR%\%OLD_DIR%"
-)
-
-if exist "%DIST_DIR%\%APP_DIR%" (
-    echo [INFO] Zmienianie nazwy katalogu "%DIST_DIR%\%APP_DIR%" na "%OLD_DIR%"...
-    ren "%DIST_DIR%\%APP_DIR%" "%OLD_DIR%"
+REM --- 1. Konfiguracja Ikony ---
+set "ICON_OPT="
+if exist "icon.ico" (
+    set "ICON_OPT=--icon=icon.ico"
+    echo [INFO] Znaleziono ikone: icon.ico
 ) else (
-    echo [INFO] Brak starego katalogu "%DIST_DIR%\%APP_DIR%" - pomijam zmianę nazwy.
+    if exist "icon.png" (
+        set "ICON_OPT=--icon=icon.png"
+        echo [INFO] Znaleziono ikone: icon.png
+    ) else (
+        echo [WARN] Nie znaleziono icon.ico ani icon.png. Aplikacja bedzie miec domyslna ikone.
+    )
 )
 
-pyinstaller SubtitleStudio.spec
-pyinstaller --onefile --distpath="dist/SubtitleStudio" audio/converter.py
+REM --- 2. Czyszczenie poprzednich buildow ---
+if exist "dist" rmdir /s /q "dist"
+if exist "build" rmdir /s /q "build"
+
+REM --- 3. Budowanie Converter.exe (Tryb konsolowy) ---
+echo.
+echo [1/2] Budowanie converter.exe...
+pyinstaller --noconfirm --onefile --console --name "converter" ^
+    --hidden-import="pydub" ^
+    audio/converter.py
+
+if %ERRORLEVEL% NEQ 0 (
+    echo [BLAD] Nie udalo sie zbudowac converter.exe
+    pause
+    exit /b %ERRORLEVEL%
+)
+
+REM --- 4. Budowanie SubtitleStudio.exe (Tryb okienkowy) ---
+echo.
+echo [2/2] Budowanie Subtitle Studio...
+REM Uzywamy --collect-all dla customtkinter, aby pobrac motywy i pliki json
+pyinstaller --noconfirm --onefile --windowed --name "SubtitleStudio" %ICON_OPT% ^
+    --add-data "assets;assets" ^
+    --collect-all "customtkinter" ^
+    --hidden-import="elevenlabs" ^
+    --hidden-import="google.cloud.texttospeech" ^
+    --hidden-import="pydub" ^
+    gui.py
+
+if %ERRORLEVEL% NEQ 0 (
+    echo [BLAD] Nie udalo sie zbudowac aplikacji.
+    pause
+    exit /b %ERRORLEVEL%
+)
+
+echo.
+echo ========================================================
+echo [SUKCES] Zakonczono. Pliki znajduja sie w folderze dist/
+echo ========================================================
+echo.
+dir "dist\*.exe"
+pause
