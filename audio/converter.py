@@ -9,7 +9,7 @@ from pathlib import Path
 from pydub import AudioSegment
 
 
-def convert_file(input_file: Path, output_file: Path, speed: float, filters: dict):
+def convert_file(input_file: Path, output_file: Path, filters: dict):
     """Konwertuje pojedynczy plik audio do OGG z filtrami FFmpeg."""
 
     filter_list = []
@@ -22,13 +22,10 @@ def convert_file(input_file: Path, output_file: Path, speed: float, filters: dic
                 filter_list.append(f"{f}={params}")
 
     filter_str = ",".join(filter_list)
-    speed_filter = f"atempo={speed}" if speed != 1.0 else ""
-    if filter_str and speed_filter:
-        full_chain = f"{filter_str},{speed_filter}"
-    elif filter_str:
+    if filter_str:
         full_chain = filter_str
     else:
-        full_chain = speed_filter
+        full_chain = ""
 
     cmd = ["ffmpeg", "-i", str(input_file)]
     if full_chain:
@@ -47,7 +44,7 @@ def convert_file(input_file: Path, output_file: Path, speed: float, filters: dic
         print(f"❌ Nieoczekiwany błąd {input_file.name}: {e}")
 
 
-def convert_directory(dir_path: Path, workers: int, speed: float, filters: dict):
+def convert_directory(dir_path: Path, workers: int, filters: dict):
     """Konwertuje wszystkie pliki WAV/MP3 w katalogu."""
     ready_dir = dir_path / "ready"
     ready_dir.mkdir(exist_ok=True)
@@ -60,13 +57,7 @@ def convert_directory(dir_path: Path, workers: int, speed: float, filters: dict)
             out = ready_dir / (f.stem + ".ogg")
             if not out.exists():
                 futures.append(executor.submit(
-                    convert_file, f, out, speed, filters))
-
-            out2 = ready_dir / f"{f.stem.replace('output1', 'output2')}.ogg"
-            if not out2.exists():
-                filters['speed'] = filters.get('speed', speed) * 1.2
-                futures.append(executor.submit(
-                    convert_file, f, out2, speed, filters))
+                    convert_file, f, out, filters))
         concurrent.futures.wait(futures)
 
     print("\n✅ Konwersja zakończona.")
@@ -77,7 +68,6 @@ def main():
     parser = argparse.ArgumentParser(description="Niezależny konwerter audio do OGG.")
     parser.add_argument("--path", help="Ścieżka do pliku lub katalogu.")
     parser.add_argument("--workers", type=int, default=4, help="Liczba wątków dla katalogu.")
-    parser.add_argument("--speed", type=float, default=1.0, help="Mnożnik prędkości audio.")
     parser.add_argument("--filters", type=str, default="{}", help="JSON z konfiguracją filtrów.")
     args = parser.parse_args()
 
@@ -85,9 +75,9 @@ def main():
     filters = json.loads(args.filters) if args.filters else {}
     if path.is_file():
         output = path.with_suffix(".ogg")
-        convert_file(path, output, args.speed, filters)
+        convert_file(path, output, filters)
     elif path.is_dir():
-        convert_directory(path, args.workers, args.speed, filters)
+        convert_directory(path, args.workers, filters)
     else:
         print("Błędna ścieżka:", path)
         sys.exit(1)

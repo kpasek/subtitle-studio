@@ -308,7 +308,6 @@ class GenerationManager:
     def _run_converter(self, audio_dir: Path, config: dict):
         """Uruchamia konwerter audio."""
         try:
-            base_speed = float(config.get('base_audio_speed', 1.1))
             filter_settings = config.get('ffmpeg_filters', {})
 
             default_workers = max(1, os.cpu_count() //  # type: ignore
@@ -316,8 +315,7 @@ class GenerationManager:
             max_workers = int(config.get(
                 'conversion_workers', default_workers))
 
-            converter = AudioConverter(
-                base_speed=base_speed, filter_settings=filter_settings)
+            converter = AudioConverter(filter_settings=filter_settings)
 
             output_dir = audio_dir / "ready"
             os.makedirs(output_dir, exist_ok=True)

@@ -13,13 +13,12 @@ def _convert_worker(task_args):
     Funkcja robocza (top-level) dla puli procesów.
     Tworzy własną instancję konwertera i wywołuje parse_ogg.
     """
-    input_file, output_file, base_speed, filter_settings = task_args
+    input_file, output_file, filter_settings = task_args
 
     print(f"[Worker] Przetwarzam: {input_file} -> {output_file}")
 
     try:
-        converter_instance = AudioConverter(
-            base_speed=base_speed, filter_settings=filter_settings)
+        converter_instance = AudioConverter(filter_settings=filter_settings)
         converter_instance.parse_ogg(input_file, output_file)
         return (input_file, True, None)
     except Exception as e:
@@ -29,41 +28,17 @@ def _convert_worker(task_args):
 
 class AudioConverter:
     """
-    Handles audio conversion, applying speed changes and FFmpeg filters.
+    Handles audio conversion, applying FFmpeg filters.
     """
 
-    def __init__(self, base_speed: float = 1.1, filter_settings: Optional[Dict[str, Any]] = None):
+    def __init__(self, filter_settings: Optional[Dict[str, Any]] = None):
         """
         Initializes the converter.
 
         Args:
-            base_speed: The base speed multiplier for audio (e.g., 1.1).
             filter_settings: A dictionary of filter configurations from global settings.
         """
-        self.base_speed = base_speed
         self.filter_settings = filter_settings if filter_settings is not None else {}
-
-    def calculate_base_speed(self, duration_ms: float) -> float:
-        """
-        Calculates a dynamic speed multiplier based on audio duration.
-        Longer files are sped up slightly more.
-
-        Args:
-            duration_ms: The duration of the audio in milliseconds.
-
-        Returns:
-            The calculated speed multiplier.
-        """
-        duration_sec = duration_ms / 1000
-        if duration_sec < 2:
-            return 1.0
-
-        if duration_sec <= 3:
-            return self.base_speed
-        extra_time = duration_sec - 3
-        multiplier = (0.02 * math.ceil(extra_time / 2))
-        speed_factor = self.base_speed + multiplier
-        return min(speed_factor, self.base_speed * 1.2)
 
     def parse_ogg(self, input_file: str, output_file: str):
         """
@@ -72,7 +47,6 @@ class AudioConverter:
 
         Args:
             input_file: Path to the source audio file.
-            output_file: Path for the 'output1' (base speed) .ogg file.
         """
 
         input_filename = os.path.basename(input_file)
@@ -96,10 +70,8 @@ class AudioConverter:
             else:
                 audio = AudioSegment.from_wav(input_file)
 
-            base_speed = self.calculate_base_speed(len(audio))
-
             if not os.path.exists(output_file):
-                self.export_file(audio, output_file, base_speed)
+                self.export_file(audio, output_file)
 
         except Exception as e:
             print(f"Błąd podczas przetwarzania pliku {input_file}: {e}")
@@ -113,7 +85,7 @@ class AudioConverter:
             # Rzuć błąd dalej, aby _convert_worker go złapał
             raise e
 
-    def export_file(self, audio: AudioSegment, output_file: str, speed: float):
+    def export_file(self, audio: AudioSegment, output_file: str):
         """
         Eksportuje AudioSegment bezpośrednio do finalnego pliku .ogg,
         przekazując filtry i prędkość do FFmpeg za pomocą pydub.
@@ -121,7 +93,6 @@ class AudioConverter:
         Args:
             audio: Obiekt Pydub AudioSegment.
             output_file: Docelowa ścieżka dla pliku .ogg.
-            speed: Mnożnik prędkości (atempo) do zastosowania.
         """
 
         # 1. Budowanie łańcucha filtrów (tak jak wcześniej)
@@ -137,33 +108,17 @@ class AudioConverter:
                     filter_list.append(f"{filter_name}={params}")
 
         filter_str = ",".join(filter_list)
-        speed_filter = f"atempo={speed}" if speed != 1.0 else ""
 
-        if filter_str and speed_filter:
-            final_filter_chain = f"{filter_str},{speed_filter}"
-        elif filter_str:
+        if filter_str:
             final_filter_chain = filter_str
-        elif speed_filter:
-            final_filter_chain = speed_filter
         else:
             final_filter_chain = ""
-
-        # 2. Budowanie listy parametrów dla pydub.export()
-        #    Nie potrzebujemy już 'ffmpeg', '-i', '-y' ani nazwy pliku wyjściowego.
-        #    Pydub zajmie się tym wszystkim.
         export_params = ['-loglevel', 'error']
 
         if final_filter_chain:
             export_params.extend(['-af', final_filter_chain])
-            # Pydub domyślnie użyje libvorbis dla formatu "ogg",
-            # ale możemy być precyzyjni, jeśli filtrujemy.
             export_params.extend(['-c:a', 'libvorbis'])
         else:
-            # Jeśli nie ma filtrów ani zmiany prędkości, pydub
-            # po prostu przekonwertuje do ogg.
-            # Oryginalny kod używał '-c copy' na pliku temp.ogg.
-            # To jest w praktyce równoważne, ale bardziej wydajne,
-            # bo unikamy tworzenia pliku temp.
             pass
 
         # 3. Wykonanie eksportu w jednym kroku
@@ -217,7 +172,7 @@ class AudioConverter:
                 if os.path.exists(output_path_ogg) :
                     continue
 
-                task_args = (input_path, output_path_ogg, self.base_speed, self.filter_settings)
+                task_args = (input_path, output_path_ogg, self.filter_settings)
                 tasks.append(task_args)
 
         if not tasks:
