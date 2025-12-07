@@ -1,15 +1,13 @@
 import customtkinter as ctk
 import tkinter as tk
 
-
-
 class ProcessingSummaryWindow(ctk.CTkToplevel):
     """Okno podsumowania i wyboru opcji przed zatwierdzeniem zmian."""
-    def __init__(self, master, lines_count, changes_count, callback):
+    def __init__(self, master, lines_count, changes_count, manual_edits_count, callback):
         super().__init__(master)
         self.callback = callback
         self.title("Podsumowanie zmian")
-        self.geometry("400x300")
+        self.geometry("400x350")
         self.transient(master)
         self.grab_set()
 
@@ -21,7 +19,8 @@ class ProcessingSummaryWindow(ctk.CTkToplevel):
         # Statystyki
         stats_text = (
             f"Liczba wszystkich linii: {lines_count}\n"
-            f"Linii zmienionych przez wzorce: {changes_count}"
+            f"Linii zmienionych przez wzorce: {changes_count}\n"
+            f"Ręcznie edytowane linie: {manual_edits_count}"
         )
         ctk.CTkLabel(self, text=stats_text, justify="center").pack(pady=10)
 

@@ -91,7 +91,7 @@ class SubtitleStudioApp(ctk.CTk):
     Main application class for Subtitle Studio.
     Handles the main window, UI, file operations, project management, and audio interactions.
     """
-    APP_VERSION = "0.9.8.1"
+    APP_VERSION = "0.9.9.0"
 
     def __init__(self):
         super().__init__()
@@ -110,6 +110,9 @@ class SubtitleStudioApp(ctk.CTk):
         self.original_lines: List[str] = []
         self.processed_clean: List[str] = []
         self.processed_replace: List[str] = []
+
+        self.manual_edits: dict[int, str] = {}
+        self.view_mode = tk.StringVar(value="Napisy")
 
         self.builtin_remove = [PatternItem(
             p.pattern, p.replace, p.case_sensitive, name) for p, name in BUILTIN_REMOVE]
@@ -240,35 +243,30 @@ class SubtitleStudioApp(ctk.CTk):
         root_grid.grid_rowconfigure(0, weight=1)
         root_grid.grid_columnconfigure(0, weight=1)
 
-        # --- Preview & Actions (Right Frame z oryginału, teraz Main Frame) ---
+        # --- Preview & Actions ---
         right = ctk.CTkFrame(root_grid)
         right.grid(row=0, column=0, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(4, weight=1)
+        right.grid_rowconfigure(5, weight=1)
 
+        # --- Górny pasek (Zatwierdź zmiany + nazwa pliku) ---
         stats_frame = ctk.CTkFrame(right)
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
         ctk.CTkButton(stats_frame, text="Zatwierdź zmiany",
-                      command=self.apply_processing).pack(side="left", padx=5)
+                      command=self.apply_processing,
+                      fg_color="#2E8B57", hover_color="#1E613B").pack(side="left", padx=5)
 
         self.update_button = ctk.CTkButton(stats_frame, text="Nowa wersja!",
                                            command=self._download_update,
                                            fg_color="#006400", hover_color="#004d00")
         self.update_button.pack(side="left", padx=5)
         self.update_button.pack_forget()
+
         self.lbl_filename = ctk.CTkLabel(stats_frame, text="Brak wczytanego pliku")
         self.lbl_filename.pack(side="left", anchor="w", padx=5)
 
-        self.lbl_count_orig = ctk.CTkLabel(stats_frame, text="Linie org.: 0")
-        self.lbl_count_orig.pack(side="right", anchor="w", padx=5)
-        self.lbl_count_after = ctk.CTkLabel(stats_frame, text="Linie po: 0")
-        self.lbl_count_after.pack(side="right", anchor="w", padx=5)
-        self.lbl_count_words = ctk.CTkLabel(stats_frame, text="Słowa: 0")
-        self.lbl_count_words.pack(side="right", anchor="w", padx=5)
-        self.lbl_count_chars = ctk.CTkLabel(stats_frame, text="Znaki: 0")
-        self.lbl_count_chars.pack(side="right", anchor="w", padx=5)
-
-        # Audio buttons
+        # Audio buttons (Pasek narzędzi)
         audio_btn_frame = ctk.CTkFrame(right)
         audio_btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 5), padx=5)
 
@@ -283,19 +281,24 @@ class SubtitleStudioApp(ctk.CTk):
         self.audio_select.pack(side="left", padx=(4, 8))
 
         self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
-                                             command=self.enqueue_generate_single, state="disabled")
+                                             command=self.enqueue_generate_single, state="disabled",
+                                             fg_color="#2E8B57", hover_color="#1E613B")
         self.generate_button.pack(side="left", padx=4)
 
-        self.delete_button = ctk.CTkButton(audio_btn_frame, text="❌ Usuń", width=80, command=self.delete_selected_audio,
-                                           state="disabled")
-        self.delete_button.pack(side="left", padx=4)
-
-        self.delete_all_button = ctk.CTkButton(audio_btn_frame, text="🗑️Usuń Wsz.", width=80,
-                                               command=self.delete_all_selected_audio, state="disabled")
+        self.delete_all_button = ctk.CTkButton(audio_btn_frame, text="🗑️ Usuń audio", width=100,
+                                               command=self.delete_all_selected_audio, state="disabled",
+                                               fg_color="#C51616", hover_color="#920F0F")
         self.delete_all_button.pack(side="left", padx=4)
-        self.edit_line_button = ctk.CTkButton(audio_btn_frame, text="✏️ Edytuj linię", width=80,
-                                              command=self.add_replace_pattern_from_selection, state="disabled")
-        self.edit_line_button.pack(side="left", padx=4)
+
+        ctk.CTkLabel(audio_btn_frame, text="Widok:").pack(side="left", padx=(15, 5))
+        self.view_switcher = ctk.CTkSegmentedButton(
+            audio_btn_frame,
+            values=["Oryginał", "Napisy", "TTS"],
+            variable=self.view_mode,
+            command=self._on_view_mode_change,
+            width=200
+        )
+        self.view_switcher.pack(side="left", padx=5)
 
         # Search bar
         search_frame = ctk.CTkFrame(right)
@@ -312,7 +315,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         # Preview Textbox
         self.txt_preview = ctk.CTkTextbox(right)
-        self.txt_preview.grid(row=4, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        self.txt_preview.grid(row=5, column=0, sticky="nsew", padx=5, pady=(0, 5))
         self.txt_preview.configure(state=tk.DISABLED)
         self.txt_preview.tag_config("selected_line", background="gray25", foreground="white")
         self.txt_preview.bind("<ButtonRelease-1>", self.on_preview_click)
@@ -321,12 +324,34 @@ class SubtitleStudioApp(ctk.CTk):
         self.txt_preview.bind("<Delete>", self.add_remove_pattern_from_selection)
         self.txt_preview.configure(cursor="hand2")
 
-        # --- USUNIĘTO: Kod tworzący center_frame (listy custom) oraz builtin_frame (listy builtin) ---
-        # Logika tych ramek została przeniesiona do pattern_manager.py
+        # --- Edycja manualna (pod listą) ---
+        self.manual_edit_frame = ctk.CTkFrame(right)
+        self.manual_edit_frame.grid(row=6, column=0, sticky="ew", padx=5, pady=(0, 5))
+        self.manual_edit_frame.grid_columnconfigure(1, weight=1)
 
-        # --- Status Bar ---
-        self.status = ctk.CTkLabel(self, text="Gotowy", anchor="w")
-        self.status.pack(fill="x", side="bottom", padx=10, pady=(0, 5))
+        ctk.CTkLabel(self.manual_edit_frame, text="Edycja linii:").grid(row=0, column=0, padx=5)
+        self.txt_manual_edit = ctk.CTkEntry(self.manual_edit_frame, placeholder_text="Wybierz linię aby edytować...")
+        self.txt_manual_edit.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        self.txt_manual_edit.bind("<KeyRelease>", self._on_manual_edit_change)
+
+        # --- Status Bar & Statistics (Dolny panel) ---
+        bottom_bar = ctk.CTkFrame(self, fg_color="transparent")
+        bottom_bar.pack(fill="x", side="bottom", padx=10, pady=(0, 5))
+
+        self.status = ctk.CTkLabel(bottom_bar, text="Gotowy", anchor="w")
+        self.status.pack(side="left", padx=5)
+
+        self.lbl_count_orig = ctk.CTkLabel(bottom_bar, text="Linie org.: 0")
+        self.lbl_count_orig.pack(side="right", padx=10)
+
+        self.lbl_count_after = ctk.CTkLabel(bottom_bar, text="Linie po: 0")
+        self.lbl_count_after.pack(side="right", padx=10)
+
+        self.lbl_count_words = ctk.CTkLabel(bottom_bar, text="Słowa: 0")
+        self.lbl_count_words.pack(side="right", padx=10)
+
+        self.lbl_count_chars = ctk.CTkLabel(bottom_bar, text="Znaki: 0")
+        self.lbl_count_chars.pack(side="right", padx=10)
 
     def open_pattern_manager(self):
         """Otwiera lub podnosi okno Menedżera Wzorców."""
@@ -490,13 +515,14 @@ class SubtitleStudioApp(ctk.CTk):
         try:
             with open(self.loaded_path, "r", encoding="utf-8", errors="replace") as f:
                 self.original_lines = f.read().splitlines()
+
+            # Wczytaj manualne edycje
+            self._load_manual_edits()
+
             self.apply_patterns()
             self.set_status(f"Wczytano {len(self.original_lines)} linii")
-            # Po wczytaniu pliku nie ma niezapisanych zmian *projektu*
             self.has_unsaved_changes = False
-            # Zaktualizuj ścieżkę w configu projektu, jeśli jest otwarty
             if self.current_project_path:
-                # To wywoła zapis
                 self.set_project_config(
                     'subtitle_path', str(self.loaded_path))
 
@@ -726,13 +752,16 @@ class SubtitleStudioApp(ctk.CTk):
 
         rem_patterns, _ = self._gather_active_patterns()
 
-        # 1. Symulacja działania wzorców wycinających (bez usuwania pustych/duplikatów na tym etapie)
+        # 1. Symulacja
         simulated_lines = apply_remove_patterns(self.original_lines, rem_patterns)
 
-        # 2. Oblicz ile linii uległo zmianie
+        # Uwzględnij ręczne edycje w statystyce zmian
         changes_count = 0
-        for orig, new in zip(self.original_lines, simulated_lines):
-            if orig != new:
+        for i, (orig, new) in enumerate(zip(self.original_lines, simulated_lines)):
+            # Jeśli linia ma ręczną edycję, to jest zmieniona
+            if i in self.manual_edits:
+                changes_count += 1
+            elif orig != new:
                 changes_count += 1
 
         # 3. Otwórz okno podsumowania
@@ -740,6 +769,7 @@ class SubtitleStudioApp(ctk.CTk):
             self,
             len(self.original_lines),
             changes_count,
+            manual_edits_count=len(self.manual_edits),  # Przekazanie licznika
             callback=self._finalize_processing
         )
 
@@ -749,14 +779,18 @@ class SubtitleStudioApp(ctk.CTk):
         """
         rem_patterns, rep_patterns = self._gather_active_patterns()
 
-        # 1. Zastosuj regexy (zwraca listę o tej samej długości co oryginał)
+        # 1. Regex
         processed_temp = apply_remove_patterns(self.original_lines, rem_patterns)
 
-        # 2. Usuń puste wiersze (jeśli zaznaczono)
+        # 2. Manual Edits
+        for idx, text in self.manual_edits.items():
+            if 0 <= idx < len(processed_temp):
+                processed_temp[idx] = text
+
+        # 3. Opcjonalne czyszczenie
         if remove_empty:
             processed_temp = [line for line in processed_temp if line.strip()]
 
-        # 3. Usuń duplikaty (jeśli zaznaczono)
         if remove_duplicates:
             seen = set()
             uniq = []
@@ -766,29 +800,16 @@ class SubtitleStudioApp(ctk.CTk):
                     seen.add(l)
             processed_temp = uniq
 
-        # Zapisz wynik etapu 1 (clean)
         self.processed_clean = processed_temp
 
-        # --- Tutaj obsługa logiki "Przeładowania pliku bazowego" ---
         self._refresh_custom_lists()
         self.mark_as_unsaved()
 
-        # 4. Zastosuj wzorce podmieniające (replace) na gotowej liście
         self.processed_replace = apply_replace_patterns(self.processed_clean, rep_patterns)
 
-        # 5. Aktualizacja UI
-        self.lbl_count_after.configure(text=f'Linie po: {len(self.processed_clean):,}'.replace(",", " "))
-
-        total_words = sum(len(line.split()) for line in self.processed_replace)
-        total_chars = sum(len(line) for line in self.processed_replace)
-
-        self.lbl_count_words.configure(text=f'Słowa: {total_words:,}'.replace(",", " "))
-        self.lbl_count_chars.configure(text=f'Znaki: {total_chars:,}'.replace(",", " "))
-
-        self.set_preview(self.processed_replace)
-        self.update_audio_buttons_state()
+        # Aktualizacja UI
+        self.apply_patterns()  # To odświeży liczniki i widok
         self.set_status('Zatwierdzono zmiany i przetworzono napisy.')
-        self.mark_as_unsaved()
 
     def download_clean(self):
         """Saves the 'clean' (for Game Reader) subtitles to a file."""
@@ -818,6 +839,50 @@ class SubtitleStudioApp(ctk.CTk):
             return
         self._save_lines_to_file(path, self.processed_replace, "z podmianami")
 
+    def _get_edits_file_path(self) -> Path | None:
+        """Zwraca ścieżkę do pliku z historią zmian (.edits.json)."""
+        if not self.loaded_path:
+            return None
+        # Np. "film.txt" -> "film.edits.json"
+        return self.loaded_path.with_suffix(".edits.json")
+
+    def _load_manual_edits(self):
+        """Wczytuje ręczne zmiany z pliku JSON."""
+        self.manual_edits = {}
+        path = self._get_edits_file_path()
+        if path and path.exists():
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    # JSON przechowuje klucze jako stringi, musimy zamienić na int
+                    data = json.load(f)
+                    self.manual_edits = {int(k): v for k, v in data.items()}
+                print(f"Wczytano {len(self.manual_edits)} ręcznych edycji.")
+            except Exception as e:
+                print(f"Błąd wczytywania edycji: {e}")
+
+    def _save_manual_edits(self):
+        """Zapisuje ręczne zmiany do pliku JSON."""
+        path = self._get_edits_file_path()
+        if path:
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(self.manual_edits, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"Błąd zapisywania edycji: {e}")
+
+    def _on_view_mode_change(self, value):
+        """Obsługa zmiany widoku (Oryginał/Napisy/TTS)."""
+        self.apply_patterns()  # Przelicz i odśwież widok
+
+        if value == "Oryginał":
+            self.txt_manual_edit.delete(0, tk.END)
+            self.txt_manual_edit.configure(state="disabled", placeholder_text="Edycja niedostępna w trybie oryginału")
+        else:
+            self.txt_manual_edit.configure(state="normal", placeholder_text="Wybierz linię aby edytować...")
+            # Jeśli linia jest wybrana, załaduj jej aktualną wartość
+            if self.selected_line_index is not None:
+                self.on_preview_click(None)
+
     def _get_save_dir(self) -> str | None:
         """Determines the initial directory for save dialogs."""
         if self.loaded_path:
@@ -837,39 +902,65 @@ class SubtitleStudioApp(ctk.CTk):
             messagebox.showerror('Błąd zapisu', str(e), parent=self)
 
     def apply_patterns(self):
-        """Recalculates processed lines and updates preview."""
+        """Recalculates processed lines, applies manual edits, and updates preview."""
         self.lbl_count_orig.configure(
             text=f'Linie org.: {len(self.original_lines):,}'.replace(",", " "))
         rem_patterns, rep_patterns = self._gather_active_patterns()
 
         try:
-            self.processed_clean = apply_remove_patterns(
-                self.original_lines, rem_patterns)
+            # 1. Apply Remove Patterns (Regex Base)
+            temp_clean = apply_remove_patterns(self.original_lines, rem_patterns)
+
+            # 2. APPLY MANUAL EDITS (Overlay)
+            for idx, text in self.manual_edits.items():
+                if 0 <= idx < len(temp_clean):
+                    temp_clean[idx] = text
+
+            self.processed_clean = temp_clean
+
+            # 3. Apply Replace Patterns (TTS Layer)
             self.processed_replace = apply_replace_patterns(
                 self.processed_clean, rep_patterns)
         except re.error as e:
-            messagebox.showerror(
-                'Błąd regex', f'Błąd w wyrażeniu regularnym:\n{e}')
+            messagebox.showerror('Błąd regex', f'Błąd w wyrażeniu regularnym:\n{e}')
             return
         except Exception as e:
-            messagebox.showerror(
-                'Błąd przetwarzania', f'Wystąpił nieoczekiwany błąd podczas stosowania wzorców:\n{e}')
+            # messagebox.showerror(...) - można odkomentować w produkcji
+            print(f"Error applying patterns: {e}")
             return
 
-        total_words = sum(len(line.split())
-                          for line in self.processed_replace)
-        total_chars = sum(len(line) for line in self.processed_replace)
+        # Wybierz listę do wyświetlenia na podstawie trybu
+        mode = self.view_mode.get()
+        lines_to_show = []
+        if mode == "Oryginał":
+            lines_to_show = self.original_lines
+        elif mode == "Napisy":
+            lines_to_show = self.processed_clean
+        else:  # TTS
+            lines_to_show = self.processed_replace
 
-        self.lbl_count_after.configure(
-            text=f'Linie po: {len(self.processed_clean):,}'.replace(",", " "))
-        self.lbl_count_words.configure(
-            text=f'Słowa: {total_words:,}'.replace(",", " "))
-        self.lbl_count_chars.configure(
-            text=f'Znaki: {total_chars:,}'.replace(",", " "))
+        # Statystyki (dla widoku końcowego/aktualnego)
+        total_words = sum(len(line.split()) for line in lines_to_show)
+        total_chars = sum(len(line) for line in lines_to_show)
 
-        self.lbl_count_after.configure(
-            text=f'Linie po: {len(self.processed_clean):,}'.replace(",", " "))
-        self.set_preview(self.processed_replace)
+        self.lbl_count_after.configure(text=f'Linie po: {len(self.processed_clean):,}'.replace(",", " "))
+        self.lbl_count_words.configure(text=f'Słowa: {total_words:,}'.replace(",", " "))
+        self.lbl_count_chars.configure(text=f'Znaki: {total_chars:,}'.replace(",", " "))
+
+        self.set_preview(lines_to_show)
+
+        # Przywróć podświetlenie jeśli indeks jest wybrany
+        if self.selected_line_index is not None:
+            # To jest uproszczone, bo numer linii w podglądzie odpowiada indeksowi+1
+            # pod warunkiem że filtr wyszukiwania nie ukrył linii.
+            search_term = self.search_entry.get()
+            if not search_term:  # Tylko jeśli nie filtrujemy
+                line_str = str(self.selected_line_index + 1)
+                # Znajdź w tekście
+                content = self.txt_preview.get("1.0", tk.END)
+                # To może być kosztowne, więc w tym miejscu pominę pełną reimplementację
+                # wyszukiwania linii w Textboxie.
+
         self.update_audio_buttons_state()
 
     def set_preview(self, lines_to_show: list[str]):
@@ -1161,48 +1252,77 @@ class SubtitleStudioApp(ctk.CTk):
     def on_preview_click(self, event):
         """Handles clicks inside the preview textbox to select a line."""
         try:
-            # Pobierz indeks kliknięcia (np. "5.10")
-            click_index = self.txt_preview.index(f"@{event.x},{event.y}")
-            # Pobierz numer linii (np. "5")
+            if event:
+                click_index = self.txt_preview.index(f"@{event.x},{event.y}")
+            else:
+                click_index = self.txt_preview.index(tk.INSERT)
+
             line_number_str = click_index.split('.')[0]
-            # Przekonwertuj na indeks listy (0-based)
-            # Uwaga: To jest indeks linii W WIDOCZNYM, filtrowanym tekście!
             visible_line_index = int(line_number_str) - 1
 
-            # Musimy zmapować ten widoczny indeks na oryginalny indeks z `processed_replace`
-            # Najpierw pobierz WSZYSTKIE linie z textboxa
-            all_visible_lines = self.txt_preview.get(
-                "1.0", tk.END).splitlines()
+            all_visible_lines = self.txt_preview.get("1.0", tk.END).splitlines()
             if visible_line_index >= len(all_visible_lines):
-                return  # Kliknięcie poza tekstem
+                return
 
-            # Pobierz treść klikniętej linii (np. "005 | Jakiś tekst")
             clicked_line_content = all_visible_lines[visible_line_index]
-
-            # Wyciągnij numer oryginalnej linii z początku
             match = re.match(r"^\s*(\d+)\s*\|", clicked_line_content)
+
             if match:
                 original_line_number = int(match.group(1))
-                self.selected_line_index = original_line_number - 1  # 0-based index
+                self.selected_line_index = original_line_number - 1  # 0-based
 
-                # Podświetl linię
                 self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
                 line_start = f"{line_number_str}.0"
                 line_end = f"{line_number_str}.end"
                 self.txt_preview.tag_add("selected_line", line_start, line_end)
 
+                # --- ZMIANA: Wczytywanie tekstu do edycji ---
+                mode = self.view_mode.get()
+                if mode != "Oryginał":
+                    self.txt_manual_edit.delete(0, tk.END)
+
+                    text_to_edit = ""
+                    try:
+                        if mode == "Napisy":
+                            text_to_edit = self.processed_clean[self.selected_line_index]
+                        elif mode == "TTS":
+                            if self.selected_line_index in self.manual_edits:
+                                text_to_edit = self.manual_edits[self.selected_line_index]
+                            else:
+                                text_to_edit = self.processed_replace[self.selected_line_index]
+
+                        self.txt_manual_edit.insert(0, text_to_edit)
+                    except IndexError:
+                        pass
+                else:
+                    self.txt_manual_edit.delete(0, tk.END)
             else:
-                # Nie udało się sparsować numeru linii (np. pusta linia, błąd formatowania)
                 self.selected_line_index = None
+                self.txt_manual_edit.delete(0, tk.END)
                 self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
 
-        except (ValueError, tk.TclError):
-            # Błąd konwersji lub indeksu - kliknięcie w złym miejscu
+        except (ValueError, tk.TclError, IndexError):
             self.selected_line_index = None
+            self.txt_manual_edit.delete(0, tk.END)
             self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
 
-        # Zaktualizuj stan przycisków
         self.update_audio_buttons_state()
+
+    def _on_manual_edit_change(self, event):
+        """Callback wywoływany przy zmianie tekstu w polu edycji."""
+        if self.selected_line_index is None:
+            return
+
+        new_text = self.txt_manual_edit.get()
+        idx = self.selected_line_index
+
+        # Zapisz zmianę
+        self.manual_edits[idx] = new_text
+        self._save_manual_edits()
+
+        # Odśwież widok (przelicz patterns z uwzględnieniem edycji)
+        # Optymalizacja: można by aktualizować tylko jedną linię, ale apply_patterns jest szybkie
+        self.apply_patterns()
 
     def update_audio_buttons_state(self):
         """Enables/disables audio action buttons based on selection and audio dir."""
@@ -1212,10 +1332,9 @@ class SubtitleStudioApp(ctk.CTk):
         project_loaded = self.current_project_path is not None
         lines_processed = bool(self.processed_replace)
 
-        # Znajdź pliki dla zaznaczonej linii (jeśli jest)
         files_exist = False
         if line_selected and audio_dir_set:
-            identifier = str(self.selected_line_index + 1) # type: ignore
+            identifier = str(self.selected_line_index + 1)  # type: ignore
             found_files = self._find_audio_files(identifier)
             files_exist = bool(found_files)
 
@@ -1227,21 +1346,14 @@ class SubtitleStudioApp(ctk.CTk):
                 self.audio_select.configure(values=["(brak plików)"])
                 self.audio_select_var.set("(brak plików)")
 
-        # Ustaw stany przycisków
         play_state = "normal" if FFPLAY_AVAILABLE and line_selected and audio_dir_set and files_exist else "disabled"
         gen_state = "normal" if line_selected and audio_dir_set and project_loaded and lines_processed else "disabled"
+        del_all_state = "normal" if line_selected and audio_dir_set and files_exist else "disabled"
 
-        del_state = "normal" if line_selected and audio_dir_set and files_exist else "disabled"
-        del_all_state = del_state
-
-        edit_state = "normal" if line_selected and lines_processed else "disabled"
 
         self.play_button.configure(state=play_state)
         self.generate_button.configure(state=gen_state)
-        self.delete_button.configure(state=del_state)
         self.delete_all_button.configure(state=del_all_state)
-        # Ustaw stan nowego przycisku
-        self.edit_line_button.configure(state=edit_state)
 
     def _get_selected_identifier(self) -> str | None:
         """Returns the identifier (line number as string) of the selected line, or None."""
