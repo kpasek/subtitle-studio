@@ -45,8 +45,14 @@ except ImportError:
     PACKAGING_AVAILABLE = False
     print("Ostrzeżenie: Biblioteka 'packaging' nie jest zainstalowana.")
 
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
+APP_CONFIG = os.path.join(application_path, "config.json")
+
 APP_TITLE = "Subtitle Studio"
-APP_CONFIG = Path.cwd() / ".subtitle_studio_config.json"
 
 BUILTIN_REMOVE = [
     (PatternItem(r"^\[[^\]]*\]+$", "", False), "Usuń całe linie [.*]"),
@@ -93,6 +99,7 @@ class SubtitleStudioApp(ctk.CTk):
         super().__init__()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.has_unsaved_changes = False
+        self.global_config = {}
 
         self.title(APP_TITLE)
         self.geometry("1700x1000")
@@ -102,12 +109,12 @@ class SubtitleStudioApp(ctk.CTk):
         except Exception:
             pass
 
+        self._load_app_config(only_config=True)
+
         self.loaded_path: Optional[Path] = None
         self.original_lines: List[str] = []
         self.processed_clean: List[str] = []
         self.processed_replace: List[str] = []
-
-        self._load_app_config(only_config=True)
 
         # Przechowuje zmiany dla warstwy "Napisy" (czyszczone)
         self.manual_edits: dict[int, str] = {}
@@ -132,7 +139,6 @@ class SubtitleStudioApp(ctk.CTk):
 
         self.current_project_path: Optional[Path] = None
         self.project_config = {}
-        self.global_config = {}
         self.torch_installed = is_installed('torch')
 
         self.queue = queue.Queue()
@@ -932,18 +938,16 @@ class SubtitleStudioApp(ctk.CTk):
         return current_cfg
 
     def _load_app_config(self, only_config=False):
-        if APP_CONFIG.exists():
-            try:
-                with open(APP_CONFIG, "r", encoding="utf-8") as f:
-                    self.global_config = json.load(f)
-                    if only_config: return
-                last_proj = self.global_config.get('last_project')
-                if last_proj and Path(last_proj).exists():
-                    self.open_project(last_proj)
-                self.global_config.setdefault('appearance_mode', 'System')
-                self.global_config.setdefault('color_theme', 'blue')
-            except Exception as e:
-                print(f"Błąd konfiguracji: {e}")
+        if os.path.exists(APP_CONFIG):
+            if os.path.exists(APP_CONFIG):
+                try:
+                    with open(APP_CONFIG, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    self.global_config = cfg
+                except Exception as e:
+                    print(f"Błąd wczytywania configu: {e}")
+                    self.global_config = {}  # Fallback w razie błędu odczytu
+            else:
                 self.global_config = {}
 
     def save_app_setting(self, param, value):
