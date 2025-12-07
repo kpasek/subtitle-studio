@@ -5,12 +5,12 @@ echo ========================================================
 
 REM --- 1. Konfiguracja Ikony ---
 set "ICON_OPT="
-if exist "icon.ico" (
-    set "ICON_OPT=--icon=icon.ico"
+if exist "assets\icon512.ico" (
+    set "ICON_OPT=--icon=assets\icon512.ico"
     echo [INFO] Znaleziono ikone: icon.ico
 ) else (
-    if exist "icon.png" (
-        set "ICON_OPT=--icon=icon.png"
+    if exist "assets/icon512.png" (
+        set "ICON_OPT=--icon=assets/icon512.png"
         echo [INFO] Znaleziono ikone: icon.png
     ) else (
         echo [WARN] Nie znaleziono icon.ico ani icon.png. Aplikacja bedzie miec domyslna ikone.

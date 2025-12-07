@@ -1424,7 +1424,8 @@ class SubtitleStudioApp(ctk.CTk):
 
         return {
             'ffmpeg_filters': self.global_config.get('ffmpeg_filters', {}),
-            'conversion_workers': max_workers
+            'conversion_workers': max_workers,
+            'audio_output_format': self.global_config.get('audio_output_format', 'ogg')
         }
 
     def _prepare_job_dependencies(self) -> bool:
