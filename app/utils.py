@@ -25,15 +25,14 @@ def compile_pattern(pat: PatternItem) -> re.Pattern:
 def apply_remove_patterns(lines: List[str], patterns: List[PatternItem]) -> List[str]:
     """
     Applies 'remove' patterns to a list of lines.
-    Lines that are empty after substitution are removed.
-    Duplicates are also removed.
+    Does NOT automatically remove empty lines or duplicates anymore.
 
     Args:
         lines: The list of original subtitle lines.
         patterns: A list of PatternItems to apply.
 
     Returns:
-        A new list of processed, unique, non-empty lines.
+        A new list of processed lines (regex applied only).
     """
     try:
         compiled = [compile_pattern(p) for p in patterns]
@@ -46,15 +45,9 @@ def apply_remove_patterns(lines: List[str], patterns: List[PatternItem]) -> List
         s = line
         for i, pat in enumerate(patterns):
             s = compiled[i].sub(pat.replace, s)
-        if s.strip():
-            out.append(s)
-    seen = set()
-    uniq = []
-    for l in out:
-        if l not in seen:
-            uniq.append(l)
-            seen.add(l)
-    return uniq
+        out.append(s)
+
+    return out
 
 
 def resource_path(relative_path: str) -> str:

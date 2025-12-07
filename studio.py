@@ -18,7 +18,6 @@ import ctypes
 from pathlib import Path
 from typing import List, Optional, Tuple
 from tkinter import filedialog, messagebox
-from datetime import datetime
 from customtkinter import CTkFrame, CTkScrollableFrame
 
 from app.pattern_manager import PatternManagerWindow
@@ -31,6 +30,7 @@ from audio.pattern_editor import PatternEditorWindow
 from audio.deleter import AudioDeleterWindow
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from audio.generation_queue import GenerationQueueWindow
+from ui.processing_summary import ProcessingSummaryWindow
 
 try:
     from packaging import version
@@ -248,7 +248,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         stats_frame = ctk.CTkFrame(right)
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        ctk.CTkButton(stats_frame, text="Zastosuj wzorce",
+        ctk.CTkButton(stats_frame, text="Zatwierdź zmiany",
                       command=self.apply_processing).pack(side="left", padx=5)
 
         self.update_button = ctk.CTkButton(stats_frame, text="Nowa wersja!",
@@ -717,67 +717,77 @@ class SubtitleStudioApp(ctk.CTk):
         return remove_patterns, replace_patterns
 
     def apply_processing(self):
-        """Applies all active patterns to the loaded subtitles."""
+        """
+        Otwiera okno podsumowania zmian przed ich faktycznym zastosowaniem.
+        """
         if not self.original_lines:
-            messagebox.showwarning(
-                'Brak pliku', 'Najpierw wczytaj plik z napisami.')
+            messagebox.showwarning('Brak pliku', 'Najpierw wczytaj plik z napisami.')
             return
 
         rem_patterns, _ = self._gather_active_patterns()
-        old_path = self.current_project_path
-        new_name = f"{old_path.stem}_{datetime.now().strftime('%Y%m%d')}{self.loaded_path.suffix}" # type: ignore
 
-        if rem_patterns and self.loaded_path:
-            msg = (
-                "Wykryto aktywne wzorce wycinające.\n\n"
-                "Czy chcesz 'przeładować' plik z napisami?\n\n"
-                "TAK:\n"
-                "1. Zostaną zastosowane wzorce wycinające.\n"
-                f"2. Wynik zostanie zapisany jako nowy plik (np. {new_name}).\n"
-                "3. Nowy plik stanie się bazowym plikiem projektu.\n"
-                "4. Wszystkie wzorce wycinające zostaną wyłączone.\n"
-                "NIE:\n"
-                "Wzorce (wycinające i podmieniające) zostaną zastosowane tylko do podglądu, "
-                "plik bazowy się nie zmieni (standardowe działanie)."
-            )
+        # 1. Symulacja działania wzorców wycinających (bez usuwania pustych/duplikatów na tym etapie)
+        simulated_lines = apply_remove_patterns(self.original_lines, rem_patterns)
 
-            if messagebox.askyesno("Przeładować plik bazowy?", msg, parent=self):
-                try:
-                    # 1. Zastosuj tylko wzorce wycinające
-                    temp_clean_lines = apply_remove_patterns(
-                        self.original_lines, rem_patterns)
+        # 2. Oblicz ile linii uległo zmianie
+        changes_count = 0
+        for orig, new in zip(self.original_lines, simulated_lines):
+            if orig != new:
+                changes_count += 1
 
-                    # 2. Wygeneruj nową nazwę i zapisz
+        # 3. Otwórz okno podsumowania
+        ProcessingSummaryWindow(
+            self,
+            len(self.original_lines),
+            changes_count,
+            callback=self._finalize_processing
+        )
 
-                    new_path = old_path.with_name(new_name) # type: ignore
+    def _finalize_processing(self, remove_empty: bool, remove_duplicates: bool):
+        """
+        Faktyczne zastosowanie zmian wywołane przez okno podsumowania.
+        """
+        rem_patterns, rep_patterns = self._gather_active_patterns()
 
-                    # Zapisz plik BEZ pokazywania okienka z _save_lines_to_file
-                    with open(new_path, 'w', encoding='utf-8') as f:
-                        f.write('\n'.join(temp_clean_lines))
-                    print(f"Zapisano przeładowane napisy: {new_path}")
+        # 1. Zastosuj regexy (zwraca listę o tej samej długości co oryginał)
+        processed_temp = apply_remove_patterns(self.original_lines, rem_patterns)
 
-                    # 4. Wyłącz wszystkie wzorce wycinające
-                    for var in self.builtin_remove_state:
-                        var.set(False)
-                    for p in self.custom_remove:
-                        p.enabled = False
+        # 2. Usuń puste wiersze (jeśli zaznaczono)
+        if remove_empty:
+            processed_temp = [line for line in processed_temp if line.strip()]
 
-                    # Odśwież UI wzorców
-                    self._refresh_custom_lists()
-                    self.mark_as_unsaved()
+        # 3. Usuń duplikaty (jeśli zaznaczono)
+        if remove_duplicates:
+            seen = set()
+            uniq = []
+            for l in processed_temp:
+                if l not in seen:
+                    uniq.append(l)
+                    seen.add(l)
+            processed_temp = uniq
 
-                    # 3. & 5. Załaduj nowy plik (to wywoła apply_patterns)
-                    self.load_file(str(new_path), bypass_save_check=True)
-                    self.set_status(f"Przeładowano plik na: {new_path.name}")
+        # Zapisz wynik etapu 1 (clean)
+        self.processed_clean = processed_temp
 
-                except Exception as e:
-                    messagebox.showerror(
-                        "Błąd przeładowania", f"Nie udało się przeładować pliku: {e}")
-                return
+        # --- Tutaj obsługa logiki "Przeładowania pliku bazowego" ---
+        self._refresh_custom_lists()
+        self.mark_as_unsaved()
 
-        self.apply_patterns()  # To zaktualizuje processed_clean i processed_replace
+        # 4. Zastosuj wzorce podmieniające (replace) na gotowej liście
+        self.processed_replace = apply_replace_patterns(self.processed_clean, rep_patterns)
 
-        self.set_status('Przetworzono napisy — gotowe do pobrania')
+        # 5. Aktualizacja UI
+        self.lbl_count_after.configure(text=f'Linie po: {len(self.processed_clean):,}'.replace(",", " "))
+
+        total_words = sum(len(line.split()) for line in self.processed_replace)
+        total_chars = sum(len(line) for line in self.processed_replace)
+
+        self.lbl_count_words.configure(text=f'Słowa: {total_words:,}'.replace(",", " "))
+        self.lbl_count_chars.configure(text=f'Znaki: {total_chars:,}'.replace(",", " "))
+
+        self.set_preview(self.processed_replace)
+        self.update_audio_buttons_state()
+        self.set_status('Zatwierdzono zmiany i przetworzono napisy.')
         self.mark_as_unsaved()
 
     def download_clean(self):

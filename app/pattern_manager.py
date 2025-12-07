@@ -5,7 +5,7 @@ from typing import List,  TYPE_CHECKING
 from app.entity import PatternItem
 
 if TYPE_CHECKING:
-    from gui import SubtitleStudioApp
+    from studio import SubtitleStudioApp
 
 
 class PatternManagerWindow(ctk.CTkToplevel):

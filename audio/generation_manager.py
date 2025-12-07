@@ -186,7 +186,7 @@ class GenerationManager:
         for callback in self._observers_progress:
             callback(-1, -1, message)
 
-    # --- Logika wykonywania zadań (przeniesiona z gui.py) ---
+    # --- Logika wykonywania zadań (przeniesiona z studio.py) ---
 
     def _execute_tts_job(self, job: GenerationJob):
         """Wykonuje pełne zadanie generowania TTS."""

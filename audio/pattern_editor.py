@@ -7,7 +7,7 @@ import re
 from app.entity import PatternItem
 
 if TYPE_CHECKING:
-    from gui import SubtitleStudioApp
+    from studio import SubtitleStudioApp
 
 
 class PatternEditorWindow(ctk.CTkToplevel):

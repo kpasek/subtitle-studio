@@ -44,7 +44,7 @@ pyinstaller --noconfirm --onefile --windowed --name "SubtitleStudio" %ICON_OPT% 
     --hidden-import="elevenlabs" ^
     --hidden-import="google.cloud.texttospeech" ^
     --hidden-import="pydub" ^
-    gui.py
+    studio.py
 
 if %ERRORLEVEL% NEQ 0 (
     echo [BLAD] Nie udalo sie zbudowac aplikacji.
