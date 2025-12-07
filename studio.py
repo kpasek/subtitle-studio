@@ -31,6 +31,8 @@ from audio.deleter import AudioDeleterWindow
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from audio.generation_queue import GenerationQueueWindow
 from ui.processing_summary import ProcessingSummaryWindow
+from app.editor import LineEditor
+from ui.menu import AppMenu
 
 try:
     from packaging import version
@@ -145,7 +147,9 @@ class SubtitleStudioApp(ctk.CTk):
 
         self._load_app_config(only_config=True)
         self.apply_theme_settings()
-        self._create_menu()
+
+        AppMenu(self).create()
+
         self._create_widgets()
         self._load_app_config()
         self.check_queue()
@@ -160,82 +164,6 @@ class SubtitleStudioApp(ctk.CTk):
                 self.set_status(
                     f"{self.status.cget('text')} (niezapisane zmiany)")
 
-    def _create_menu(self):
-        """Creates the main application menu bar."""
-        menubar = tk.Menu(self)
-
-        config_menu = tk.Menu(menubar, tearoff=0)
-        config_menu.add_command(
-            label="Otwórz projekt (.json)", command=self.open_project)
-        config_menu.add_command(label="Zapisz projekt",
-                                command=self.save_project)
-        config_menu.add_command(label="Zapisz jako",
-                                command=self.save_project_as)
-        config_menu.add_separator()
-        config_menu.add_command(label="Zamknij projekt",
-                                command=self.close_project)
-        config_menu.add_separator()
-        config_menu.add_command(label="Zamknij", command=self.on_close)
-        menubar.add_cascade(label="Projekt", menu=config_menu)
-
-        gen_menu = tk.Menu(menubar, tearoff=0)
-        gen_menu.add_command(
-            label="Wczytaj napisy", command=self.load_file)
-
-        gen_menu.add_command(
-            label="Wybierz katalog audio", command=self.choose_audio_dir)
-
-        gen_menu.add_separator()
-        gen_menu.add_command(
-            label="Pokaż kolejkę zadań", command=self.show_generation_queue)
-        gen_menu.add_command(
-            label="Generuj dialogi", command=self.enqueue_generate_all)
-        gen_menu.add_command(
-            label="Konwertuj audio", command=self.enqueue_convert_all)
-
-        gen_menu.add_separator()
-
-        gen_menu.add_command(
-            label="Dopasuj identyfikatory audio", command=self.open_audio_rename_window)
-        gen_menu.add_command(
-            label="Usuń przekonwertowane pliki", command=self.delete_all_converted_audio)
-
-        gen_menu.add_separator()
-        gen_menu.add_command(
-            label="Pobierz napisy", command=self.download_clean)
-        gen_menu.add_command(
-            label="Pobierz napisy TTS", command=self.download_replace)
-        gen_menu.add_command(
-            label="Generuj preset", command=self.generate_game_reader_preset)
-
-        menubar.add_cascade(label="Dialogi", menu=gen_menu)
-
-        patterns_menu = tk.Menu(menubar, tearoff=0)
-        patterns_menu.add_command(
-            label="Menedżer wzorców", command=self.open_pattern_manager)
-        patterns_menu.add_command(
-            label="Importuj wzorce z CSV", command=self.import_patterns_from_csv)
-        patterns_menu.add_command(
-            label="Eksportuj wzorce do CSV", command=self.export_patterns_to_csv)
-        patterns_menu.add_separator()
-        patterns_menu.add_command(
-            label="Usuwanie dialogów", command=self.open_audio_deleter)
-        menubar.add_cascade(label="Wzorce", menu=patterns_menu)
-
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        settings_menu.add_command(
-            label="Ustawienia aplikacji", command=self.open_global_settings)
-        settings_menu.add_command(
-            label="Ustawienia projektu", command=self.open_project_settings)
-        menubar.add_cascade(label="Ustawienia", menu=settings_menu)
-
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="O programie",
-                              command=self.show_about_window)
-        menubar.add_cascade(label="Pomoc", menu=help_menu)
-
-        self.config(menu=menubar)
-
     def _create_widgets(self):
         """Creates and places all main UI widgets in the window."""
         root_grid = ctk.CTkFrame(self)
@@ -249,13 +177,23 @@ class SubtitleStudioApp(ctk.CTk):
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(5, weight=1)
 
-        # --- Górny pasek (Zatwierdź zmiany + nazwa pliku) ---
+        # --- Górny pasek (Zatwierdź zmiany + Widok + Nazwa pliku) ---
         stats_frame = ctk.CTkFrame(right)
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
         ctk.CTkButton(stats_frame, text="Zatwierdź zmiany",
                       command=self.apply_processing,
                       fg_color="#2E8B57", hover_color="#1E613B").pack(side="left", padx=5)
+
+        ctk.CTkLabel(stats_frame, text="Widok:").pack(side="left", padx=(15, 5))
+        self.view_switcher = ctk.CTkSegmentedButton(
+            stats_frame,
+            values=["Oryginał", "Napisy", "TTS"],
+            variable=self.view_mode,
+            command=self._on_view_mode_change,
+            width=200
+        )
+        self.view_switcher.pack(side="left", padx=5)
 
         self.update_button = ctk.CTkButton(stats_frame, text="Nowa wersja!",
                                            command=self._download_update,
@@ -290,16 +228,6 @@ class SubtitleStudioApp(ctk.CTk):
                                                fg_color="#C51616", hover_color="#920F0F")
         self.delete_all_button.pack(side="left", padx=4)
 
-        ctk.CTkLabel(audio_btn_frame, text="Widok:").pack(side="left", padx=(15, 5))
-        self.view_switcher = ctk.CTkSegmentedButton(
-            audio_btn_frame,
-            values=["Oryginał", "Napisy", "TTS"],
-            variable=self.view_mode,
-            command=self._on_view_mode_change,
-            width=200
-        )
-        self.view_switcher.pack(side="left", padx=5)
-
         # Search bar
         search_frame = ctk.CTkFrame(right)
         search_frame.grid(row=3, column=0, sticky="ew", pady=(0, 5), padx=5)
@@ -324,15 +252,8 @@ class SubtitleStudioApp(ctk.CTk):
         self.txt_preview.bind("<Delete>", self.add_remove_pattern_from_selection)
         self.txt_preview.configure(cursor="hand2")
 
-        # --- Edycja manualna (pod listą) ---
-        self.manual_edit_frame = ctk.CTkFrame(right)
-        self.manual_edit_frame.grid(row=6, column=0, sticky="ew", padx=5, pady=(0, 5))
-        self.manual_edit_frame.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(self.manual_edit_frame, text="Edycja linii:").grid(row=0, column=0, padx=5)
-        self.txt_manual_edit = ctk.CTkEntry(self.manual_edit_frame, placeholder_text="Wybierz linię aby edytować...")
-        self.txt_manual_edit.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-        self.txt_manual_edit.bind("<KeyRelease>", self._on_manual_edit_change)
+        self.editor = LineEditor(right, on_save_callback=self.on_manual_edit_save)
+        self.editor.grid(row=6, column=0, sticky="ew", padx=5, pady=(0, 5))
 
         # --- Status Bar & Statistics (Dolny panel) ---
         bottom_bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -874,14 +795,13 @@ class SubtitleStudioApp(ctk.CTk):
         """Obsługa zmiany widoku (Oryginał/Napisy/TTS)."""
         self.apply_patterns()  # Przelicz i odśwież widok
 
-        if value == "Oryginał":
-            self.txt_manual_edit.delete(0, tk.END)
-            self.txt_manual_edit.configure(state="disabled", placeholder_text="Edycja niedostępna w trybie oryginału")
-        else:
-            self.txt_manual_edit.configure(state="normal", placeholder_text="Wybierz linię aby edytować...")
-            # Jeśli linia jest wybrana, załaduj jej aktualną wartość
-            if self.selected_line_index is not None:
-                self.on_preview_click(None)
+        if self.selected_line_index is not None:
+            # Odśwież zawartość edytora dla nowej linii/widoku
+            self.on_preview_click(None)
+
+        # Jeśli nic nie jest wybrane, wyczyść
+        if self.selected_line_index is None:
+            self.editor.clear()
 
     def _get_save_dir(self) -> str | None:
         """Determines the initial directory for save dialogs."""
@@ -911,21 +831,25 @@ class SubtitleStudioApp(ctk.CTk):
             # 1. Apply Remove Patterns (Regex Base)
             temp_clean = apply_remove_patterns(self.original_lines, rem_patterns)
 
-            # 2. APPLY MANUAL EDITS (Overlay)
+            # 2. APPLY MANUAL EDITS (Overlay on CLEAN/BASE layer)
             for idx, text in self.manual_edits.items():
                 if 0 <= idx < len(temp_clean):
                     temp_clean[idx] = text
 
             self.processed_clean = temp_clean
 
-            # 3. Apply Replace Patterns (TTS Layer)
+            # 3. Apply Replace Patterns (TTS Layer generation)
             self.processed_replace = apply_replace_patterns(
                 self.processed_clean, rep_patterns)
+
+            for idx, text in self.manual_edits.items():
+                if 0 <= idx < len(self.processed_replace):
+                    self.processed_replace[idx] = text
+
         except re.error as e:
             messagebox.showerror('Błąd regex', f'Błąd w wyrażeniu regularnym:\n{e}')
             return
         except Exception as e:
-            # messagebox.showerror(...) - można odkomentować w produkcji
             print(f"Error applying patterns: {e}")
             return
 
@@ -951,15 +875,10 @@ class SubtitleStudioApp(ctk.CTk):
 
         # Przywróć podświetlenie jeśli indeks jest wybrany
         if self.selected_line_index is not None:
-            # To jest uproszczone, bo numer linii w podglądzie odpowiada indeksowi+1
-            # pod warunkiem że filtr wyszukiwania nie ukrył linii.
             search_term = self.search_entry.get()
-            if not search_term:  # Tylko jeśli nie filtrujemy
+            if not search_term:
                 line_str = str(self.selected_line_index + 1)
-                # Znajdź w tekście
-                content = self.txt_preview.get("1.0", tk.END)
-                # To może być kosztowne, więc w tym miejscu pominę pełną reimplementację
-                # wyszukiwania linii w Textboxie.
+                # Opcjonalnie: logika scrollowania do wybranej linii
 
         self.update_audio_buttons_state()
 
@@ -1276,53 +1195,36 @@ class SubtitleStudioApp(ctk.CTk):
                 line_end = f"{line_number_str}.end"
                 self.txt_preview.tag_add("selected_line", line_start, line_end)
 
-                # --- ZMIANA: Wczytywanie tekstu do edycji ---
                 mode = self.view_mode.get()
-                if mode != "Oryginał":
-                    self.txt_manual_edit.delete(0, tk.END)
+                text_to_edit = ""
+                read_only = (mode == "Oryginał")
 
-                    text_to_edit = ""
+                if not read_only:
                     try:
                         if mode == "Napisy":
                             text_to_edit = self.processed_clean[self.selected_line_index]
                         elif mode == "TTS":
+                            # Jeśli jest w manual edits, to weź stamtąd, inaczej z przetworzonych
                             if self.selected_line_index in self.manual_edits:
                                 text_to_edit = self.manual_edits[self.selected_line_index]
                             else:
                                 text_to_edit = self.processed_replace[self.selected_line_index]
-
-                        self.txt_manual_edit.insert(0, text_to_edit)
                     except IndexError:
                         pass
-                else:
-                    self.txt_manual_edit.delete(0, tk.END)
+
+                self.editor.set_content(text_to_edit, read_only=read_only)
+
             else:
                 self.selected_line_index = None
-                self.txt_manual_edit.delete(0, tk.END)
+                self.editor.clear()
                 self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
 
         except (ValueError, tk.TclError, IndexError):
             self.selected_line_index = None
-            self.txt_manual_edit.delete(0, tk.END)
+            self.editor.clear()
             self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
 
         self.update_audio_buttons_state()
-
-    def _on_manual_edit_change(self, event):
-        """Callback wywoływany przy zmianie tekstu w polu edycji."""
-        if self.selected_line_index is None:
-            return
-
-        new_text = self.txt_manual_edit.get()
-        idx = self.selected_line_index
-
-        # Zapisz zmianę
-        self.manual_edits[idx] = new_text
-        self._save_manual_edits()
-
-        # Odśwież widok (przelicz patterns z uwzględnieniem edycji)
-        # Optymalizacja: można by aktualizować tylko jedną linię, ale apply_patterns jest szybkie
-        self.apply_patterns()
 
     def update_audio_buttons_state(self):
         """Enables/disables audio action buttons based on selection and audio dir."""
@@ -1998,6 +1900,23 @@ class SubtitleStudioApp(ctk.CTk):
             self.update_button.pack(side="left", padx=5)
             # Przesuń lbl_filename na lewo od przycisków po prawej
             self.lbl_filename.pack_configure(side="left", anchor="w", padx=5)
+
+    def on_manual_edit_save(self, new_text: str):
+        """
+        Callback wywoływany przez LineEditor po zakończeniu edycji (FocusOut/Enter).
+        """
+        if self.selected_line_index is None:
+            return
+
+        idx = self.selected_line_index
+        print(f"Zapisuję ręczną edycję dla linii {idx + 1}: {new_text}")
+
+        # Zapisz zmianę
+        self.manual_edits[idx] = new_text
+        self._save_manual_edits()
+
+        # Odśwież widok
+        self.apply_patterns()
 
     def _download_update(self):
         """Otwiera przeglądarkę z linkiem do pobrania nowej wersji."""
