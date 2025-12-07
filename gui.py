@@ -911,7 +911,7 @@ class SubtitleStudioApp(ctk.CTk):
 
     def generate_game_reader_preset(self):
         """
-        Generates a folder structure and config file (clean.json)
+        Generates a folder structure and config file (preset.json)
         compatible with the "Game Reader" application.
         """
         if not self.processed_clean:
@@ -947,10 +947,16 @@ class SubtitleStudioApp(ctk.CTk):
             parent=self
         )
 
-        # 3. Load template clean.json (z pliku dostarczonego przez użytkownika)
+        # 3. Load template preset.json (ZAKTUALIZOWANY WZORZEC)
         preset_template = {
-            "monitor": {"top": 900, "left": 375, "width": 1170, "height": 120},
+            "monitor": {
+                "top": 900,
+                "left": 375,
+                "width": 1170,
+                "height": 120
+            },
             "resolution": "1920x1080",
+            "selected_screen_monitor": 1,
             "CENTER_LINE_MARGIN": 100,
             "CENTER_LINE_2_START": 1,
             "CENTER_LINE_3_START_RATIO": 0.3,
@@ -960,6 +966,10 @@ class SubtitleStudioApp(ctk.CTk):
             "MAX_HEIGHT": 100,
             "ENABLE_REMOVE_CHARACTER_NAME": False,
             "ENABLE_SCREENSHOTS": False,
+            "ENABLE_OUTPUT2_SYSTEM": False,
+            "ENABLE_DYNAMIC_SPEED": True,
+            "BASE_PLAYBACK_SPEED": 1.0,
+            "OVERLAP_PLAYBACK_SPEED": 1.2,
             "USE_CENTER_LINE_1": False,
             "USE_CENTER_LINE_2": False,
             "USE_CENTER_LINE_3": False,
@@ -968,13 +978,28 @@ class SubtitleStudioApp(ctk.CTk):
             "names_file_path": "",
             "screenshot_dir": "",
             "key_bindings": {
-                "toggle_on": "home", "toggle_off": "end", "volume_up": "page_up",
-                "volume_down": "page_down", "switch_monitor_prev": "alt+1",
-                "switch_monitor_next": "alt+2", "test_sound": "insert",
-                "open_settings": "alt+`", "interrupt_audio": "delete"
+                "toggle_on": "home",
+                "toggle_off": "end",
+                "volume_up": "page_up",
+                "volume_down": "page_down",
+                "switch_monitor_toggle": "alt+1",
+                "test_sound": "insert",
+                "open_settings": "alt+`",
+                "interrupt_audio": "delete",
+                "base_speed_up": "shift+z",
+                "base_speed_down": "shift+x",
+                "overlap_speed_up": "shift+c",
+                "overlap_speed_down": "shift+v",
+                "debug_console": "alt+d",
+                "toggle_areas": "alt+2"
             },
             "monitor2_enabled": False,
-            "monitor2_top": 100, "monitor2_left": 375, "monitor2_width": 1170, "monitor2_height": 120
+            "monitor2_top": 100,
+            "monitor2_left": 375,
+            "monitor2_width": 1170,
+            "monitor2_height": 120,
+            "VOLUME_REDUCTION_LEVEL": 0.2,
+            "AUDIO_QUEUE_SIZE": 1
         }
 
         # 4. Define paths
@@ -1010,7 +1035,7 @@ class SubtitleStudioApp(ctk.CTk):
                 preset_template["audio_dir"] = str(
                     source_audio_path.absolute())
 
-            # 7. Save clean.json
+            # 7. Save preset.json
             with open(json_file_dest_path, "w", encoding="utf-8") as f:
                 json.dump(preset_template, f, indent=4, ensure_ascii=False)
 
