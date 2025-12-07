@@ -35,6 +35,7 @@ from audio.deleter import AudioDeleterWindow
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from audio.generation_queue import GenerationQueueWindow
 from ui.recent_projects import RecentProjectsWindow
+from ui.shortcuts import ShortcutsWindow
 
 try:
     from packaging import version
@@ -165,9 +166,8 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-f>", lambda e: self.subtitle_panel.search_entry.focus_set())
         self.bind("<Control-k>", lambda e: self.apply_processing())
 
-        # Specjalna obsługa TAB (przełączanie widoku)
-        # return "break" zapobiega domyślnemu przenoszeniu fokusu przez Tab
         self.bind("<Tab>", self._cycle_view_mode)
+        self.bind("<Escape>", self._on_escape_key)
 
         # Audio i Wzorce
         self.bind("<Control-R>",
@@ -204,16 +204,32 @@ class SubtitleStudioApp(ctk.CTk):
     def _on_ctrl_c(self, event=None):
         """
         Obsługa Ctrl+C.
-        Jeśli focus jest w polu tekstowym -> systemowe kopiowanie.
-        Jeśli nie -> kopiuje treść zaznaczonej linii (zależnie od widoku).
+        Priorytet:
+        1. Jeśli fokus jest na liście dialogów -> Kopiuj całą linię (wymuś).
+        2. Jeśli fokus jest na innym polu edycji (Edytor, Szukaj) -> Systemowe kopiowanie.
+        3. W innym przypadku -> Kopiuj całą linię.
         """
         widget = self.focus_get()
-        # Jeśli jesteśmy w polu edycji, SearchBarze lub Textboxie (podgląd),
-        # pozwalamy systemowi obsłużyć skrót (standardowe kopiowanie tekstu).
+
+        # Sprawdź, czy fokus jest na wewnętrznym widgecie tekstowym listy dialogów
+        # (CTkTextbox w środku zawiera standardowy tk.Text dostępny przez ._textbox)
+        is_preview_list = (widget == self.subtitle_panel.txt_preview._textbox)
+
+        if is_preview_list:
+            # Wymuszamy kopiowanie linii, ignorując systemowe kopiowanie zaznaczenia
+            self._on_ctrl_c_from_menu()
+            return "break"  # Zatrzymaj propagację zdarzenia
+
+        # Jeśli jesteśmy w normalnym polu edycji (np. search, line editor),
+        # pozwalamy systemowi obsłużyć skrót (standardowe kopiowanie tekstu zaznaczonego myszką)
         if isinstance(widget, (tk.Entry, ctk.CTkEntry, ctk.CTkTextbox, tk.Text)):
             return
 
-            # W przeciwnym razie kopiujemy całą linię z listy
+            # Fallback dla innych przypadków (np. fokus na ramce)
+        self._on_ctrl_c_from_menu()
+
+    def _on_ctrl_c_from_menu(self):
+        """Faktyczna logika kopiowania wywoływana z menu kontekstowego lub Ctrl+C."""
         if self.selected_line_index is None:
             return
 
@@ -225,10 +241,8 @@ class SubtitleStudioApp(ctk.CTk):
             if mode == "Oryginał":
                 text_to_copy = self.original_lines[idx]
             elif mode == "Napisy":
-                # Kopiujemy z processed_clean (uwzględnia ręczne edycje)
                 text_to_copy = self.processed_clean[idx]
             elif mode == "TTS":
-                # Kopiujemy z processed_replace (uwzględnia ręczne edycje TTS)
                 text_to_copy = self.processed_replace[idx]
         except IndexError:
             return
@@ -247,6 +261,30 @@ class SubtitleStudioApp(ctk.CTk):
 
         # W przeciwnym razie usuń audio
         self.subtitle_panel.delete_all_selected_audio()
+
+    def _on_escape_key(self, event=None):
+        """
+        Obsługa klawisza ESC:
+        1. Czyści wyszukiwarkę i odświeża listę.
+        2. Usuwa zaznaczenie linii (jeśli istnieje) i czyści edytor.
+        """
+        # 1. Czyść wyszukiwarkę i nr linii
+        self.subtitle_panel.search_entry.delete(0, tk.END)
+        self.subtitle_panel.search_line_nr.delete(0, tk.END)
+        self.apply_patterns()  # Odświeża listę dialogów
+
+        # 2. Usuń zaznaczenie i wyczyść edytor
+        if self.selected_line_index is not None:
+            # Zapisz, jeśli były jakieś zmiany w edytorze
+            if self.subtitle_panel.editor.last_saved_text:
+                self.subtitle_panel.on_manual_edit_save(self.subtitle_panel.editor.entry.get())
+
+            self.selected_line_index = None
+            self.subtitle_panel.txt_preview.tag_remove("selected_line", "1.0", tk.END)
+            self.subtitle_panel.editor.clear()
+            self.set_status("Wyszukiwanie anulowane, linia odznaczona.")
+
+        return "break"
 
     def _on_delete_key(self, event=None):
         """Obsługa Del (Wyczyść linię), z zabezpieczeniem edycji tekstu."""
@@ -916,6 +954,28 @@ class SubtitleStudioApp(ctk.CTk):
         except Exception:
             pass
 
+    def save_global_config(self, data: dict):
+        """
+        Zapisuje słownik ustawień przekazany z SettingsWindow.
+        Iteruje po kluczach, aby bezpiecznie zaktualizować konfigurację,
+        nie usuwając innych ustawień (np. recent_projects).
+        """
+        # Iteracja i aktualizacja klucz po kluczu
+        for key, value in data.items():
+            self.global_config[key] = value
+
+        # Zapisz do pliku
+        try:
+            with open(APP_CONFIG, "w", encoding="utf-8") as f:
+                json.dump(self.global_config, f, indent=4)
+            self.set_status("Zapisano ustawienia aplikacji.")
+
+            # Zastosuj motyw od razu, jeśli został zmieniony
+            self.apply_theme_settings()
+
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Nie udało się zapisać ustawień:\n{e}")
+
     def _check_unsaved_changes(self) -> bool:
         if self.has_unsaved_changes and self.current_project_path:
             msg = "Masz niezapisane zmiany w projekcie. Czy chcesz je zapisać?"
@@ -994,8 +1054,7 @@ class SubtitleStudioApp(ctk.CTk):
         except IndexError:
             pass
 
-    def add_replace_pattern_from_selection(self, event=None):
-        """Dodaje wzorzec zamieniający (wywołane z panelu)."""
+    def add_replace_pattern_from_selection(self, event=None, from_menu=False):
         if self.selected_line_index is None: return
         try:
             text = self.processed_replace[self.selected_line_index].strip()
@@ -1004,8 +1063,8 @@ class SubtitleStudioApp(ctk.CTk):
             win.ent_pattern.insert(0, text)
             win.ent_replace.insert(0, text)
             win.var_case_sensitive.set(True)
-        except IndexError:
-            pass
+            if from_menu: win.lift()
+        except IndexError: pass
 
     def _check_for_updates(self):
         if not PACKAGING_AVAILABLE: return
@@ -1037,9 +1096,16 @@ class SubtitleStudioApp(ctk.CTk):
         about_win = ctk.CTkToplevel(self)
         about_win.title("O programie")
         about_win.geometry("400x200")
+
+        # Kluczowe linie naprawiające chowanie się okna:
+        about_win.transient(self)
+        about_win.lift()
+        about_win.focus_force()
+
         ctk.CTkLabel(about_win, text=APP_TITLE, font=("", 20, "bold")).pack(pady=10)
         ctk.CTkLabel(about_win, text=f"Wersja: {self.APP_VERSION}").pack()
         ctk.CTkLabel(about_win, text="Autor: Kamil Pasek").pack()
+
         ctk.CTkButton(about_win, text="Zamknij", command=about_win.destroy).pack(pady=20)
 
     # Proxy dla metod z menu
