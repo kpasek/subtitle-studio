@@ -5,7 +5,7 @@ class AppMenu:
     """Zarządza paskiem menu aplikacji."""
 
     def __init__(self, app):
-        self.app = app  # Referencja do głównej instancji SubtitleStudioApp
+        self.app = app
 
     def create(self):
         menubar = tk.Menu(self.app)
@@ -13,7 +13,9 @@ class AppMenu:
         # --- Projekt ---
         config_menu = tk.Menu(menubar, tearoff=0)
         config_menu.add_command(label="Otwórz projekt (.json)", command=self.app.open_project)
-        config_menu.add_command(label="Zapisz projekt", command=self.app.save_project)
+        config_menu.add_command(label="Otwórz ostatni...", command=self.app.open_recent_projects_window,
+                                accelerator="Ctrl+E")
+        config_menu.add_command(label="Zapisz projekt", command=self.app.save_project, accelerator="Ctrl+S")
         config_menu.add_command(label="Zapisz jako", command=self.app.save_project_as)
         config_menu.add_separator()
         config_menu.add_command(label="Zamknij projekt", command=self.app.close_project)
@@ -27,8 +29,8 @@ class AppMenu:
         gen_menu.add_command(label="Wybierz katalog audio", command=self.app.choose_audio_dir)
         gen_menu.add_separator()
         gen_menu.add_command(label="Pokaż kolejkę zadań", command=self.app.show_generation_queue)
-        gen_menu.add_command(label="Generuj dialogi", command=self.app.enqueue_generate_all)
-        gen_menu.add_command(label="Konwertuj audio", command=self.app.enqueue_convert_all)
+        gen_menu.add_command(label="Generuj dialogi", command=self.app.enqueue_generate_all, accelerator="Ctrl+Shift+G")
+        gen_menu.add_command(label="Konwertuj audio", command=self.app.enqueue_convert_all, accelerator="Ctrl+Shift+R")
         gen_menu.add_separator()
         gen_menu.add_command(label="Dopasuj identyfikatory audio", command=self.app.open_audio_rename_window)
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=self.app.delete_all_converted_audio)
@@ -40,7 +42,7 @@ class AppMenu:
 
         # --- Wzorce ---
         patterns_menu = tk.Menu(menubar, tearoff=0)
-        patterns_menu.add_command(label="Menedżer wzorców", command=self.app.open_pattern_manager)
+        patterns_menu.add_command(label="Menedżer wzorców", command=self.app.open_pattern_manager, accelerator="Ctrl+R")
         patterns_menu.add_command(label="Importuj wzorce z CSV", command=self.app.import_patterns_from_csv)
         patterns_menu.add_command(label="Eksportuj wzorce do CSV", command=self.app.export_patterns_to_csv)
         patterns_menu.add_separator()
@@ -55,6 +57,7 @@ class AppMenu:
 
         # --- Pomoc ---
         help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Skróty klawiszowe", command=self.app.open_shortcuts_window)
         help_menu.add_command(label="O programie", command=self.app.show_about_window)
         menubar.add_cascade(label="Pomoc", menu=help_menu)
 

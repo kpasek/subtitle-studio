@@ -34,6 +34,7 @@ from audio.pattern_editor import PatternEditorWindow
 from audio.deleter import AudioDeleterWindow
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from audio.generation_queue import GenerationQueueWindow
+from ui.recent_projects import RecentProjectsWindow
 
 try:
     from packaging import version
@@ -105,12 +106,15 @@ class SubtitleStudioApp(ctk.CTk):
         self.processed_clean: List[str] = []
         self.processed_replace: List[str] = []
 
+        self._load_app_config(only_config=True)
+
         # Przechowuje zmiany dla warstwy "Napisy" (czyszczone)
         self.manual_edits: dict[int, str] = {}
         # Przechowuje zmiany dla warstwy "TTS" (podmiana pod lektora)
         self.tts_edits: dict[int, str] = {}
 
-        self.view_mode = tk.StringVar(value="Napisy")
+        last_view = self.global_config.get('last_view_mode', 'Napisy')
+        self.view_mode = tk.StringVar(value=last_view)
 
         self.builtin_remove = [PatternItem(
             p.pattern, p.replace, p.case_sensitive, name) for p, name in BUILTIN_REMOVE]
@@ -140,7 +144,6 @@ class SubtitleStudioApp(ctk.CTk):
         self.update_button: Optional[ctk.CTkButton] = None
         self.latest_version_info: Optional[Tuple[str, str]] = None
 
-        self._load_app_config(only_config=True)
         self.apply_theme_settings()
 
         # Inicjalizacja Menu
@@ -150,7 +153,142 @@ class SubtitleStudioApp(ctk.CTk):
         self._load_app_config()
         self.check_queue()
 
+        self._bind_shortcuts()
+
         threading.Thread(target=self._check_for_updates, daemon=True).start()
+
+    def _bind_shortcuts(self):
+        """Rejestruje globalne skróty klawiszowe."""
+        # Nawigacja i Projekt
+        self.bind("<Control-e>", lambda e: self.open_recent_projects_window())
+        self.bind("<Control-s>", lambda e: self.save_project())
+        self.bind("<Control-f>", lambda e: self.subtitle_panel.search_entry.focus_set())
+        self.bind("<Control-k>", lambda e: self.apply_processing())
+
+        # Specjalna obsługa TAB (przełączanie widoku)
+        # return "break" zapobiega domyślnemu przenoszeniu fokusu przez Tab
+        self.bind("<Tab>", self._cycle_view_mode)
+
+        # Audio i Wzorce
+        self.bind("<Control-R>",
+                  lambda e: self.enqueue_convert_all())  # Shift+Ctrl+r (Tkinter widzi Shift jako wielką literę)
+        self.bind("<Control-r>", lambda e: self.open_pattern_manager())
+        self.bind("<Control-G>", lambda e: self.enqueue_generate_all())  # Shift+Ctrl+g
+
+        # Kontekstowe (Linia) - bindujemy do root, ale sprawdzamy kontekst w metodach
+        self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())
+        self.bind("<Control-g>", lambda e: self.enqueue_generate_single())
+
+        # Ctrl+X (Usuń audio) - uwaga na konflikt z wycinaniem tekstu
+        self.bind("<Control-x>", self._on_ctrl_x)
+        self.bind("<Control-c>", self._on_ctrl_c)
+
+        # Klawisz Delete (Usuń treść)
+        # Bindujemy go tutaj globalnie, ale logika sprawdzi, czy nie jesteśmy w polu edycji
+        self.bind("<Delete>", self._on_delete_key)
+
+    def _cycle_view_mode(self, event=None):
+        """Przełącza widok między Napisy a TTS (pomija Oryginał)."""
+        current = self.view_mode.get()
+        if current == "Napisy":
+            self.subtitle_panel.view_switcher.set("TTS")
+            self.view_mode.set("TTS")
+        else:
+            self.subtitle_panel.view_switcher.set("Napisy")
+            self.view_mode.set("Napisy")
+
+        # Wywołujemy metodę zmiany widoku w panelu
+        self.subtitle_panel._on_view_mode_change("TTS" if current == "Napisy" else "Napisy")
+        return "break"
+
+    def _on_ctrl_c(self, event=None):
+        """
+        Obsługa Ctrl+C.
+        Jeśli focus jest w polu tekstowym -> systemowe kopiowanie.
+        Jeśli nie -> kopiuje treść zaznaczonej linii (zależnie od widoku).
+        """
+        widget = self.focus_get()
+        # Jeśli jesteśmy w polu edycji, SearchBarze lub Textboxie (podgląd),
+        # pozwalamy systemowi obsłużyć skrót (standardowe kopiowanie tekstu).
+        if isinstance(widget, (tk.Entry, ctk.CTkEntry, ctk.CTkTextbox, tk.Text)):
+            return
+
+            # W przeciwnym razie kopiujemy całą linię z listy
+        if self.selected_line_index is None:
+            return
+
+        idx = self.selected_line_index
+        mode = self.view_mode.get()
+        text_to_copy = ""
+
+        try:
+            if mode == "Oryginał":
+                text_to_copy = self.original_lines[idx]
+            elif mode == "Napisy":
+                # Kopiujemy z processed_clean (uwzględnia ręczne edycje)
+                text_to_copy = self.processed_clean[idx]
+            elif mode == "TTS":
+                # Kopiujemy z processed_replace (uwzględnia ręczne edycje TTS)
+                text_to_copy = self.processed_replace[idx]
+        except IndexError:
+            return
+
+        if text_to_copy:
+            self.clipboard_clear()
+            self.clipboard_append(text_to_copy)
+            self.set_status(f"Skopiowano linię {idx + 1} do schowka.")
+
+    def _on_ctrl_x(self, event=None):
+        """Obsługa Ctrl+X (Usuń audio), z zabezpieczeniem edycji tekstu."""
+        # Jeśli fokus jest w polu tekstowym (Editor lub Search), pozwól na standardowe 'Wytnij'
+        widget = self.focus_get()
+        if isinstance(widget, (tk.Entry, ctk.CTkEntry, ctk.CTkTextbox, tk.Text)):
+            return  # Nie blokuj zdarzenia, niech system zrobi "Cut"
+
+        # W przeciwnym razie usuń audio
+        self.subtitle_panel.delete_all_selected_audio()
+
+    def _on_delete_key(self, event=None):
+        """Obsługa Del (Wyczyść linię), z zabezpieczeniem edycji tekstu."""
+        widget = self.focus_get()
+        # Jeśli piszemy w edytorze lub wyszukiwarce, Del ma usuwać znaki
+        if isinstance(widget, (tk.Entry, ctk.CTkEntry)):
+            return
+
+            # Jeśli nie edytujemy tekstu, czyścimy zawartość linii
+        self._clear_selected_line_content()
+
+    def _clear_selected_line_content(self):
+        """Czyści treść aktualnie zaznaczonej linii (zastępuje pustym stringiem)."""
+        if self.selected_line_index is None:
+            return
+
+        mode = self.view_mode.get()
+        idx = self.selected_line_index
+
+        # Nie pozwalamy edytować oryginału
+        if mode == "Oryginał":
+            messagebox.showinfo("Info", "Nie można edytować oryginału.", parent=self)
+            return
+
+        # Pusta wartość
+        empty_val = ""
+
+        if mode == "Napisy":
+            self.manual_edits[idx] = empty_val
+            self._save_manual_edits()
+        elif mode == "TTS":
+            self.tts_edits[idx] = empty_val
+            self._save_tts_edits()
+
+        self.apply_patterns()
+        # Odśwież edytor (pokaże puste pole)
+        self.subtitle_panel.on_preview_click(None)
+        self.set_status(f"Wyczyszczono zawartość linii {idx + 1}")
+
+    def open_shortcuts_window(self):
+        """Otwiera okno pomocy ze skrótami."""
+        ShortcutsWindow(self)
 
     def mark_as_unsaved(self, *args):
         """Oznacza projekt jako niezapisany."""
@@ -645,11 +783,14 @@ class SubtitleStudioApp(ctk.CTk):
                                               initialdir=initial_dir)
         if not path:
             return
+
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             self.current_project_path = Path(path)
             self.project_config = cfg
+
+            self._update_recent_projects(str(self.current_project_path))
 
             all_vars = self.builtin_remove_state + self.builtin_replace_state
             traces = {}
@@ -689,7 +830,6 @@ class SubtitleStudioApp(ctk.CTk):
             self.has_unsaved_changes = False
             self.lbl_filename.configure(text=os.path.basename(path))
 
-            # Odśwież panel napisów
             self.subtitle_panel.update_audio_buttons_state()
 
         except Exception as e:
@@ -992,6 +1132,39 @@ class SubtitleStudioApp(ctk.CTk):
     def apply_theme_settings(self):
         ctk.set_appearance_mode(self.global_config.get('appearance_mode', 'System'))
         ctk.set_default_color_theme(self.global_config.get('color_theme', 'blue'))
+
+    def _update_recent_projects(self, path: str):
+        """Aktualizuje listę ostatnich projektów w configu."""
+        recents = self.global_config.get('recent_projects', [])
+        # Usuń jeśli już jest (żeby przenieść na górę)
+        if path in recents:
+            recents.remove(path)
+        # Dodaj na początek
+        recents.insert(0, path)
+        # Limit np. do 15
+        recents = recents[:15]
+
+        self.save_app_setting('recent_projects', recents)
+
+    def open_recent_projects_window(self):
+        """Otwiera okno z listą ostatnich projektów."""
+        recents = self.global_config.get('recent_projects', [])
+        RecentProjectsWindow(
+            self,
+            recents,
+            on_open_callback=self.open_project,
+            on_delete_callback=self._remove_recent_project,
+            on_clear_callback=self._clear_recent_projects
+        )
+
+    def _remove_recent_project(self, path: str):
+        recents = self.global_config.get('recent_projects', [])
+        if path in recents:
+            recents.remove(path)
+            self.save_app_setting('recent_projects', recents)
+
+    def _clear_recent_projects(self):
+        self.save_app_setting('recent_projects', [])
 
 
 if __name__ == '__main__':

@@ -63,7 +63,7 @@ class SubtitlePanel(ctk.CTkFrame):
         audio_btn_frame = ctk.CTkFrame(self)
         audio_btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 5), padx=5)
 
-        self.play_button = ctk.CTkButton(audio_btn_frame, text="▶️ Odtwórz", width=80, command=self.play_selected_audio,
+        self.play_button = ctk.CTkButton(audio_btn_frame, text="▶️ Odtwórz", width=120, command=self.play_selected_audio,
                                          state="disabled")
         self.play_button.pack(side="left", padx=(0, 4))
         if not FFPLAY_AVAILABLE:
@@ -101,8 +101,7 @@ class SubtitlePanel(ctk.CTkFrame):
         self.txt_preview.tag_config("selected_line", background="gray25", foreground="white")
         self.txt_preview.bind("<ButtonRelease-1>", self.on_preview_click)
         self.txt_preview.bind("<Double-Button-1>", self.play_selected_audio)
-        self.txt_preview.bind("<Control-Button-1>", self.app.add_replace_pattern_from_selection)
-        self.txt_preview.bind("<Delete>", self.app.add_remove_pattern_from_selection)
+
         self.txt_preview.configure(cursor="hand2")
 
         # --- Editor ---
@@ -112,6 +111,7 @@ class SubtitlePanel(ctk.CTkFrame):
     # ... (metody _on_view_mode_change, filter_preview, set_preview, on_preview_click, on_manual_edit_save - BEZ ZMIAN) ...
     def _on_view_mode_change(self, value):
         self.app.apply_patterns()
+        self.app.save_app_setting('last_view_mode', value)
         if self.app.selected_line_index is not None:
             self.on_preview_click(None)
         else:
