@@ -1003,7 +1003,7 @@ class SubtitleStudioApp(ctk.CTk):
         }
 
         # 4. Define paths
-        text_filename = "subtitles.txt"
+        text_filename = "subtitlesPL.txt"
         text_file_dest_path = dest_folder / text_filename
         json_file_dest_path = dest_folder / "preset.json"
         source_audio_path = self.audio_dir / "ready"
@@ -1845,7 +1845,7 @@ class SubtitleStudioApp(ctk.CTk):
                 # Ustalanie linku do pobierania
                 download_url = None
                 if sys.platform == "win32":
-                    download_url = f"https://github.com/kpasek/subtitle-studio/releases/download/{latest_tag}/SubtitleStudioWindows.zip"
+                        download_url = f"https://github.com/kpasek/subtitle-studio/releases/download/{latest_tag}/SubtitleStudioWindows.zip"
                 elif sys.platform.startswith("linux"):
                     download_url = f"https://github.com/kpasek/subtitle-studio/releases/download/{latest_tag}/SubtitleStudioLinux.zip"
                 else:
