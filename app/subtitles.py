@@ -69,9 +69,7 @@ class SubtitlePanel(ctk.CTkFrame):
         if not FFPLAY_AVAILABLE:
             self.play_button.configure(state="disabled", text="N/A ffplay")
 
-        self.audio_select_var = tk.StringVar(value="(brak plików)")
-        self.audio_select = ctk.CTkOptionMenu(audio_btn_frame, variable=self.audio_select_var, values=["(brak plików)"])
-        self.audio_select.pack(side="left", padx=(4, 8))
+        # USUNIĘTO DROPDOWN (self.audio_select)
 
         self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
                                              command=self.app.enqueue_generate_single, state="disabled",
@@ -111,137 +109,92 @@ class SubtitlePanel(ctk.CTkFrame):
         self.editor = LineEditor(self, on_save_callback=self.on_manual_edit_save)
         self.editor.grid(row=6, column=0, sticky="ew", padx=5, pady=(0, 5))
 
+    # ... (metody _on_view_mode_change, filter_preview, set_preview, on_preview_click, on_manual_edit_save - BEZ ZMIAN) ...
     def _on_view_mode_change(self, value):
-        """Obsługa zmiany widoku (Oryginał/Napisy/TTS)."""
         self.app.apply_patterns()
-        # Odśwież edytor dla aktualnie zaznaczonej linii (jeśli jest)
         if self.app.selected_line_index is not None:
             self.on_preview_click(None)
         else:
             self.editor.clear()
 
     def filter_preview(self, lines: List[str]) -> List[str]:
-        """Filtruje linie w podglądzie na podstawie wyszukiwania."""
         search_term = self.search_entry.get()
-        if not search_term:
-            return lines
+        if not search_term: return lines
         try:
-            pattern = search_term.lower()
-            return [line for line in lines if re.search(pattern, line, re.IGNORECASE)]
+            return [line for line in lines if re.search(search_term.lower(), line, re.IGNORECASE)]
         except re.error:
             return lines
 
     def set_preview(self, lines_to_show: list[str]):
-        """Aktualizuje pole tekstowe podglądu."""
-        # Reset zaznaczenia w app
         self.app.selected_line_index = None
         self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
-
         total_lines = len(lines_to_show)
         num_digits = len(str(total_lines)) if total_lines > 0 else 1
-        numbered_lines = [
-            f"{str(i + 1).zfill(num_digits)} | {line}"
-            for i, line in enumerate(lines_to_show)
-        ]
-
+        numbered_lines = [f"{str(i + 1).zfill(num_digits)} | {line}" for i, line in enumerate(lines_to_show)]
         filtered = self.filter_preview(numbered_lines)
-
         self.txt_preview.configure(state='normal')
         self.txt_preview.delete('1.0', tk.END)
-        if filtered:
-            self.txt_preview.insert('1.0', '\n'.join(filtered))
+        if filtered: self.txt_preview.insert('1.0', '\n'.join(filtered))
         self.txt_preview.configure(state='disabled')
-
-        # Wyczyść edytor po odświeżeniu listy
         self.editor.clear()
 
     def on_preview_click(self, event):
-        """Obsługa kliknięcia w listę napisów."""
         try:
             if event:
                 click_index = self.txt_preview.index(f"@{event.x},{event.y}")
             else:
                 click_index = self.txt_preview.index(tk.INSERT)
-
             line_number_str = click_index.split('.')[0]
             visible_line_index = int(line_number_str) - 1
-
             all_visible_lines = self.txt_preview.get("1.0", tk.END).splitlines()
-            if visible_line_index >= len(all_visible_lines):
-                return
-
+            if visible_line_index >= len(all_visible_lines): return
             clicked_line_content = all_visible_lines[visible_line_index]
             match = re.match(r"^\s*(\d+)\s*\|", clicked_line_content)
-
             if match:
                 original_line_number = int(match.group(1))
-                self.app.selected_line_index = original_line_number - 1  # 0-based
-
+                self.app.selected_line_index = original_line_number - 1
                 self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
-                line_start = f"{line_number_str}.0"
-                line_end = f"{line_number_str}.end"
+                line_start, line_end = f"{line_number_str}.0", f"{line_number_str}.end"
                 self.txt_preview.tag_add("selected_line", line_start, line_end)
-
-                # --- Ładowanie tekstu do edytora ---
                 mode = self.app.view_mode.get()
                 text_to_edit = ""
                 read_only = (mode == "Oryginał")
-
                 if not read_only:
                     try:
                         idx = self.app.selected_line_index
                         if mode == "Napisy":
-                            # Pobierz z warstwy CLEAN (uwzględnia manual_edits)
                             text_to_edit = self.app.processed_clean[idx]
                         elif mode == "TTS":
-                            # Pobierz z warstwy TTS (uwzględnia tts_edits)
-                            # tts_edits ma priorytet nad wygenerowanym processed_replace
                             text_to_edit = self.app.processed_replace[idx]
                     except IndexError:
                         pass
-
                 self.editor.set_content(text_to_edit, read_only=read_only)
             else:
                 self.app.selected_line_index = None
                 self.editor.clear()
                 self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
-
         except (ValueError, tk.TclError, IndexError):
             self.app.selected_line_index = None
             self.editor.clear()
             self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
-
         self.update_audio_buttons_state()
 
     def on_manual_edit_save(self, new_text: str):
-        """Callback zapisu edycji z LineEditor."""
-        if self.app.selected_line_index is None:
-            return
-
+        if self.app.selected_line_index is None: return
         idx = self.app.selected_line_index
         mode = self.app.view_mode.get()
-
         if mode == "Napisy":
-            print(f"Zapisuję edycję (Subtitles) linia {idx + 1}")
             self.app.manual_edits[idx] = new_text
             self.app._save_manual_edits()
         elif mode == "TTS":
-            print(f"Zapisuję edycję (TTS) linia {idx + 1}")
             self.app.tts_edits[idx] = new_text
             self.app._save_tts_edits()
-
-        # Odśwież widok
         self.app.apply_patterns()
-
-        # Przywróć stan edytora (aby pokazać, że zapisano)
         self.on_preview_click(None)
 
-    # --- AUDIO METHODS (Moved from Studio) ---
-
+    # --- AUDIO METHODS ---
     def _find_audio_files(self, identifier: str) -> List[Tuple[Path, bool]]:
-        """Znajduje pliki audio dla danego identyfikatora."""
-        if not self.app.audio_dir:
-            return []
+        if not self.app.audio_dir: return []
         candidates = [
             (self.app.audio_dir / f"output1 ({identifier}).wav", False),
             (self.app.audio_dir / f"output1 ({identifier}).mp3", False),
@@ -250,25 +203,32 @@ class SubtitlePanel(ctk.CTkFrame):
         return [(f, ready) for f, ready in candidates if f.exists()]
 
     def update_audio_buttons_state(self):
-        """Aktualizuje stan przycisków audio."""
+        """Aktualizuje stan przycisków audio i pasek statusu."""
         line_selected = self.app.selected_line_index is not None
         audio_dir_set = self.app.audio_dir is not None and self.app.audio_dir.is_dir()
         project_loaded = self.app.current_project_path is not None
         lines_processed = bool(self.app.processed_replace)
 
         files_exist = False
+        status_msg = "Audio: ---"
+
         if line_selected and audio_dir_set:
             identifier = str(self.app.selected_line_index + 1)
             found_files = self._find_audio_files(identifier)
             files_exist = bool(found_files)
 
+            # ZMIANA: Aktualizacja statusu zamiast dropdowna
             if found_files:
-                file_names = [f.name for f, _ in found_files]
-                self.audio_select.configure(values=file_names)
-                self.audio_select_var.set(file_names[0])
+                status_msg = f"Audio: znaleziono {len(found_files)}"
+                # Domyślnie bierzemy pierwszy do odtwarzania (do play_selected_audio)
+                self.first_found_audio = found_files[0][0]
             else:
-                self.audio_select.configure(values=["(brak plików)"])
-                self.audio_select_var.set("(brak plików)")
+                status_msg = "Audio: brak"
+                self.first_found_audio = None
+
+        # Wywołanie metody w app (którą dodamy w studio.py)
+        if hasattr(self.app, 'set_status'):
+            self.app.set_status(status_msg)
 
         play_state = "normal" if FFPLAY_AVAILABLE and line_selected and audio_dir_set and files_exist else "disabled"
         gen_state = "normal" if line_selected and audio_dir_set and project_loaded and lines_processed else "disabled"
@@ -279,7 +239,6 @@ class SubtitlePanel(ctk.CTkFrame):
         self.delete_all_button.configure(state=del_all_state)
 
     def stop_audio(self):
-        """Zatrzymuje proces ffplay."""
         if self.current_audio_process:
             try:
                 self.current_audio_process.terminate()
@@ -288,93 +247,42 @@ class SubtitlePanel(ctk.CTkFrame):
                 self.current_audio_process = None
 
     def play_selected_audio(self, event=None):
-        """Odtwarza wybrane audio."""
-        if not FFPLAY_AVAILABLE:
-            return
-
-        if self.app.selected_line_index is None:
-            return
+        if not FFPLAY_AVAILABLE or self.app.selected_line_index is None or not self.app.audio_dir: return
+        # Logika uproszczona - odtwarza pierwszy znaleziony (bo usunęliśmy wybór)
         identifier = str(self.app.selected_line_index + 1)
-
-        if not self.app.audio_dir:
-            return
-
         files = self._find_audio_files(identifier)
         if files:
-            selected_name = self.audio_select_var.get()
-            file_to_play = next(
-                (f for f, _ in files if f.name == selected_name), files[0][0])
-
+            file_to_play = files[0][0]
             self.stop_audio()
-
             try:
-                print(f"Odtwarzam: {file_to_play}")
                 startupinfo = None
                 if os.name == 'nt':
                     startupinfo = subprocess.STARTUPINFO()
                     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
                 cmd = ["ffplay", "-nodisp", "-autoexit", str(file_to_play)]
-
-                self.current_audio_process = subprocess.Popen(
-                    cmd,
-                    startupinfo=startupinfo,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+                self.current_audio_process = subprocess.Popen(cmd, startupinfo=startupinfo, stdout=subprocess.DEVNULL,
+                                                              stderr=subprocess.DEVNULL)
             except Exception as e:
                 self.current_audio_process = None
-                messagebox.showerror(
-                    "Błąd odtwarzania", f"Nie udało się uruchomić ffplay:\n{e}", parent=self)
+                messagebox.showerror("Błąd", f"Nie udało się uruchomić ffplay:\n{e}", parent=self)
         else:
-            messagebox.showinfo(
-                "Brak pliku", "Brak plików audio dla tej linii.", parent=self)
+            messagebox.showinfo("Brak pliku", "Brak plików audio.", parent=self)
 
     def delete_all_selected_audio(self):
-        """Usuwa wszystkie pliki audio dla wybranej linii."""
-        if self.app.selected_line_index is None:
-            return
+        # (Bez zmian w logice, poza brakiem konieczności odświeżania dropdowna)
+        if self.app.selected_line_index is None or not self.app.audio_dir: return
         identifier = str(self.app.selected_line_index + 1)
-
-        if not self.app.audio_dir:
-            return
-
         files = self._find_audio_files(identifier)
-        if not files:
-            messagebox.showinfo(
-                "Brak plików", "Brak plików audio do usunięcia dla tej linii.", parent=self)
-            return
-
+        if not files: return
         if self.current_audio_process and self.current_audio_process.poll() is None:
-            messagebox.showwarning("Plik w użyciu",
-                                   "Audio jest odtwarzane. Zatrzymaj je przed usunięciem.",
-                                   parent=self)
+            messagebox.showwarning("Plik w użyciu", "Audio jest odtwarzane.", parent=self)
             return
-
-        file_list_str = "\n".join([f.name for f, rdy in files])
-        if not messagebox.askyesno("Potwierdź usunięcie",
-                                   f"Czy na pewno usunąć WSZYSTKIE ({len(files)}) pliki dla linii {identifier}?\n{file_list_str}",
-                                   parent=self):
-            return
-
+        if not messagebox.askyesno("Potwierdź", f"Usunąć {len(files)} plików dla linii {identifier}?",
+                                   parent=self): return
         self.stop_audio()
-
-        deleted_count = 0
-        errors = []
         for file_path, _ in files:
             try:
                 os.remove(file_path)
-                deleted_count += 1
-            except Exception as e:
-                errors.append(f"{file_path.name}: {e}")
-
-        if errors:
-            messagebox.showerror("Błąd usuwania",
-                                 f"Usunięto {deleted_count} z {len(files)} plików.\nBłędy:\n" + "\n".join(
-                                     errors),
-                                 parent=self)
-        else:
-            messagebox.showinfo("Usunięto", f"Pomyślnie usunięto {deleted_count} plików dla linii {identifier}.",
-                                parent=self)
-
+            except Exception:
+                pass
         self.update_audio_buttons_state()

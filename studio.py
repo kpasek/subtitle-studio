@@ -25,6 +25,7 @@ from app.settings import SettingsWindow
 from app.utils import apply_remove_patterns, apply_replace_patterns, resource_path, is_installed
 from app.entity import PatternItem
 from app.subtitles import SubtitlePanel
+from ui.generation_summary import GenerationSummaryWindow
 from ui.menu import AppMenu
 from ui.processing_summary import ProcessingSummaryWindow
 
@@ -490,24 +491,53 @@ class SubtitleStudioApp(ctk.CTk):
 
     def enqueue_generate_all(self):
         if not self._prepare_job_dependencies(): return
+
+        # 1. Analiza stanu
+        total_items = len(self.processed_replace)
+        existing_items = 0
+
+        for i in range(total_items):
+            identifier = str(i + 1)
+            raw_wav = self.audio_dir / f"output1 ({identifier}).wav"
+            raw_mp3 = self.audio_dir / f"output1 ({identifier}).mp3"
+            ready_ogg = self.audio_dir / "ready" / f"output1 ({identifier}).ogg"
+            if raw_wav.exists() or raw_mp3.exists() or ready_ogg.exists():
+                existing_items += 1
+
+        # 2. Wyświetl okno podsumowania
+        GenerationSummaryWindow(
+            self,
+            "Generowanie dialogów",
+            total_items,
+            existing_items,
+            callback=self._execute_generate_all
+        )
+
+    def _execute_generate_all(self, overwrite: bool):
+        """Callback po zatwierdzeniu generowania."""
         tts_model = self._get_active_tts_model_name()
-        if not tts_model:
-            messagebox.showerror("Błąd", "Brak modelu TTS.")
-            return
+        if not tts_model: return
 
         dialogs_to_generate = []
         for i, text in enumerate(self.processed_replace):
             identifier = str(i + 1)
-            # Sprawdź czy plik istnieje
-            raw_wav = self.audio_dir / f"output1 ({identifier}).wav"
-            raw_mp3 = self.audio_dir / f"output1 ({identifier}).mp3"
-            ready_ogg = self.audio_dir / "ready" / f"output1 ({identifier}).ogg"
 
-            if not (raw_wav.exists() or raw_mp3.exists() or ready_ogg.exists()):
-                dialogs_to_generate.append((identifier, text))
+            # Jeśli NIE nadpisujemy, to sprawdź czy istnieje
+            if not overwrite:
+                raw_wav = self.audio_dir / f"output1 ({identifier}).wav"
+                raw_mp3 = self.audio_dir / f"output1 ({identifier}).mp3"
+                ready_ogg = self.audio_dir / "ready" / f"output1 ({identifier}).ogg"
+
+                # Jeśli którykolwiek istnieje, pomiń
+                if raw_wav.exists() or raw_mp3.exists() or ready_ogg.exists():
+                    continue
+
+            # Jeśli overwrite=True, po prostu dodajemy wszystko do listy.
+            # Silnik TTS nadpisze plik wyjściowy (np. wav) w momencie generowania, sztuka po sztuce.
+            dialogs_to_generate.append((identifier, text))
 
         if not dialogs_to_generate:
-            messagebox.showinfo("Info", "Wszystkie pliki audio już istnieją.")
+            messagebox.showinfo("Info", "Brak dialogów do wygenerowania (wszystkie istnieją).")
             return
 
         job = GenerationJob(
@@ -523,11 +553,43 @@ class SubtitleStudioApp(ctk.CTk):
         self.set_status(f"Dodano {len(dialogs_to_generate)} linii do kolejki.")
 
     def enqueue_convert_all(self):
-        """Dodaje zadanie samej konwersji do kolejki."""
         if not self.audio_dir or not self.audio_dir.is_dir():
             messagebox.showwarning("Brak katalogu", "Najpierw wybierz katalog audio.", parent=self)
             return
 
+        # 1. Analiza stanu (ile plików źródłowych vs ile w ready)
+        # Liczymy pliki źródłowe (WAV/MP3) które mają odpowiadające identyfikatory
+        source_files = list(self.audio_dir.glob("output1 (*).wav")) + list(self.audio_dir.glob("output1 (*).mp3"))
+        total_source = len(source_files)
+
+        ready_dir = self.audio_dir / "ready"
+        existing_target = 0
+        if ready_dir.exists():
+            existing_target = len(list(ready_dir.glob("*.ogg")))
+
+        # 2. Okno podsumowania
+        GenerationSummaryWindow(
+            self,
+            "Konwersja audio",
+            total_source,
+            existing_target,
+            callback=self._execute_convert_all
+        )
+
+    def _execute_convert_all(self, overwrite: bool):
+        """Callback po zatwierdzeniu konwersji."""
+
+        # Jeśli overwrite=True, usuń wszystkie pliki w 'ready' przed startem
+        if overwrite:
+            ready_dir = self.audio_dir / "ready"
+            if ready_dir.exists():
+                try:
+                    for f in ready_dir.glob("*.ogg"):
+                        os.remove(f)
+                except Exception as e:
+                    print(f"Błąd czyszczenia katalogu ready: {e}")
+
+        # Uruchomienie konwersji (tak jak wcześniej)
         if os.name == 'nt':
             converter_config = self._gather_converter_config()
             workers = converter_config.get("conversion_workers", 4)
