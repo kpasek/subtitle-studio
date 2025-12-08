@@ -15,7 +15,7 @@ import subprocess
 import ctypes
 
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from tkinter import filedialog, messagebox
 
 # --- Importy z modułów aplikacji ---
@@ -38,6 +38,7 @@ from ui.shortcuts import ShortcutsWindow
 from ui.game_reader_export import GameReaderExportWindow
 from ui.pattern_io import PatternIOWindow
 from ui.names_manager import NamesManagerWindow
+from ui.audio_sync import AudioSyncWindow
 
 try:
     from packaging import version
@@ -648,42 +649,124 @@ class SubtitleStudioApp(ctk.CTk):
         )
 
     def _finalize_processing(self, remove_empty: bool, remove_duplicates: bool):
+        """
+        Zatwierdza zmiany z okna podsumowania.
+        Implementuje ścisłe wiązanie ID linii z plikami audio przed przetworzeniem.
+        """
         rem_patterns, rep_patterns = self._gather_active_patterns()
-        processed_temp = apply_remove_patterns(self.original_lines, rem_patterns)
 
+        # 1. Przygotuj bazę tekstową (Regex) - to nie zmienia indeksów
+        base_processed = apply_remove_patterns(self.original_lines, rem_patterns)
+
+        # Nałóż edycje manualne
         for idx, text in self.manual_edits.items():
-            if 0 <= idx < len(processed_temp):
-                processed_temp[idx] = text
+            if 0 <= idx < len(base_processed):
+                base_processed[idx] = text
 
-        if remove_empty:
-            processed_temp = [line for line in processed_temp if line.strip()]
-        if remove_duplicates:
-            seen = set()
-            uniq = []
-            for l in processed_temp:
-                if l not in seen:
-                    uniq.append(l)
-                    seen.add(l)
-            processed_temp = uniq
+        # 2. IN-MEMORY BINDING: Zbuduj strukturę danych wiążącą linię z jej plikami audio
+        # Każdy element to słownik: { 'old_id': int, 'text': str, 'audio_files': List[Path] }
+        lines_data = []
 
-        self.processed_clean = processed_temp
+        # Helper do szukania plików dla danego ID
+        def find_files_for_id(ident: int) -> List[Path]:
+            found = []
+            if not self.audio_dir: return found
+
+            # Sprawdź główne rozszerzenia
+            for ext in ['.wav', '.mp3']:
+                f = self.audio_dir / f"output1 ({ident}){ext}"
+                if f.exists(): found.append(f)
+
+            # Sprawdź folder ready
+            ready_dir = self.audio_dir / "ready"
+            if ready_dir.exists():
+                for ext in ['.ogg', '.mp3']:
+                    f = ready_dir / f"output1 ({ident}){ext}"
+                    if f.exists(): found.append(f)
+
+            return found
+
+        for i, text in enumerate(base_processed):
+            old_id = i + 1
+            entry = {
+                'old_id': old_id,
+                'text': text,
+                'audio_files': find_files_for_id(old_id),  # Tu następuje "przypięcie" plików
+                'keep': True
+            }
+            lines_data.append(entry)
+
+        # 3. Logika filtrowania (oznaczamy co usunąć)
+        seen = set()
+        for entry in lines_data:
+            text = entry['text']
+
+            if remove_empty and not text.strip():
+                entry['keep'] = False
+
+            if remove_duplicates and entry['keep']:  # Sprawdzamy tylko jeśli jeszcze nie odpadło
+                if text in seen:
+                    entry['keep'] = False
+                elif text.strip():
+                    seen.add(text)
+
+        # 4. Generowanie nowej listy linii i planu dla plików
+        final_lines = []
+        audio_operations = []  # Lista krotek dla AudioSyncWindow
+
+        new_idx_counter = 1
+
+        for entry in lines_data:
+            if entry['keep']:
+                final_lines.append(entry['text'])
+
+                # Jeśli linia zostaje, sprawdzamy czy zmienił się jej numer
+                new_id = new_idx_counter
+                new_idx_counter += 1
+
+                if new_id != entry['old_id']:
+                    # Linia zmienia numer -> Przenieś WSZYSTKIE jej pliki
+                    for src in entry['audio_files']:
+                        # Oblicz nową nazwę zachowując rozszerzenie i folder
+                        is_ready_folder = src.parent.name == "ready"
+                        if is_ready_folder:
+                            dst = self.audio_dir / "ready" / f"output1 ({new_id}){src.suffix}"
+                        else:
+                            dst = self.audio_dir / f"output1 ({new_id}){src.suffix}"
+
+                        audio_operations.append(('rename', src, dst))
+            else:
+                # Linia usuwana -> Usuń jej pliki
+                for src in entry['audio_files']:
+                    audio_operations.append(('delete', src, None))
+
+        # 5. Wykonanie zmian
+
+        # Jeśli są operacje na plikach, uruchom okno synchronizacji
+        if audio_operations:
+            if self.audio_dir and self.audio_dir.exists():
+                AudioSyncWindow(self, audio_operations)
+            else:
+                messagebox.showwarning("Błąd",
+                                       "Katalog audio nie jest dostępny, ale wykryto zmiany wymagające synchronizacji.")
+
+        # Aktualizacja stanu aplikacji
+        if len(final_lines) != len(base_processed):
+            self.processed_clean = final_lines
+            self.manual_edits = {}
+            self.tts_edits = {}
+            self.set_status(
+                f'Zatwierdzono. Usunięto {len(base_processed) - len(final_lines)} linii. Przygotowano {len(audio_operations)} operacji na plikach.')
+        else:
+            self.processed_clean = base_processed
+            self.set_status('Zatwierdzono zmiany. Brak linii do usunięcia.')
+
         self._refresh_custom_lists()
         self.mark_as_unsaved()
 
-        # Po finalizacji trzeba przeliczyć replace, aby uwzględnić nowe linie
-        # Uwaga: w tym miejscu logika 'finalize' jest specyficzna - ona modyfikuje processed_clean
-        # ale apply_patterns normalnie nadpisuje processed_clean z original_lines.
-        # W tej aplikacji _finalize_processing jest jednorazowym "zrzutem",
-        # który po wywołaniu apply_patterns może zostać nadpisany, jeśli original_lines nie zostały zaktualizowane.
-        # Aby cache działał poprawnie po tej operacji, wymuszamy odświeżenie cache dla replace
-
-        # apply_patterns w obecnej formie odtworzy processed_clean z original_lines, 
-        # co potencjalnie cofnie efekt _finalize (usuwanie pustych/duplikatów), 
-        # chyba że intencją autora było tylko wygenerowanie plików wyjściowych?
-        # Zakładam, że apply_patterns ma decydujący głos.
-
+        self._cache_replace_result = None
+        self._last_replace_signature = None
         self.apply_patterns()
-        self.set_status('Zatwierdzono zmiany i przetworzono napisy.')
 
     # --- GENEROWANIE ---
 
@@ -741,8 +824,7 @@ class SubtitleStudioApp(ctk.CTk):
             identifier = str(i + 1)
             raw_wav = self.audio_dir / f"output1 ({identifier}).wav"
             raw_mp3 = self.audio_dir / f"output1 ({identifier}).mp3"
-            ready_ogg = self.audio_dir / "ready" / f"output1 ({identifier}).ogg"
-            if raw_wav.exists() or raw_mp3.exists() or ready_ogg.exists():
+            if raw_wav.exists() or raw_mp3.exists():
                 existing_items += 1
 
         # 2. Wyświetl okno podsumowania
@@ -760,25 +842,28 @@ class SubtitleStudioApp(ctk.CTk):
         if not tts_model: return
 
         dialogs_to_generate = []
+
+        # Iterujemy po wszystkich liniach, aby zachować ciągłość ID (i + 1)
         for i, text in enumerate(self.processed_replace):
             identifier = str(i + 1)
+            text = text.strip()
 
-            # Jeśli NIE nadpisujemy, to sprawdź czy istnieje
+            if not text:
+                continue
+
+            # Jeśli NIE nadpisujemy, to sprawdź czy plik istnieje
             if not overwrite:
                 raw_wav = self.audio_dir / f"output1 ({identifier}).wav"
                 raw_mp3 = self.audio_dir / f"output1 ({identifier}).mp3"
-                ready_ogg = self.audio_dir / "ready" / f"output1 ({identifier}).ogg"
 
                 # Jeśli którykolwiek istnieje, pomiń
-                if raw_wav.exists() or raw_mp3.exists() or ready_ogg.exists():
+                if raw_wav.exists() or raw_mp3.exists():
                     continue
 
-            # Jeśli overwrite=True, po prostu dodajemy wszystko do listy.
-            # Silnik TTS nadpisze plik wyjściowy (np. wav) w momencie generowania, sztuka po sztuce.
             dialogs_to_generate.append((identifier, text))
 
         if not dialogs_to_generate:
-            messagebox.showinfo("Info", "Brak dialogów do wygenerowania (wszystkie istnieją).")
+            messagebox.showinfo("Info", "Brak dialogów do wygenerowania (wszystkie istnieją lub są puste).")
             return
 
         job = GenerationJob(
@@ -806,7 +891,7 @@ class SubtitleStudioApp(ctk.CTk):
         ready_dir = self.audio_dir / "ready"
         existing_target = 0
         if ready_dir.exists():
-            existing_target = len(list(ready_dir.glob("*.ogg")))
+            existing_target = len(list(ready_dir.glob("*.ogg"))) + len(list(ready_dir.glob("*.mp3")))
 
         # 2. Okno podsumowania
         GenerationSummaryWindow(
