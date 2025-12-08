@@ -28,7 +28,7 @@ class AppMenu:
         gen_menu.add_command(label="Wczytaj napisy", command=self.app.load_file)
         gen_menu.add_command(label="Wybierz katalog audio", command=self.app.choose_audio_dir)
         gen_menu.add_separator()
-        gen_menu.add_command(label="Pokaż kolejkę zadań", command=self.app.show_generation_queue)
+        gen_menu.add_command(label="Pokaż kolejkę zadań", command=self.app.show_generation_queue, accelerator="Ctrl+Q")
         gen_menu.add_command(label="Generuj dialogi", command=self.app.enqueue_generate_all, accelerator="Ctrl+Shift+G")
         gen_menu.add_command(label="Konwertuj audio", command=self.app.enqueue_convert_all, accelerator="Ctrl+Shift+R")
         gen_menu.add_separator()

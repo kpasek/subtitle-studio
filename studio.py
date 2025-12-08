@@ -36,6 +36,7 @@ from audio.generation_manager import GenerationManager, GenerationJob, Conversio
 from audio.generation_queue import GenerationQueueWindow
 from ui.recent_projects import RecentProjectsWindow
 from ui.shortcuts import ShortcutsWindow
+from ui.game_reader_export import GameReaderExportWindow
 
 try:
     from packaging import version
@@ -1214,16 +1215,17 @@ class SubtitleStudioApp(ctk.CTk):
             messagebox.showinfo('Gotowe', f'Zapisano: {path}')
 
     def generate_game_reader_preset(self):
-        # (Skrócona wersja - logika bez zmian, tylko przeniesienie)
-        if not self.processed_clean: return messagebox.showwarning('Brak danych', 'Brak napisów.', parent=self)
-        if not self.audio_dir: return messagebox.showwarning('Brak audio', 'Brak katalogu audio.', parent=self)
-        dest_folder = filedialog.askdirectory(title="Wybierz folder docelowy")
-        if not dest_folder: return
-        # ... (implementacja identyczna jak wcześniej, pomijam dla czytelności kodu tutaj - wklej swoją implementację generate_game_reader_preset z poprzedniej wersji) ...
-        # Tutaj wstaw pełną implementację tej funkcji, jeśli jej używasz.
-        # Jeśli nie chcesz zaśmiecać, wstaw tutaj tylko 'pass' i dodaj, jeśli używasz.
-        # Zakładam, że wiesz jak ona wyglądała - nie zmieniała się logicznie.
-        pass
+        """Otwiera okno konfiguracji eksportu do Game Readera."""
+        if not self.processed_replace:
+            messagebox.showwarning('Brak danych', 'Brak przetworzonych napisów do wyeksportowania.', parent=self)
+            return
+
+        if not self.audio_dir:
+            messagebox.showwarning('Brak audio', 'Nie wybrano katalogu audio w projekcie.', parent=self)
+            return
+
+        # Otwórz nowe okno konfiguracji
+        GameReaderExportWindow(self)
 
     def import_patterns_from_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
