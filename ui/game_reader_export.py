@@ -3,7 +3,6 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
 import shutil
-import os
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Tuple
@@ -230,23 +229,26 @@ class GameReaderExportWindow(ctk.CTkToplevel):
                 else:
                     self._update_status_safe(f"Kopiowanie {total_files} plików do katalogu 'audio'...", "blue")
 
+                    update_step = max(10, int(total_files / 100))
+
                     copied_count = 0
                     for src in files_to_copy:
                         dst = target_audio_dir / src.name
                         shutil.copy2(src, dst)
                         copied_count += 1
 
-                        # Aktualizacja paska postępu co 10 plików
-                        if copied_count % 1000 == 0 or copied_count == total_files:
+                        if copied_count % update_step == 0 or copied_count == total_files:
                             progress = copied_count / total_files
+                            percent = int(progress * 100)
+
                             self.app.queue.put(lambda p=progress: self.progress_bar.set(p))
-                            self.app.queue.put(lambda c=copied_count, t=total_files: self.lbl_progress_info.configure(
-                                text=f"Kopiowanie audio: {c}/{t}"))
+                            self.app.queue.put(
+                                lambda txt=f"Kopiowanie audio: {percent}%": self.lbl_progress_info.configure(text=txt))
 
             # 3. Generowanie pliku preset.json
             self._update_status_safe("Generowanie preset.json...", "blue")
 
-            # Wzorzec JSON (na podstawie przesłanego pliku), z uzupełnionymi ścieżkami
+            # Wzorzec JSON
             preset_data = {
                 "monitor": {
                     "top": 900,
@@ -267,8 +269,8 @@ class GameReaderExportWindow(ctk.CTkToplevel):
                 "USE_CENTER_LINE_1": False,
                 "USE_CENTER_LINE_2": False,
                 "USE_CENTER_LINE_3": False,
-                "audio_dir": "audio",  # Ustawione na podkatalog
-                "text_file_path": "subtitlesPL.txt",  # Ustawione na wygenerowany plik
+                "audio_dir": "audio",
+                "text_file_path": "subtitlesPL.txt",
                 "names_file_path": "",
                 "screenshot_dir": "",
                 "key_bindings": {

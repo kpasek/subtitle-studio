@@ -37,6 +37,7 @@ from audio.generation_queue import GenerationQueueWindow
 from ui.recent_projects import RecentProjectsWindow
 from ui.shortcuts import ShortcutsWindow
 from ui.game_reader_export import GameReaderExportWindow
+from ui.pattern_io import PatternIOWindow
 
 try:
     from packaging import version
@@ -1228,29 +1229,14 @@ class SubtitleStudioApp(ctk.CTk):
         GameReaderExportWindow(self)
 
     def import_patterns_from_csv(self):
-        file_path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
-        if not file_path: return
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    if len(row) >= 1:
-                        pat = row[0].strip()
-                        repl = row[1].strip() if len(row) > 1 else ""
-                        cs = not bool(int(row[2].strip())) if len(row) > 2 else True
-                        self.custom_replace.append(PatternItem(pat, repl, cs))
-            self._refresh_custom_lists()
-            messagebox.showinfo("Sukces", "Zaimportowano wzorce.")
-        except Exception as e:
-            messagebox.showerror("Błąd", str(e))
+        """Otwiera okno IO wzorców na zakładce Import."""
+        win = PatternIOWindow(self)
+        win.tabview.set("Import")
 
     def export_patterns_to_csv(self):
-        if not self.custom_replace: return
-        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
-        if path:
-            with open(path, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-                for p in self.custom_replace: writer.writerow([p.pattern, p.replace, int(p.case_sensitive)])
+        """Otwiera okno IO wzorców na zakładce Eksport."""
+        win = PatternIOWindow(self)
+        win.tabview.set("Eksport")
 
     def apply_theme_settings(self):
         ctk.set_appearance_mode(self.global_config.get('appearance_mode', 'System'))
