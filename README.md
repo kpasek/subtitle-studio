@@ -1,125 +1,113 @@
-# 🎬 Subtitle Studio – Przewodnik użytkownika
+# Subtitle Studio
 
-Subtitle Studio to aplikacja desktopowa do czyszczenia i przygotowywania napisów dialogowych dla systemów TTS (Text-to-Speech) i Game Reader.
-Umożliwia wczytanie napisów, zastosowanie wzorców REGEX do usuwania lub poprawiania treści, generowanie dialogów głosowych oraz zarządzanie powiązanymi plikami audio.
+**Subtitle Studio** to zaawansowane narzędzie okienkowe stworzone do edycji napisów, zarządzania nimi oraz automatyzacji procesu generowania dubbingu (TTS) do gier. Aplikacja pozwala na wygodną pracę z plikami napisów, mapowanie głosów postaci oraz masowe generowanie i konwersję plików audio.
 
-## 🧭 Workflow – krok po kroku
-### 1. Otwieranie napisów
+---
 
-Uruchom aplikację Subtitle Studio.
+## 🚀 Główne funkcje
 
-W menu górnym wybierz:
-`Dialogi → Wczytaj napisy`
+### 📂 Zarządzanie Projektem (Menu: Projekt)
 
-Wskaż plik `.txt` zawierający napisy (np. subtitles.txt).
+Zarządzanie stanem pracy odbywa się poprzez pliki projektów `.json`.
+* **Otwórz projekt (.json)** – Wczytuje wcześniej zapisany stan pracy (ustawienia, ścieżki, mapowanie głosów).
+* **Otwórz ostatni... (Ctrl+E)** – Szybki dostęp do listy ostatnio edytowanych projektów.
+* **Zapisz projekt (Ctrl+S)** – Zapisuje bieżące postępy.
+* **Zapisz jako** – Pozwala zapisać kopię projektu pod nową nazwą.
+* **Zamknij projekt** – Czyści bieżący widok i resetuje ustawienia do domyślnych.
+* **Zamknij** – Wyłącza aplikację.
 
-Zawartość pojawi się w głównym oknie po prawej stronie.
+### 💬 Dialogi i Audio (Menu: Dialogi)
 
-💡 W każdej chwili możesz zapisać bieżący stan projektu wybierając `Projekt → Zapisz projekt`.
-Aplikacja zapamięta wybrane pliki, wzorce oraz katalog audio.
+To serce aplikacji, gdzie odbywa się praca z plikami.
+* **Wczytaj napisy** – Importuje plik z napisami (obsługa formatów tekstowych).
+* **Wybierz katalog audio** – Wskazuje folder, do którego będą trafiać wygenerowane pliki dźwiękowe.
+* **Pokaż kolejkę zadań (Ctrl+Q)** – Otwiera okno menedżera, który w tle przetwarza generowanie TTS i konwersję plików.
+* **Generuj dialogi (Ctrl+Shift+G)** – Rozpoczyna proces generowania audio dla wszystkich linii (lub brakujących).
+* **Konwertuj audio (Ctrl+Shift+R)** – Uruchamia przetwarzanie plików (np. formatowanie do OGG/MP3, normalizacja) przy użyciu FFmpeg.
+* **Dopasuj identyfikatory audio** – Narzędzie do masowej zmiany nazw plików audio, aby pasowały do ID linii w napisach.
+* **Usuń przekonwertowane pliki** – Czyści folder `ready` (gotowe pliki), przydatne przy regeneracji.
+* **Imiona (Ctrl+Shift+N)** – Lista imion, które mają być wycinane przez program Game Reader.
+* **Pobierz napisy / Pobierz napisy TTS** – Eksportuje przetworzone napisy:
+    * *Clean* – Czyste napisy wyświetlane w grze.
+    * *TTS* – Napisy przygotowane pod syntezator mowy (np. z rozwiniętymi skrótami "100 zł" -> "sto złotych").
 
-### 2. Czyszczenie napisów – wzorce wycinające
+### 🧩 Wzorce i Regex (Menu: Wzorce)
 
-Po lewej stronie znajdziesz sekcję Wbudowane wzorce wycinające.
-Służą one do usuwania całych linii zawierających określone elementy (np. znaczniki \<i>, liczby, komentarze).
+Automatyzacja czyszczenia i zamiany tekstu.
+* **Menedżer wzorców (Ctrl+R)** – Pozwala definiować reguły zamiany tekstu (np. usuwanie tagów HTML, zamiana literówek). Dzieli się na:
+    * *Napisy (Czyszczenie)* – Modyfikacje widoczne dla gracza.
+    * *TTS (Podmiana)* – Modyfikacje słyszalne (wymowa).
+* **Importuj/Eksportuj wzorce z CSV** – Możliwość przenoszenia bazy wzorców między projektami. Format CSV obsługuje: `Wzorzec, Zamiennik, CzyWielkośćLiterMaZnaczenie`.
+* **Usuwanie dialogów** – Narzędzie do masowego usuwania plików audio dla konkretnych wzorców (np. usunięcie wszystkich kwestii Narratora).
 
-Zaznacz wybrane wzorce (np. Usuń całe linie [*-]).
+### ⚙️ Ustawienia (Menu: Ustawienia)
 
-Możesz dodać własne wzorce w sekcji Własne wzorce wycinające:
+* **Ustawienia aplikacji** – Globalne konfiguracje (wygląd, domyślne ścieżki).
+* **Ustawienia projektu** – Konfiguracja specyficzna dla danej gry/filmu (wybrany silnik TTS).
 
-- wpisz wyrażenie regularne (regexp),
+---
 
-- opcjonalnie określ zamiennik,
+## 🖥️ Okno Główne i Edycja
 
-- kliknij `Dodaj`.
+### Lista Napisów
+Główna część okna wyświetla listę linii dialogowych.
+* **Interakcja:** Kliknięcie na linię ładuje ją do edytora na dole.
 
-- Kliknij przycisk `Zastosuj wzorce`, aby przetworzyć tekst.
+### Edytor Linii
+Znajduje się pod listą napisów. Pozwala na ręczną modyfikację tekstu wybranej linii bez ingerencji w plik źródłowy na dysku (zmiany są w pamięci projektu).
+* Przydatne do poprawiania literówek lub zmiany fonetycznej pisowni dla TTS (np. wpisanie "Dżi-ti-ej" zamiast "GTA").
 
-✨ Linie usunięte zostaną oznaczone jako odrzucone, a widok w podglądzie zostanie zaktualizowany.
+### 🔍 Wyszukiwarka (Regex)
+Pasek wyszukiwania obsługuje wyrażenia regularne (Regex), co pozwala na zaawansowane filtrowanie.
 
-### 3. Poprawianie treści – wzorce podmieniające
+**Przykłady wyszukiwania:**
+1.  **Zwykły tekst:**
+    * Wpisz: `zamek`
+    * *Znajdzie wszystkie linie zawierające słowo "zamek".*
+2.  **Początek linii (`^`):**
+    * Wpisz: `^Hej`
+    * *Znajdzie linie zaczynające się od "Hej".*
+3.  **Koniec linii (`$`):**
+    * Wpisz: `koniec\.$`
+    * *Znajdzie linie kończące się słowem "koniec." (kropka musi być poprzedzona backslashem).*
+4.  **Alternatywa (`|`):**
+    * Wpisz: `(Tak|Nie)`
+    * *Znajdzie linie zawierające słowo "Tak" LUB "Nie".*
+5.  **Długość znaku (`.`):**
+    * Wpisz: `^...$`
+    * *Znajdzie linie mające dokładnie 3 znaki.*
 
-Niżej znajduje się sekcja Wbudowane wzorce podmieniające – automatycznie poprawiają treść napisów, np.:
+---
 
-* zamieniają wielokrotne znaki interpunkcyjne,
-* usuwają znaki specjalne,
-* poprawiają trójkropki,
-* zastępują białe znaki pojedynczymi spacjami.
+## 🔊 Generowanie Audio
 
-Analogicznie możesz dodać własne wzorce podmieniające, by lepiej dopasować dane do modeli TTS.
+Aplikacja wspiera różne silniki TTS. Konfiguracja odbywa się w ustawieniach projektu.
+* **Google Cloud TTS** – Wysoka jakość, wymaga pliku credentials JSON.
+* **ElevenLabs** – Najwyższa jakość (głosy AI), wymaga klucza API.
+* **Local API (XTTS / STylish)** – Współpraca z lokalnymi serwerami generowania mowy.
 
-🔍 Dobrze przygotowane napisy (bez znaków specjalnych, skrótów, oznaczeń scen) znacząco poprawiają jakość generowanego głosu.
+Dla zaawansowanej obsługi lokalnej, Subtitle Studio współpracuje z repozytorium:
+👉 **[TTS Dialog Generator](https://github.com/kpasek/tts-dialog-generator)**
 
-### 4. Generowanie i odsłuchiwanie plików audio
+---
 
-Po przetworzeniu napisów możesz generować i przeglądać dialogi:
+## ⌨️ Skróty Klawiszowe
 
-Wybierz katalog roboczy dla plików audio:
-`Dialogi → Wybierz katalog audio`
+Pełna lista skrótów dostępna w menu **Pomoc -> Skróty klawiszowe**.
 
-W głównym oknie:
-
-Każdy wiersz odpowiada jednej linii dialogowej.
-
-Obok znajduje się przycisk `Odtwórz`, który umożliwia odsłuch wybranego pliku audio. Można też kliknąć 2x na liście dialogowej, aby odsługać audio.
-
-Obok przycisku dostępna jest lista rozwijana z odnalezionymi plikami audio (jeśli istnieje kilka wersji).
-
-Aby wygenerować nowy plik audio, kliknij przycisk `Generuj` przy danej linii.
-
-## 🗣️ Obsługiwane modele TTS:
-
-* ElevenLabs,
-* Google Cloud TTS,
-* XTTSv2 (lokalny model).
-* STylish TTS (localny model)
-
-### Lokalne modele serwowane są za pomocą pomocniczej aplikacji
-https://github.com/kpasek/tts-dialog-generator
-
-### 5. Usuwanie plików audio
-
-Subtitle Studio pozwala zarządzać nagraniami audio w sposób elastyczny:
-
-🔸 Usuwanie pojedynczego pliku
-
-Kliknij Usuń obok konkretnej linii – spowoduje to usunięcie odpowiadającego jej pliku audio.
-
-🔸 Usuwanie wszystkich plików dla dialogu
-
-Kliknij Usuń Wsz., aby skasować wszystkie warianty audio powiązane z daną linią.
-
-🔸 Masowe usuwanie plików
-
-W menu wybierz:
-`Dialogi → Masowe usuwanie plików audio`
-
-Wprowadź wzorce `REGEX` dopasowujące treść dialogów, których pliki chcesz usunąć.
-
-Kliknij `Dodaj` aby dodać wzorzec do listy.
-
-Wciśnij `Przelicz`, aby aplikacja wyświetliła liczbę pasujących linii i plików.
-
-Kliknij `Usuń pliki`, aby wykonać operację.
-
-## 6. Wyszukiwanie i podgląd
-
-W górnej części okna znajduje się pole Szukaj – możesz tu wprowadzić dowolny wzorzec (także REGEX), by szybko odszukać konkretne linie w podglądzie.
-
-## 7. Eksport napisów
-
-Po zakończeniu pracy możesz zapisać wyniki:
-
-`Pobierz – napisy dla TTS` → zapisuje oczyszczoną wersję do użycia z generatorami głosu.
-
-`Pobierz – napisy dla Game Reader` → przygotowuje napisy w formacie zgodnym z Game Readerem.
-
-## ⚙️ Ustawienia
-
-W zakładce Ustawienia możesz określić m.in.:
-
-* domyślne katalogi wejściowe i wyjściowe,
-* model TTS do użycia,
-* parametry generowania (głos, prędkość, język),
-* parametry przetwarzania audio
-* host i port do lokalnego modelu XTTSv2 (jeśli używasz wersji offline).
+| Kategoria | Skrót | Akcja |
+| :--- | :--- | :--- |
+| **Ogólne** | `Ctrl + S` | Zapisz projekt |
+| | `Ctrl + E` | Otwórz ostatnie projekty |
+| | `Ctrl + F` | Szukaj (aktywacja paska szukania) |
+| | `Ctrl + Q` | Pokaż kolejkę zadań (Queue) |
+| | `Tab` | Przełącz widok (Tekst Napisów <-> Tekst TTS) |
+| **Edycja** | `Ctrl + C` | Kopiuj tekst zaznaczonej linii |
+| | `Ctrl + K` | Zatwierdź zmiany w edytorze |
+| | `Ctrl + R` | Otwórz Menedżer Wzorców |
+| **Audio (Globalne)** | `Ctrl + Shift + G` | Generuj wszystkie brakujące audio |
+| | `Ctrl + Shift + R` | Konwertuj pliki audio |
+| **Audio (Linia)** | `Ctrl + Spacja` | Odtwórz audio dla wybranej linii |
+| | `Ctrl + G` | Generuj audio tylko dla tej linii |
+| | `Ctrl + X` | Usuń audio dla tej linii |
+| | `Del` | Wyczyść treść linii |
