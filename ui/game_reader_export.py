@@ -202,6 +202,14 @@ class GameReaderExportWindow(ctk.CTkToplevel):
 
             self._update_status_safe("Zapisano subtitlesPL.txt", "blue")
 
+            if self.app.names_list:
+                names_file = dest_dir / "names.txt"
+                with open(names_file, 'w', encoding='utf-8') as f:
+                    # Zapisujemy każde imię w nowej linii
+                    f.write('\n'.join(self.app.names_list))
+
+                self._update_status_safe("Zapisano names.txt", "blue")
+
             # 2. Kopiowanie plików audio do podkatalogu 'audio'
             ready_dir = self.app.audio_dir / "ready"
             target_audio_dir = dest_dir / "audio"

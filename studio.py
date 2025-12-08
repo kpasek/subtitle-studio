@@ -3,7 +3,6 @@ import os.path
 import customtkinter as ctk
 import tkinter as tk
 import re
-import csv
 import json
 import sys
 import os
@@ -38,6 +37,7 @@ from ui.recent_projects import RecentProjectsWindow
 from ui.shortcuts import ShortcutsWindow
 from ui.game_reader_export import GameReaderExportWindow
 from ui.pattern_io import PatternIOWindow
+from ui.names_manager import NamesManagerWindow
 
 try:
     from packaging import version
@@ -118,6 +118,8 @@ class SubtitleStudioApp(ctk.CTk):
         self.processed_clean: List[str] = []
         self.processed_replace: List[str] = []
 
+        self.names_list: List[str] = []
+
         # Zmienne GUI i Cache (inicjalizacja)
         self.lbl_filename: Optional[ctk.CTkLabel] = None
         self._original_lines_version = 0
@@ -174,6 +176,10 @@ class SubtitleStudioApp(ctk.CTk):
 
         threading.Thread(target=self._check_for_updates, daemon=True).start()
 
+        if hasattr(self, 'subtitle_panel'):
+            # Bindujemy Prawy Przycisk Myszy (Button-3 w Windows/Linux, Button-2 w macOS czasem)
+            self.subtitle_panel.editor.entry.bind("<Button-3>", self._show_editor_context_menu)
+
         # Sprawdzamy, czy w konfiguracji jest zapisany ostatni projekt i czy plik istnieje
         last_proj = self.global_config.get('last_project')
         if last_proj and os.path.exists(last_proj):
@@ -188,6 +194,8 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-f>", lambda e: self.subtitle_panel.search_entry.focus_set())
         self.bind("<Control-k>", lambda e: self.apply_processing())
         self.bind("<Control-q>", lambda e: self.show_generation_queue())
+        self.bind("<Control-n>", lambda e: self._add_selected_text_to_names())
+        self.bind("<Control-N>", lambda e: self.open_names_manager())
 
         self.bind("<Tab>", self._cycle_view_mode)
         self.bind("<Escape>", self._on_escape_key)
@@ -887,6 +895,8 @@ class SubtitleStudioApp(ctk.CTk):
 
             self._update_recent_projects(str(self.current_project_path))
 
+            self.names_list = cfg.get("names_list", [])
+
             all_vars = self.builtin_remove_state + self.builtin_replace_state
             traces = {}
             for var in all_vars:
@@ -984,6 +994,7 @@ class SubtitleStudioApp(ctk.CTk):
             "custom_replace": [p.to_json() for p in self.custom_replace],
             "subtitle_path": str(self.loaded_path) if self.loaded_path else None,
             "audio_path": str(self.audio_dir.absolute()) if self.audio_dir else None,
+            "names_list": self.names_list,
             "active_tts_model": self.project_config.get('active_tts_model', 'XTTS'),
             "base_audio_speed": self.project_config.get('base_audio_speed', 1.1)
         })
@@ -1274,6 +1285,51 @@ class SubtitleStudioApp(ctk.CTk):
 
     def _clear_recent_projects(self):
         self.save_app_setting('recent_projects', [])
+
+    def open_names_manager(self):
+        """Otwiera okno zarządzania imionami."""
+        NamesManagerWindow(self)
+
+    def _show_editor_context_menu(self, event):
+        """Pokazuje menu kontekstowe w edytorze."""
+        # Tworzymy standardowe menu Tkinter
+        menu = tk.Menu(self, tearoff=0)
+
+        # Opcje edycyjne (standardowe, bo nadpisujemy domyślne menu systemowe)
+        menu.add_command(label="Wytnij", command=lambda: self.subtitle_panel.editor.entry.event_generate("<<Cut>>"))
+        menu.add_command(label="Kopiuj", command=lambda: self.subtitle_panel.editor.entry.event_generate("<<Copy>>"))
+        menu.add_command(label="Wklej", command=lambda: self.subtitle_panel.editor.entry.event_generate("<<Paste>>"))
+        menu.add_separator()
+
+        # Nasza nowa opcja
+        menu.add_command(label="Dodaj do imion", command=self._add_selected_text_to_names)
+
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _add_selected_text_to_names(self):
+        """Pobiera zaznaczony tekst w edytorze i dodaje do listy imion."""
+        try:
+            # selection_get() rzuca wyjątek, jeśli brak zaznaczenia
+            selected_text = self.subtitle_panel.editor.entry.selection_get()
+            selected_text = selected_text.strip()
+
+            if not selected_text:
+                return
+
+            if selected_text in self.names_list:
+                # Zamiast messagebox, info na pasku statusu
+                self.set_status(f"Ignoruję: Imię '{selected_text}' już jest na liście.")
+            else:
+                self.names_list.append(selected_text)
+                self.mark_as_unsaved()
+                # Zamiast messagebox, info na pasku statusu
+                self.set_status(f"Dodano '{selected_text}' do listy imion.")
+
+        except tk.TclError:
+            # Wyrzuca błąd, gdy nic nie jest zaznaczone -> ignorujemy to
+            pass
+        except Exception as e:
+            print(f"Błąd dodawania imienia: {e}")
 
 
 if __name__ == '__main__':
