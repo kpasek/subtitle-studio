@@ -95,7 +95,7 @@ if os.name == "nt":
 
 class SubtitleStudioApp(ctk.CTk):
     """Główna klasa aplikacji Subtitle Studio."""
-    APP_VERSION = "0.9.9.5"
+    APP_VERSION = "0.10.0"
 
     def __init__(self):
         super().__init__()
