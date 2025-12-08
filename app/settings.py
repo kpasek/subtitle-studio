@@ -11,12 +11,12 @@ if TYPE_CHECKING:
     from app.gui import SubtitleStudioApp
 
 DEFAULT_FILTERS = {
-    "highpass": {"enabled": True, "params": "f=70"},
-    "lowpass": {"enabled": True, "params": "f=14000"},
-    "deesser": {"enabled": True, "params": "i=0.4:m=0.3"},
-    "acompressor": {"enabled": True, "params": "threshold=-18dB:ratio=2:attack=5:release=120:makeup=2"},
-    "loudnorm": {"enabled": True, "params": "I=-16:TP=-1.5:LRA=11"},
-    "alimiter": {"enabled": True, "params": "limit=-1dB"}
+    "highpass": {"enabled": False, "params": "f=70"},
+    "lowpass": {"enabled": False, "params": "f=14000"},
+    "deesser": {"enabled": False, "params": "i=0.4:m=0.3"},
+    "acompressor": {"enabled": False, "params": "threshold=-18dB:ratio=2:attack=5:release=120:makeup=2"},
+    "loudnorm": {"enabled": False, "params": "I=-16:TP=-1.5:LRA=11"},
+    "alimiter": {"enabled": False, "params": "limit=-1dB"}
 }
 
 FILTER_DESCRIPTIONS = {
