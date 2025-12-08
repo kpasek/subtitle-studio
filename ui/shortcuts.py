@@ -20,6 +20,7 @@ class ShortcutsWindow(ctk.CTkToplevel):
                 ("Ctrl + E", "Otwórz ostatnie projekty"),
                 ("Ctrl + S", "Zapisz projekt"),
                 ("Ctrl + F", "Szukaj (focus na wyszukiwarkę)"),
+                ("Ctrl + Q", "Pokaż kolejkę zadań"),
                 ("Tab", "Przełącz widok (Napisy <-> TTS)"),
             ]),
             ("Edycja i Wybór", [

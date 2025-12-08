@@ -179,6 +179,7 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-s>", lambda e: self.save_project())
         self.bind("<Control-f>", lambda e: self.subtitle_panel.search_entry.focus_set())
         self.bind("<Control-k>", lambda e: self.apply_processing())
+        self.bind("<Control-q>", lambda e: self.show_generation_queue())
 
         self.bind("<Tab>", self._cycle_view_mode)
         self.bind("<Escape>", self._on_escape_key)
