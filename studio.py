@@ -116,22 +116,22 @@ class SubtitleStudioApp(ctk.CTk):
         self.processed_clean: List[str] = []
         self.processed_replace: List[str] = []
 
+        # Zmienne GUI i Cache (inicjalizacja)
         self.lbl_filename: Optional[ctk.CTkLabel] = None
-
         self._original_lines_version = 0
-        self._cache_clean_base: List[str] | None = None  # Wcześniej był błąd w nazwie
+        self._cache_clean_base: List[str] | None = None
         self._last_remove_signature = None
         self._cache_replace_result: List[str] | None = None
         self._last_replace_signature = None
 
-        # Przechowuje zmiany dla warstwy "Napisy" (czyszczone)
+        # Edycje
         self.manual_edits: dict[int, str] = {}
-        # Przechowuje zmiany dla warstwy "TTS" (podmiana pod lektora)
         self.tts_edits: dict[int, str] = {}
 
         last_view = self.global_config.get('last_view_mode', 'Napisy')
         self.view_mode = tk.StringVar(value=last_view)
 
+        # Wzorce builtin
         self.builtin_remove = [PatternItem(
             p.pattern, p.replace, p.case_sensitive, name) for p, name in BUILTIN_REMOVE]
         self.builtin_replace = [PatternItem(
@@ -171,6 +171,12 @@ class SubtitleStudioApp(ctk.CTk):
         self._bind_shortcuts()
 
         threading.Thread(target=self._check_for_updates, daemon=True).start()
+
+        # Sprawdzamy, czy w konfiguracji jest zapisany ostatni projekt i czy plik istnieje
+        last_proj = self.global_config.get('last_project')
+        if last_proj and os.path.exists(last_proj):
+            # Używamy 'after', aby pozwolić GUI na pełną inicjalizację przed wczytaniem ciężkiego projektu
+            self.after(100, lambda: self.open_project(last_proj))
 
     def _bind_shortcuts(self):
         """Rejestruje globalne skróty klawiszowe."""
