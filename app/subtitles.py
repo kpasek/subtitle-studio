@@ -328,6 +328,17 @@ class SubtitlePanel(ctk.CTkFrame):
         menu.add_command(label="➕ Dodaj wzorzec zamieniający (Ctrl+Klik)",
                          command=lambda: self.app.add_replace_pattern_from_selection(from_menu=True), state=tk.NORMAL)
 
+        # Obliczamy ID. current_line_index jest liczony od 0, a pliki od 1.
+        current_id = self.app.selected_line_index + 1
+
+        prev_id = current_id - 1
+        if prev_id < 1: prev_id = 1  # Zabezpieczenie, żeby nie poszło na 0
+
+        menu.add_command(
+            label=f"Dopasuj audio",
+            command=lambda: self.app.open_audio_rename_window(target_id=current_id, source_id=prev_id)
+        )
+
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:

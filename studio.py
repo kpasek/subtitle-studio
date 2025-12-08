@@ -1282,9 +1282,13 @@ class SubtitleStudioApp(ctk.CTk):
             if self.current_project_path: self.set_project_config('audio_path', str(self.audio_dir.absolute()))
             self.subtitle_panel.update_audio_buttons_state()
 
-    def open_audio_rename_window(self):
-        if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Wybierz katalog audio.", parent=self)
-        AudioRenameWindow(self, self.audio_dir).grab_set()
+    def open_audio_rename_window(self, target_id=None, source_id=None):
+        """Otwiera okno ręcznego dopasowywania/przesuwania plików audio."""
+        if not self.audio_dir:
+            messagebox.showwarning("Brak audio", "Nie wybrano katalogu audio.")
+            return
+            # Przekazujemy parametry do okna
+        AudioRenameWindow(self, self.audio_dir, initial_target=target_id, initial_source=source_id)
 
     def delete_all_converted_audio(self):
         if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Wybierz katalog audio.", parent=self)

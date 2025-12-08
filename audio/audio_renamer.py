@@ -2,15 +2,17 @@ import customtkinter as ctk
 import os
 from pathlib import Path
 from tkinter import messagebox
+from typing import Optional
 
 
 class AudioRenameWindow(ctk.CTkToplevel):
-    def __init__(self, app, audio_dir: Path):
+    def __init__(self, app, audio_dir: Path, initial_target: Optional[int] = None,
+                 initial_source: Optional[int] = None):
         super().__init__(app)
         self.app = app
         self.audio_dir = audio_dir
         self.title("Dopasowanie dialogów do linii")
-        self.geometry("600x300")
+        self.geometry("600x350")
 
         # Ustawienie okna jako modalne
         self.transient(app)
@@ -81,6 +83,17 @@ class AudioRenameWindow(ctk.CTkToplevel):
         # Stan
         self.offset = 0
 
+        # --- Inicjalizacja wartościami (jeśli podano) ---
+        if initial_target is not None:
+            self.ent_text_id.insert(0, str(initial_target))
+
+        if initial_source is not None:
+            self.ent_audio_id.insert(0, str(initial_source))
+
+        # Jeśli wartości są wpisane, od razu uruchom logikę sprawdzania
+        if initial_target is not None or initial_source is not None:
+            self.on_input_change()
+
     def on_input_change(self, event=None):
         target_str = self.ent_text_id.get().strip()
         source_str = self.ent_audio_id.get().strip()
@@ -146,11 +159,17 @@ class AudioRenameWindow(ctk.CTkToplevel):
         file_to_play = wav if wav.exists() else (mp3 if mp3.exists() else None)
 
         if file_to_play:
-            # Używamy ffplay w tle
             import subprocess
             try:
+                # Uruchomienie ffplay w tle bez okna konsoli
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
                 subprocess.Popen(["ffplay", "-nodisp", "-autoexit", str(file_to_play)],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 startupinfo=startupinfo)
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nie można odtworzyć:\n{e}")
 
@@ -159,18 +178,12 @@ class AudioRenameWindow(ctk.CTkToplevel):
                                    f"Czy na pewno chcesz zmienić nazwy plików z przesunięciem {self.offset:+d}?\nTo operacja nieodwracalna."):
             return
 
-        # Logika zmiany nazw (podobna do AudioSync, ale prostsza - czyste przesunięcie w górę lub w dół)
-        # Przy przesunięciu trzeba uważać na kolejność!
-
         start_id = int(self.ent_audio_id.get())
         files = []
 
-        # Znajdź wszystkie pliki >= start_id
-        # Niestety glob nie sortuje numerycznie idealnie, trzeba sparsować
         for f in self.audio_dir.glob("output1 (*).*"):
             try:
-                # nazwa formatu: output1 (123).wav
-                stem = f.stem  # output1 (123)
+                stem = f.stem
                 num_part = stem.split('(')[1].split(')')[0]
                 num = int(num_part)
                 if num >= start_id:
@@ -182,10 +195,7 @@ class AudioRenameWindow(ctk.CTkToplevel):
             messagebox.showinfo("Info", "Brak plików do zmiany.")
             return
 
-        # Sortowanie:
-        # Jeśli offset > 0 (np. 1 -> 2), musimy zmieniać od KOŃCA (największe numery najpierw), żeby nie nadpisać.
-        # Jeśli offset < 0 (np. 2 -> 1), musimy zmieniać od POCZĄTKU.
-
+        # Sortowanie od końca przy przesuwaniu w górę (offset > 0)
         reverse_order = (self.offset > 0)
         files.sort(key=lambda x: x[0], reverse=reverse_order)
 
@@ -196,7 +206,6 @@ class AudioRenameWindow(ctk.CTkToplevel):
 
             try:
                 if new_name.exists():
-                    # Conflict!
                     print(f"Konflikt: {new_name} już istnieje. Pomijam {path}.")
                     continue
                 os.rename(path, new_name)
@@ -204,7 +213,7 @@ class AudioRenameWindow(ctk.CTkToplevel):
             except Exception as e:
                 print(f"Błąd zmiany {path}: {e}")
 
-        # To samo dla folderu ready
+        # Folder ready
         ready_dir = self.audio_dir / "ready"
         if ready_dir.exists():
             ready_files = []
