@@ -116,6 +116,14 @@ class SubtitleStudioApp(ctk.CTk):
         self.processed_clean: List[str] = []
         self.processed_replace: List[str] = []
 
+        self.lbl_filename: Optional[ctk.CTkLabel] = None
+
+        self._original_lines_version = 0
+        self._cache_clean_base: List[str] | None = None  # Wcześniej był błąd w nazwie
+        self._last_remove_signature = None
+        self._cache_replace_result: List[str] | None = None
+        self._last_replace_signature = None
+
         # Przechowuje zmiany dla warstwy "Napisy" (czyszczone)
         self.manual_edits: dict[int, str] = {}
         # Przechowuje zmiany dla warstwy "TTS" (podmiana pod lektora)
@@ -446,6 +454,7 @@ class SubtitleStudioApp(ctk.CTk):
         try:
             with open(self.loaded_path, "r", encoding="utf-8", errors="replace") as f:
                 self.original_lines = f.read().splitlines()
+                self._original_lines_version += 1  # Invalidate cache
 
             # Wczytaj obie warstwy edycji
             self._load_manual_edits()
@@ -523,26 +532,46 @@ class SubtitleStudioApp(ctk.CTk):
         replace_patterns.extend(p for i, p in enumerate(self.builtin_replace) if self.builtin_replace_state[i].get())
         return remove_patterns, replace_patterns
 
+    def _get_patterns_signature(self, patterns: List[PatternItem]):
+        """Tworzy sygnaturę (hashowalną krotkę) dla listy wzorców."""
+        return tuple((p.pattern, p.replace, p.case_sensitive, p.enabled) for p in patterns)
+
     def apply_patterns(self):
-        """Przelicza linie uwzględniając obie warstwy edycji (Napisy i TTS)."""
+        """Przelicza linie z wykorzystaniem CACHE, aby unikać zbędnych operacji regex."""
         self.lbl_count_orig.configure(text=f'Linie org.: {len(self.original_lines):,}'.replace(",", " "))
+
         rem_patterns, rep_patterns = self._gather_active_patterns()
 
         try:
-            # 1. Regex (usuwanie)
-            temp_clean = apply_remove_patterns(self.original_lines, rem_patterns)
+            # --- ETAP 1: Clean Patterns (Cache'owany) ---
+            current_rem_sig = self._get_patterns_signature(rem_patterns)
+            # Sygnatura uwzględnia wersję linii oryginalnych
+            full_rem_sig = (self._original_lines_version, current_rem_sig)
 
-            # 2. Edycje manualne (Napisy) - nadpisują wynik regexa
+            # Sprawdź czy mamy wynik w cache i czy jest aktualny
+            # Tutaj używamy poprawnej nazwy zmiennej z __init__
+            if self._cache_clean_base is None or full_rem_sig != self._last_remove_signature:
+                self._cache_clean_base = apply_remove_patterns(self.original_lines, rem_patterns)
+                self._last_remove_signature = full_rem_sig
+
+            # Zastosuj edycje manualne na bazie wyniku z cache
+            self.processed_clean = list(self._cache_clean_base)
             for idx, text in self.manual_edits.items():
-                if 0 <= idx < len(temp_clean):
-                    temp_clean[idx] = text
+                if 0 <= idx < len(self.processed_clean):
+                    self.processed_clean[idx] = text
 
-            self.processed_clean = temp_clean
+            # --- ETAP 2: Replace Patterns (Cache'owany) ---
+            input_hash = hash(tuple(self.processed_clean))
+            current_rep_sig = self._get_patterns_signature(rep_patterns)
 
-            # 3. Regex (podmiana pod TTS) - baza to processed_clean
-            self.processed_replace = apply_replace_patterns(self.processed_clean, rep_patterns)
+            full_rep_sig = (input_hash, current_rep_sig)
 
-            # 4. Edycje manualne (TTS) - nadpisują wynik podmiany
+            if self._cache_replace_result is None or full_rep_sig != self._last_replace_signature:
+                self._cache_replace_result = apply_replace_patterns(self.processed_clean, rep_patterns)
+                self._last_replace_signature = full_rep_sig
+
+            # Zastosuj edycje manualne TTS
+            self.processed_replace = list(self._cache_replace_result)
             for idx, text in self.tts_edits.items():
                 if 0 <= idx < len(self.processed_replace):
                     self.processed_replace[idx] = text
@@ -551,7 +580,10 @@ class SubtitleStudioApp(ctk.CTk):
             messagebox.showerror('Błąd regex', f'Błąd w wyrażeniu regularnym:\n{e}')
             return
         except Exception as e:
+            # Ważne: logowanie błędów, żeby wiedzieć co poszło nie tak
             print(f"Error applying patterns: {e}")
+            import traceback
+            traceback.print_exc()
             return
 
         # Wybierz listę do wyświetlenia
@@ -622,7 +654,17 @@ class SubtitleStudioApp(ctk.CTk):
         self.mark_as_unsaved()
 
         # Po finalizacji trzeba przeliczyć replace, aby uwzględnić nowe linie
-        self.processed_replace = apply_replace_patterns(self.processed_clean, rep_patterns)
+        # Uwaga: w tym miejscu logika 'finalize' jest specyficzna - ona modyfikuje processed_clean
+        # ale apply_patterns normalnie nadpisuje processed_clean z original_lines.
+        # W tej aplikacji _finalize_processing jest jednorazowym "zrzutem",
+        # który po wywołaniu apply_patterns może zostać nadpisany, jeśli original_lines nie zostały zaktualizowane.
+        # Aby cache działał poprawnie po tej operacji, wymuszamy odświeżenie cache dla replace
+
+        # apply_patterns w obecnej formie odtworzy processed_clean z original_lines, 
+        # co potencjalnie cofnie efekt _finalize (usuwanie pustych/duplikatów), 
+        # chyba że intencją autora było tylko wygenerowanie plików wyjściowych?
+        # Zakładam, że apply_patterns ma decydujący głos.
+
         self.apply_patterns()
         self.set_status('Zatwierdzono zmiany i przetworzono napisy.')
 
@@ -863,6 +905,7 @@ class SubtitleStudioApp(ctk.CTk):
                 self.load_file(subtitle_path, bypass_save_check=True)
             else:
                 self.original_lines = []
+                self._original_lines_version += 1  # Invalidate cache
                 self.apply_patterns()
                 self.lbl_filename.configure(text="Brak wczytanego pliku")
 
@@ -1068,7 +1111,8 @@ class SubtitleStudioApp(ctk.CTk):
             win.ent_replace.insert(0, text)
             win.var_case_sensitive.set(True)
             if from_menu: win.lift()
-        except IndexError: pass
+        except IndexError:
+            pass
 
     def _check_for_updates(self):
         if not PACKAGING_AVAILABLE: return

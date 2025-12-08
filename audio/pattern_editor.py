@@ -33,7 +33,7 @@ class PatternEditorWindow(ctk.CTkToplevel):
         self.resizable(False, False)
 
         # Zablokuj okno nadrzędne
-        # self.grab_set()
+        self.grab_set()
         self.transient(parent)
 
         self.grid_columnconfigure(0, weight=1)
