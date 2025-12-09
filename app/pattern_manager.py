@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
-from typing import List,  TYPE_CHECKING
+from tkinter import ttk
+from typing import List, TYPE_CHECKING, Optional
 
 from app.entity import PatternItem
 
@@ -10,173 +11,296 @@ if TYPE_CHECKING:
 
 class PatternManagerWindow(ctk.CTkToplevel):
     """
-    Osobne okno (niemodalne) do zarządzania wzorcami wycinającymi i podmieniającymi.
+    Osobne okno do zarządzania wzorcami.
+    Zoptymalizowane przy użyciu ttk.Treeview dla wysokiej wydajności przy dużej liczbie wzorców.
+    Wersja Compact z naprawionym renderowaniem wierszy (rowheight).
     """
 
     def __init__(self, master: 'SubtitleStudioApp'):
         super().__init__(master)
         self.master_app = master
         self.title("Menedżer Wzorców")
-        self.geometry("1000x700")
-
-        # Okno nie blokuje rodzica (niemodalne)
+        self.geometry("1100x750")
         self.transient(master)
+
+        # Konfiguracja stylu dla Treeview (aby pasował do ciemnego motywu)
+        self._setup_treeview_style()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
+        # Zmienna do wyszukiwania
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", self._on_search_change)
+
         self._create_layout()
         self.refresh_ui()
 
-    def _create_layout(self):
-        """Tworzy szkielet interfejsu (kolumny dla Custom i Builtin)."""
+    def _setup_treeview_style(self):
+        """Konfiguruje wygląd ttk.Treeview, aby pasował do CustomTkinter."""
+        style = ttk.Style()
+        style.theme_use("clam")
 
+        # Pobranie kolorów z motywu ctk (przybliżone dla trybu dark/light)
+        bg_color = "#2b2b2b"  # Ciemne tło
+        fg_color = "#ffffff"  # Biały tekst
+        field_bg = "#2b2b2b"
+        selected_bg = "#1f538d"  # Kolor zaznaczenia (niebieski ctk)
+
+        if ctk.get_appearance_mode() == "Light":
+            bg_color = "#ffffff"
+            fg_color = "#000000"
+            field_bg = "#ffffff"
+
+        # POPRAWKA: Dodano 'rowheight=30' aby zapobiec nachodzeniu wierszy na siebie
+        style.configure("Treeview",
+                        background=bg_color,
+                        foreground=fg_color,
+                        fieldbackground=field_bg,
+                        borderwidth=0,
+                        font=("Segoe UI", 10),
+                        rowheight=30)  # <-- Kluczowa zmiana naprawiająca overlap
+
+        style.configure("Treeview.Heading",
+                        background="#3a3a3a",
+                        foreground="white",
+                        relief="flat",
+                        font=("Segoe UI", 10, "bold"))
+
+        style.map("Treeview",
+                  background=[("selected", selected_bg)],
+                  foreground=[("selected", "white")])
+
+    def _create_layout(self):
         # === LEWA KOLUMNA: WŁASNE WZORCE ===
         self.left_frame = ctk.CTkFrame(self)
-        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.left_frame.grid_columnconfigure(0, weight=1)
-        self.left_frame.grid_rowconfigure(1, weight=1)  # Remove list
-        self.left_frame.grid_rowconfigure(4, weight=1)  # Replace list
+        self.left_frame.grid_rowconfigure(2, weight=1)  # Tree Remove
+        self.left_frame.grid_rowconfigure(5, weight=1)  # Tree Replace
+
+        # -- Wyszukiwarka (Compact) --
+        search_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        search_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
+
+        ctk.CTkLabel(search_frame, text="🔍", width=20).pack(side="left", padx=(0, 2))
+        self.ent_search = ctk.CTkEntry(search_frame, textvariable=self.search_var, placeholder_text="Filtruj...",
+                                       height=28)
+        self.ent_search.pack(side="left", fill="x", expand=True)
 
         # -- Sekcja Custom Remove --
-        ctk.CTkLabel(self.left_frame, text="Własne wzorce wycinające", font=("", 14, "bold")).grid(
-            row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        ctk.CTkLabel(self.left_frame, text="Twoje wzorce wycinające (Napisy)", font=("", 13, "bold")).grid(
+            row=1, column=0, sticky="w", padx=5, pady=(2, 2))
 
-        self.custom_remove_frame = ctk.CTkScrollableFrame(self.left_frame)
-        self.custom_remove_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=2)
+        self.tree_custom_remove = self._create_treeview(self.left_frame, ["Status", "Wzorzec"])
+        self.tree_custom_remove.grid(row=2, column=0, sticky="nsew", padx=5, pady=0)
+        self._bind_tree_events(self.tree_custom_remove, is_custom=True, list_ref=self.master_app.custom_remove)
 
-        rem_btn_frame = ctk.CTkFrame(self.left_frame)
-        rem_btn_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=5)
-        ctk.CTkButton(rem_btn_frame, text="Dodaj wzorzec",
-                      command=self.master_app.open_add_remove_pattern).pack(side="left", padx=5, expand=True, fill="x")
-        ctk.CTkButton(rem_btn_frame, text="Wyczyść listę",
-                      command=lambda: self.master_app._clear_custom_list('remove'),
-                      fg_color="gray").pack(side="right", padx=5, expand=True, fill="x")
+        # Panel przycisków Remove
+        self._create_action_buttons(self.left_frame, row=3,
+                                    tree=self.tree_custom_remove,
+                                    list_ref=self.master_app.custom_remove,
+                                    add_cmd=self.master_app.open_add_remove_pattern,
+                                    clear_type='remove')
 
         # -- Sekcja Custom Replace --
-        ctk.CTkLabel(self.left_frame, text="Własne wzorce podmieniające", font=("", 14, "bold")).grid(
-            row=3, column=0, sticky="w", padx=10, pady=(15, 5))
+        ctk.CTkLabel(self.left_frame, text="Twoje wzorce podmieniające (TTS)", font=("", 13, "bold")).grid(
+            row=4, column=0, sticky="w", padx=5, pady=(10, 2))
 
-        self.custom_replace_frame = ctk.CTkScrollableFrame(self.left_frame)
-        self.custom_replace_frame.grid(row=4, column=0, sticky="nsew", padx=10, pady=2)
+        self.tree_custom_replace = self._create_treeview(self.left_frame, ["Status", "Wzorzec"])
+        self.tree_custom_replace.grid(row=5, column=0, sticky="nsew", padx=5, pady=0)
+        self._bind_tree_events(self.tree_custom_replace, is_custom=True, list_ref=self.master_app.custom_replace)
 
-        rep_btn_frame = ctk.CTkFrame(self.left_frame)
-        rep_btn_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=5)
-        ctk.CTkButton(rep_btn_frame, text="Dodaj wzorzec",
-                      command=self.master_app.open_add_replace_pattern).pack(side="left", padx=5, expand=True, fill="x")
-        ctk.CTkButton(rep_btn_frame, text="Wyczyść listę",
-                      command=lambda: self.master_app._clear_custom_list('replace'),
-                      fg_color="gray").pack(side="right", padx=5, expand=True, fill="x")
+        # Panel przycisków Replace
+        self._create_action_buttons(self.left_frame, row=6,
+                                    tree=self.tree_custom_replace,
+                                    list_ref=self.master_app.custom_replace,
+                                    add_cmd=self.master_app.open_add_replace_pattern,
+                                    clear_type='replace')
 
-        # === PRAWA KOLUMNA: WBUDOWANE WZORCE ===
+        # === PRAWA KOLUMNA: BIBLIOTEKA WBUDOWANYCH ===
         self.right_frame = ctk.CTkFrame(self)
-        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         self.right_frame.grid_columnconfigure(0, weight=1)
+
+        # POPRAWKA: Ustawienie wag dla wierszy z tabelami (1 i 4), aby się poprawnie rozciągały
         self.right_frame.grid_rowconfigure(1, weight=1)
-        self.right_frame.grid_rowconfigure(3, weight=1)
+        self.right_frame.grid_rowconfigure(4, weight=1)
 
-        # -- Sekcja Builtin Remove --
-        ctk.CTkLabel(self.right_frame, text="Wbudowane wzorce wycinające", font=("", 14, "bold")).grid(
-            row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        # -- Builtin Remove --
+        ctk.CTkLabel(self.right_frame, text="Biblioteka: Wycinanie", font=("", 13, "bold")).grid(
+            row=0, column=0, sticky="w", padx=5, pady=(5, 2))
 
-        self.builtin_remove_frame = ctk.CTkScrollableFrame(self.right_frame)
-        self.builtin_remove_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=2)
+        self.tree_builtin_remove = self._create_treeview(self.right_frame, ["Wzorzec"])
+        self.tree_builtin_remove.grid(row=1, column=0, sticky="nsew", padx=5, pady=0)
+        self._bind_tree_events(self.tree_builtin_remove, is_custom=False, target_type='remove')
 
-        # -- Sekcja Builtin Replace --
-        ctk.CTkLabel(self.right_frame, text="Wbudowane wzorce podmieniające", font=("", 14, "bold")).grid(
-            row=2, column=0, sticky="w", padx=10, pady=(15, 5))
+        # Przycisk dodawania
+        ctk.CTkButton(self.right_frame, text="➕ Dodaj do moich", height=24,
+                      command=lambda: self._add_selected_builtin(self.tree_builtin_remove, 'remove')).grid(
+            row=2, column=0, sticky="ew", padx=5, pady=5)
 
-        self.builtin_replace_frame = ctk.CTkScrollableFrame(self.right_frame)
-        self.builtin_replace_frame.grid(row=3, column=0, sticky="nsew", padx=10, pady=2)
+        # -- Builtin Replace --
+        ctk.CTkLabel(self.right_frame, text="Biblioteka: Podmiana", font=("", 13, "bold")).grid(
+            row=3, column=0, sticky="w", padx=5, pady=(5, 2))
+
+        self.tree_builtin_replace = self._create_treeview(self.right_frame, ["Wzorzec"])
+        self.tree_builtin_replace.grid(row=4, column=0, sticky="nsew", padx=5, pady=0)
+        self._bind_tree_events(self.tree_builtin_replace, is_custom=False, target_type='replace')
+
+        # Przycisk dodawania
+        ctk.CTkButton(self.right_frame, text="➕ Dodaj do moich", height=24,
+                      command=lambda: self._add_selected_builtin(self.tree_builtin_replace, 'replace')).grid(
+            row=5, column=0, sticky="ew", padx=5, pady=5)
+
+    def _create_treeview(self, parent, columns):
+        tree = ttk.Treeview(parent, columns=columns, show="headings", selectmode="browse")
+
+        if "Status" in columns:
+            tree.heading("Status", text="Stan")
+            tree.column("Status", width=40, anchor="center", stretch=False)
+
+        tree.heading("Wzorzec", text="Opis / Wzorzec")
+        tree.column("Wzorzec", anchor="w")
+
+        return tree
+
+    def _create_action_buttons(self, parent, row, tree, list_ref, add_cmd, clear_type):
+        btn_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        btn_frame.grid(row=row, column=0, sticky="ew", padx=5, pady=2)
+
+        # Mniejsze przyciski
+        ctk.CTkButton(btn_frame, text="Nowy", width=50, height=24, command=add_cmd).pack(side="left", padx=2)
+
+        ctk.CTkButton(btn_frame, text="Edytuj", width=50, height=24,
+                      command=lambda: self._edit_selected(tree, list_ref)).pack(side="left", padx=2)
+
+        ctk.CTkButton(btn_frame, text="On/Off", width=50, height=24,
+                      command=lambda: self._toggle_selected(tree, list_ref)).pack(side="left", padx=2)
+
+        ctk.CTkButton(btn_frame, text="Usuń", width=50, height=24, fg_color="red", hover_color="darkred",
+                      command=lambda: self._delete_selected(tree, list_ref)).pack(side="right", padx=2)
+
+        ctk.CTkButton(btn_frame, text="Czyść", width=50, height=24, fg_color="gray",
+                      command=lambda: self._clear_all(clear_type)).pack(side="right", padx=2)
+
+    def _on_search_change(self, *args):
+        if hasattr(self, '_search_job') and self._search_job:
+            self.after_cancel(self._search_job)
+        self._search_job = self.after(200, self.refresh_ui)
 
     def refresh_ui(self):
-        """Odświeża zawartość wszystkich list na podstawie danych z App."""
-        if not self.winfo_exists():
-            return
+        """Przerysowuje wszystkie listy."""
+        search = self.search_var.get().lower()
 
-        # 1. Wyczyść custom lists
-        for child in self.custom_remove_frame.winfo_children():
-            child.destroy()
-        for child in self.custom_replace_frame.winfo_children():
-            child.destroy()
+        self._populate_tree(self.tree_custom_remove, self.master_app.custom_remove, is_custom=True, search=search)
+        self._populate_tree(self.tree_custom_replace, self.master_app.custom_replace, is_custom=True, search=search)
 
-        # 2. Wypełnij custom lists
-        for p in self.master_app.custom_remove:
-            self._add_custom_row(self.custom_remove_frame, p, self.master_app.custom_remove)
+        self._populate_tree(self.tree_builtin_remove, self.master_app.builtin_remove, is_custom=False)
+        self._populate_tree(self.tree_builtin_replace, self.master_app.builtin_replace, is_custom=False)
 
-        for p in self.master_app.custom_replace:
-            self._add_custom_row(self.custom_replace_frame, p, self.master_app.custom_replace)
+    def _get_display_text(self, p: PatternItem) -> str:
+        """Tworzy tekst do wyświetlenia w liście (bezpiecznie)."""
+        name_val = p.name
+        if not isinstance(name_val, str):
+            name_val = None
 
-        # 3. Wyczyść i wypełnij builtin lists (one też mogą zmieniać stan enabled)
-        for child in self.builtin_remove_frame.winfo_children():
-            child.destroy()
-        self._fill_builtin_list(self.builtin_remove_frame,
-                                self.master_app.builtin_remove,
-                                self.master_app.builtin_remove_state)
+        display_rule = f"[{p.pattern}] ➜ [{p.replace}]"
 
-        for child in self.builtin_replace_frame.winfo_children():
-            child.destroy()
-        self._fill_builtin_list(self.builtin_replace_frame,
-                                self.master_app.builtin_replace,
-                                self.master_app.builtin_replace_state)
+        if name_val and name_val.strip():
+            return f"{name_val}   |   {display_rule}"
+        return display_rule
 
-    def _add_custom_row(self, frame, pattern_item: PatternItem, target_list: List[PatternItem]):
-        """Dodaje wiersz dla własnego wzorca (z opcją edycji i usuwania)."""
-        row = ctk.CTkFrame(frame)
-        row.pack(fill="x", pady=2, padx=2)
+    def _populate_tree(self, tree, data_list, is_custom, search=""):
+        for item in tree.get_children():
+            tree.delete(item)
 
-        def on_edit_click(event):
-            # Ctrl+Click lub Double Click
-            if (
-                    event.type == '4' and event.state & 0x0004) or event.type == '4':  # ButtonPress + Ctrl or just check double
-                pass
-                # Logika otwierania edytora jest w master_app
-            self.master_app.open_edit_pattern(pattern_item, target_list)
+        for i, p in enumerate(data_list):
+            display_text = self._get_display_text(p)
 
-        def on_delete():
-            try:
-                target_list.remove(pattern_item)
-            except ValueError:
-                pass
-            row.destroy()
+            if is_custom and search:
+                name_str = p.name if isinstance(p.name, str) else ""
+                full_str = f"{p.pattern} {p.replace} {name_str}".lower()
+                if search not in full_str:
+                    continue
+
+            item_iid = str(id(p))
+
+            if is_custom:
+                status_icon = "✅" if p.enabled else "❌"
+                tags = ('disabled',) if not p.enabled else ()
+                tree.insert("", "end", iid=item_iid, values=(status_icon, display_text), tags=tags)
+            else:
+                tree.insert("", "end", iid=item_iid, values=(display_text,))
+
+        tree.tag_configure('disabled', foreground='gray')
+
+    # --- OBSŁUGA ZDARZEŃ ---
+
+    def _bind_tree_events(self, tree, is_custom, list_ref=None, target_type=None):
+        if is_custom:
+            tree.bind("<Double-1>", lambda e: self._edit_selected(tree, list_ref))
+            tree.bind("<Delete>", lambda e: self._delete_selected(tree, list_ref))
+        else:
+            tree.bind("<Double-1>", lambda e: self._add_selected_builtin(tree, target_type))
+
+    def _find_item_by_iid(self, iid, data_list) -> Optional[PatternItem]:
+        for p in data_list:
+            if str(id(p)) == iid:
+                return p
+        return None
+
+    def _edit_selected(self, tree, list_ref):
+        selected = tree.selection()
+        if not selected: return
+        iid = selected[0]
+        item = self._find_item_by_iid(iid, list_ref)
+        if item:
+            self.master_app.open_edit_pattern(item, list_ref)
+
+    def _toggle_selected(self, tree, list_ref):
+        selected = tree.selection()
+        if not selected: return
+        iid = selected[0]
+        item = self._find_item_by_iid(iid, list_ref)
+        if item:
+            item.enabled = not item.enabled
             self.master_app.mark_as_unsaved()
+            self.refresh_ui()
 
-        def on_edit():
-            self.master_app.open_edit_pattern(pattern_item, target_list)
-
-        def on_toggle():
-            pattern_item.enabled = enabled_var.get()
+    def _delete_selected(self, tree, list_ref):
+        selected = tree.selection()
+        if not selected: return
+        iid = selected[0]
+        item = self._find_item_by_iid(iid, list_ref)
+        if item:
+            list_ref.remove(item)
             self.master_app.mark_as_unsaved()
-            color = ctk.ThemeManager.theme["CTkLabel"]["text_color"] if pattern_item.enabled else "gray50"
-            lbl.configure(text_color=color)
+            self.refresh_ui()
 
-        enabled_var = tk.BooleanVar(value=pattern_item.enabled)
-        cb = ctk.CTkCheckBox(row, text="", variable=enabled_var, command=on_toggle, width=20)
-        cb.pack(side="left", padx=(4, 0))
+    def _clear_all(self, clear_type):
+        self.master_app._clear_custom_list(clear_type)
 
-        btnX = ctk.CTkButton(row, text="❌", width=20, command=on_delete, fg_color="transparent", text_color="red",
-                             hover_color=("gray85", "gray25"))
-        btnX.pack(side="left", padx=2)
+    def _add_selected_builtin(self, tree, target_type):
+        selected = tree.selection()
+        if not selected: return
+        iid = selected[0]
 
-        btnEdit = ctk.CTkButton(row, text="✏️", width=20, command=on_edit, fg_color="transparent",
-                                text_color=("gray10", "gray90"), hover_color=("gray85", "gray25"))
-        btnEdit.pack(side="left", padx=2)
+        source_list = self.master_app.builtin_remove if target_type == 'remove' else self.master_app.builtin_replace
+        item = self._find_item_by_iid(iid, source_list)
 
-        lbl_text = f"{'' if not pattern_item.case_sensitive else '(Aa)'} [{pattern_item.pattern}] -> [{pattern_item.replace}]"
-        lbl = ctk.CTkLabel(row, text=lbl_text, anchor="w")
-        lbl.pack(side="left", fill="x", expand=True, padx=4)
+        if item:
+            new_item = PatternItem(
+                pattern=item.pattern,
+                replace=item.replace,
+                case_sensitive=item.case_sensitive,
+                name=item.name if isinstance(item.name, str) else None,
+                enabled=True
+            )
 
-        # Wiązania zdarzeń do edycji
-        lbl.bind("<Double-Button-1>", lambda e: on_edit())
-        row.bind("<Double-Button-1>", lambda e: on_edit())
+            target_list = self.master_app.custom_remove if target_type == 'remove' else self.master_app.custom_replace
+            target_list.append(new_item)
 
-        if not pattern_item.enabled:
-            lbl.configure(text_color="gray50")
-
-    def _fill_builtin_list(self, frame, patterns, states):
-        """Wypełnia listę wbudowanych wzorców (tylko CheckBoxy)."""
-        for i, p in enumerate(patterns):
-            text = f"{p.pattern} -> {p.replace}" if p.name is None else p.name
-            cb = ctk.CTkCheckBox(frame, text=text, variable=states[i])
-            cb.pack(anchor="w", pady=2, padx=4)
+            self.master_app.mark_as_unsaved()
+            self.refresh_ui()

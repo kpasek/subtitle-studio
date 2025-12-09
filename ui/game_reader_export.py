@@ -265,6 +265,7 @@ class GameReaderExportWindow(ctk.CTkToplevel):
                     "height": 120
                 },
                 "resolution": "1920x1080",
+                "selected_screen_monitor": 1,
                 "CENTER_LINE_MARGIN": 100,
                 "CENTER_LINE_2_START": 1,
                 "CENTER_LINE_3_START_RATIO": 0.3,
@@ -274,29 +275,40 @@ class GameReaderExportWindow(ctk.CTkToplevel):
                 "MAX_HEIGHT": 100,
                 "ENABLE_REMOVE_CHARACTER_NAME": False,
                 "ENABLE_SCREENSHOTS": False,
+                "ENABLE_OUTPUT2_SYSTEM": False,
+                "ENABLE_DYNAMIC_SPEED": True,
+                "BASE_PLAYBACK_SPEED": 1.2,
+                "OVERLAP_PLAYBACK_SPEED": 1.35,
                 "USE_CENTER_LINE_1": False,
                 "USE_CENTER_LINE_2": False,
                 "USE_CENTER_LINE_3": False,
                 "audio_dir": "audio",
                 "text_file_path": "subtitlesPL.txt",
-                "names_file_path": "",
+                "names_file_path": "names.txt" if self.app.names_list else "",
                 "screenshot_dir": "",
                 "key_bindings": {
                     "toggle_on": "home",
                     "toggle_off": "end",
                     "volume_up": "page_up",
                     "volume_down": "page_down",
-                    "switch_monitor_prev": "alt+1",
-                    "switch_monitor_next": "alt+2",
+                    "switch_monitor_toggle": "alt+1",
                     "test_sound": "insert",
                     "open_settings": "alt+`",
-                    "interrupt_audio": "delete"
+                    "interrupt_audio": "delete",
+                    "base_speed_up": "shift+z",
+                    "base_speed_down": "shift+x",
+                    "overlap_speed_up": "shift+c",
+                    "overlap_speed_down": "shift+v",
+                    "debug_console": "alt+d",
+                    "toggle_areas": "alt+2"
                 },
                 "monitor2_enabled": False,
                 "monitor2_top": 100,
                 "monitor2_left": 375,
                 "monitor2_width": 1170,
-                "monitor2_height": 120
+                "monitor2_height": 120,
+                "VOLUME_REDUCTION_LEVEL": 0.2,
+                "AUDIO_QUEUE_SIZE": 1
             }
 
             preset_file = dest_dir / "preset.json"

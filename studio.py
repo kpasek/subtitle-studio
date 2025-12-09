@@ -96,7 +96,7 @@ if os.name == "nt":
 
 class SubtitleStudioApp(ctk.CTk):
     """Główna klasa aplikacji Subtitle Studio."""
-    APP_VERSION = "0.10.1"
+    APP_VERSION = "0.10.2"
 
     def __init__(self):
         super().__init__()
@@ -544,10 +544,12 @@ class SubtitleStudioApp(ctk.CTk):
     # --- PROCES PRZETWARZANIA ---
 
     def _gather_active_patterns(self) -> tuple[List[PatternItem], List[PatternItem]]:
+        """
+        Zbiera wszystkie aktywne wzorce.
+        """
         remove_patterns = [p for p in self.custom_remove if p.enabled]
-        remove_patterns.extend(p for i, p in enumerate(self.builtin_remove) if self.builtin_remove_state[i].get())
         replace_patterns = [p for p in self.custom_replace if p.enabled]
-        replace_patterns.extend(p for i, p in enumerate(self.builtin_replace) if self.builtin_replace_state[i].get())
+
         return remove_patterns, replace_patterns
 
     def _get_patterns_signature(self, patterns: List[PatternItem]):
@@ -1263,9 +1265,10 @@ class SubtitleStudioApp(ctk.CTk):
 
     # Proxy dla metod z menu
     def open_audio_deleter(self):
-        if not self.processed_replace: return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self)
+        if not self.processed_clean: return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self)
         if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self)
-        AudioDeleterWindow(self, self.processed_replace, str(self.audio_dir)).grab_set()
+
+        AudioDeleterWindow(self, self.processed_clean, str(self.audio_dir)).grab_set()
 
     def open_global_settings(self):
         SettingsWindow(self, self.torch_installed, mode='global').grab_set()
@@ -1294,7 +1297,11 @@ class SubtitleStudioApp(ctk.CTk):
         if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Wybierz katalog audio.", parent=self)
         ready_dir = self.audio_dir / "ready"
         if not ready_dir.is_dir() or not messagebox.askyesno("Potwierdź", f"Usunąć wszystko z {ready_dir}?"): return
-        for f in ready_dir.glob('*.ogg'):
+
+        # POPRAWKA: Uwzględnienie zarówno plików .ogg jak i .mp3
+        files_to_delete = list(ready_dir.glob('*.ogg')) + list(ready_dir.glob('*.mp3'))
+
+        for f in files_to_delete:
             try:
                 os.remove(f)
             except:
