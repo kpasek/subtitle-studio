@@ -9,7 +9,7 @@ import shutil
 import json
 from pathlib import Path
 
-# Próba importu mutagen dla MP3 (opcjonalnie, jako fallback)
+# Próba importu mutagen dla MP3
 try:
     from mutagen.mp3 import MP3
 
@@ -23,20 +23,26 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         super().__init__(app)
         self.app = app
         self.audio_dir = Path(audio_dir)
-        self.subtitles = subtitles
+        self.subtitles = subtitles  # To są już teksty TTS (processed_replace) przekazane ze studio.py
 
         self.running = False
         self.stop_event = threading.Event()
         self.analysis_results = []
         self.current_audio_process = None
 
-        # Sprawdzanie dostępności narzędzi
+        # Cache setup
+        self.cache_file = None
+        if self.app.loaded_path:
+            # Tworzymy plik cache obok pliku napisów: np. "film.txt" -> "film.cps_cache.json"
+            self.cache_file = self.app.loaded_path.with_suffix(".cps_cache.json")
+        self.cache_data = {}
+
+        # Sprawdzanie narzędzi
         self.ffplay_path = shutil.which("ffplay")
         self.ffprobe_path = shutil.which("ffprobe")
 
-        # Domyślne wartości
         self.avg_cps = 15.0
-        self.error_details = {}  # Słownik: id -> treść błędu
+        self.error_details = {}
 
         self.title(f"Weryfikacja audio ({len(subtitles)} linii)")
         self.geometry("1200x800")
@@ -76,7 +82,13 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.btn_show_errors = ctk.CTkButton(self.ctrl_panel, text="Szczegóły błędów (!)", fg_color="orange",
                                              text_color="black",
                                              command=self.show_error_details, state="disabled", width=140)
-        self.btn_show_errors.pack(side="left", pady=5)
+        self.btn_show_errors.pack(side="left", pady=5, padx=(0, 10))
+
+        # Checkbox do wymuszenia odświeżenia cache
+        self.var_force_refresh = ctk.BooleanVar(value=False)
+        self.cb_force_refresh = ctk.CTkCheckBox(self.ctrl_panel, text="Wymuś pełną analizę (ignoruj cache)",
+                                                variable=self.var_force_refresh)
+        self.cb_force_refresh.pack(side="left", pady=5)
 
         # Prawa strona: Filtry
         self.filters_frame = ctk.CTkFrame(self.top_frame)
@@ -131,7 +143,6 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             ctk.CTkLabel(self.scroll_frame, text=h, font=("", 12, "bold")).grid(row=0, column=idx, padx=5, pady=5,
                                                                                 sticky="w")
 
-        # Sprawdzenie środowiska przed startem
         if not self.ffprobe_path and not MUTAGEN_AVAILABLE:
             self.lbl_status.configure(text="Ostrzeżenie: Brak ffprobe! Analiza MP3 może nie działać.",
                                       text_color="orange")
@@ -157,26 +168,38 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             self.btn_cancel.configure(state="disabled")
 
     def show_error_details(self):
-        """Pokazuje okno z błędami."""
         if not self.error_details: return
-
         win = ctk.CTkToplevel(self)
         win.title("Szczegóły błędów")
         win.geometry("600x400")
-
         txt = ctk.CTkTextbox(win)
         txt.pack(fill="both", expand=True, padx=10, pady=10)
-
         msg = "Przykładowe błędy (pierwsze 20):\n\n"
         for i, (ident, err) in enumerate(self.error_details.items()):
             if i > 20: break
             msg += f"ID {ident}: {err}\n"
-
-        if not self.ffprobe_path:
-            msg += "\n\nDIAGNOZA: Nie znaleziono narzędzia 'ffprobe'. Upewnij się, że ffmpeg/ffprobe jest zainstalowane i dodane do zmiennej PATH."
-
         txt.insert("1.0", msg)
         txt.configure(state="disabled")
+
+    # --- Cache Logic ---
+    def _load_cache(self):
+        if self.cache_file and self.cache_file.exists():
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    self.cache_data = json.load(f)
+                print(f"Załadowano cache: {len(self.cache_data)} wpisów.")
+            except Exception as e:
+                print(f"Błąd ładowania cache: {e}")
+                self.cache_data = {}
+
+    def _save_cache(self):
+        if self.cache_file:
+            try:
+                with open(self.cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.cache_data, f, ensure_ascii=False)
+                print("Zapisano cache.")
+            except Exception as e:
+                print(f"Błąd zapisu cache: {e}")
 
     def start_analysis(self):
         self.running = True
@@ -185,7 +208,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.error_details = {}
         self.btn_cancel.configure(state="normal")
         self.btn_show_errors.configure(state="disabled")
-        self.lbl_status.configure(text="Skanowanie plików...", text_color=["black", "white"])
+        self.lbl_status.configure(text="Ładowanie cache i skanowanie...", text_color=["black", "white"])
         self.progress_bar.set(0)
 
         # Reset UI
@@ -200,7 +223,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         """Pobiera długość audio. Zwraca (duration, error_message)."""
         file_path = str(file_path)
 
-        # 2. MP3 - szybka ścieżka (Mutagen)
+        # 1. MP3 - Mutagen
         if ext == 'mp3' and MUTAGEN_AVAILABLE:
             try:
                 audio = MP3(file_path)
@@ -208,7 +231,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             except Exception:
                 pass
 
-        # 3. Fallback: FFprobe (Obsługuje WAV Float, OGG, MP3 bez mutagena, i wszystko inne)
+        # 2. Fallback: FFprobe
         if self.ffprobe_path:
             try:
                 startupinfo = None
@@ -228,19 +251,25 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                 )
 
                 if result.returncode != 0:
-                    return -1.0, f"FFprobe error: {result.stderr.strip()}"
+                    return -1.0, f"FFprobe: {result.stderr.strip()}"
 
                 val = result.stdout.strip()
                 if not val:
-                    return -1.0, "FFprobe zwrócił pusty wynik"
+                    return -1.0, "FFprobe empty result"
                 return float(val), None
             except Exception as e:
-                return -1.0, f"FFprobe exception: {str(e)}"
+                return -1.0, f"FFprobe exc: {str(e)}"
 
-        # Jeśli dotarliśmy tutaj, to znaczy że żaden sposób nie zadziałał
-        return -1.0, "Brak narzędzia do odczytu (wymagany ffprobe dla tego formatu)"
+        return -1.0, "Brak narzędzia (ffprobe)"
 
     def _analysis_worker(self):
+        # 1. Ładowanie cache
+        force_refresh = self.var_force_refresh.get()
+        if not force_refresh:
+            self._load_cache()
+        else:
+            self.cache_data = {}  # Wymuszone czyszczenie w pamięci
+
         total_lines = len(self.subtitles)
         total_chars_global = 0
         total_duration_global = 0
@@ -249,12 +278,16 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         processed_count = 0
         last_update_time = time.time()
 
+        new_cache_data = {}  # Budujemy nowy cache (sprzątanie starych wpisów)
+
         for i, text in enumerate(self.subtitles):
             if self.stop_event.is_set():
                 break
 
-            ident = i + 1
-            if not text.strip():
+            ident = str(i + 1)  # Cache klucz to ID jako string
+            text_clean = text.strip()
+
+            if not text_clean:
                 processed_count += 1
                 continue
 
@@ -280,9 +313,27 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             raw_status = "MISSING"
             error_msg = None
 
-            if audio_file:
+            # --- LOGIKA CACHE ---
+            cache_hit = False
+            # Sprawdzamy czy mamy wpis w cache, czy tekst jest taki sam i czy plik nadal istnieje
+            if not force_refresh and ident in self.cache_data:
+                entry = self.cache_data[ident]
+                # Porównujemy tekst z cache z obecnym tekstem TTS
+                # Sprawdzamy też czy ścieżka z cache istnieje (szybki check)
+                if entry.get("text") == text_clean and entry.get("path") and os.path.exists(entry["path"]):
+                    # Cache HIT
+                    duration = entry["duration"]
+                    error_msg = entry.get("error")
+                    audio_file = Path(entry["path"])
+                    found_ext = entry.get("ext", "")
+                    cache_hit = True
+
+            # Jeśli nie ma w cache (lub wymuszono), analizujemy plik
+            if not cache_hit and audio_file:
                 duration, error_msg = self.get_audio_duration(audio_file, found_ext)
 
+            # Interpretacja wyników
+            if audio_file:
                 if duration < 0:
                     raw_status = "ERROR"
                     self.error_details[ident] = f"{found_ext.upper()}: {error_msg}"
@@ -291,14 +342,23 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                     raw_status = "EMPTY"
                 else:
                     raw_status = "OK"
-                    char_count = len(text)
+                    char_count = len(text_clean)
                     cps = char_count / duration
                     total_chars_global += char_count
                     total_duration_global += duration
                     valid_files_count += 1
 
+                # Aktualizacja/Dodanie do nowego cache
+                new_cache_data[ident] = {
+                    "text": text_clean,
+                    "duration": duration,
+                    "path": str(audio_file),
+                    "ext": found_ext,
+                    "error": error_msg
+                }
+
             self.analysis_results.append({
-                "id": ident,
+                "id": int(ident),
                 "text": text,
                 "duration": duration,
                 "cps": cps,
@@ -320,6 +380,10 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             self.avg_cps = total_chars_global / total_duration_global
         else:
             self.avg_cps = 15.0
+
+        # Zapisz cache (podmieniamy stary na nowy, czyszcząc nieistniejące linie)
+        self.cache_data = new_cache_data
+        self._save_cache()
 
         self.app.after(0, lambda: self._finalize_ui(processed_count, valid_files_count))
 
@@ -400,8 +464,8 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                      f"Znaleziono {suspicious_count} odchyleń{err_msg}.")
         self.lbl_stats.configure(text=stats_txt)
 
-        # Render list (limit 200 dla płynności)
-        LIMIT = 200
+        # Render list (limit 200 dla wydajności)
+        LIMIT = 50
         row = 1
 
         if not filtered_items:
