@@ -39,6 +39,7 @@ from ui.game_reader_export import GameReaderExportWindow
 from ui.pattern_io import PatternIOWindow
 from ui.names_manager import NamesManagerWindow
 from ui.audio_sync import AudioSyncWindow
+from ui.audio_verification import AudioVerificationWindow
 
 try:
     from packaging import version
@@ -1426,6 +1427,22 @@ class SubtitleStudioApp(ctk.CTk):
             pass
         except Exception as e:
             print(f"Błąd dodawania imienia: {e}")
+
+    def open_audio_verification(self):
+        if not self.audio_dir:
+            messagebox.showwarning("Brak audio", "Najpierw wybierz katalog audio.", parent=self)
+            return
+
+        # Używamy processed_replace (tekst TTS) jeśli dostępny, bo on odpowiada temu co lektor czyta.
+        # Jeśli nie, używamy clean, a ostatecznie oryginału.
+        lines = self.processed_replace if self.processed_replace else (
+            self.processed_clean if self.processed_clean else self.original_lines)
+
+        if not lines:
+            messagebox.showwarning("Brak tekstu", "Brak napisów do weryfikacji.", parent=self)
+            return
+
+        AudioVerificationWindow(self, self.audio_dir, lines)
 
 
 if __name__ == '__main__':
