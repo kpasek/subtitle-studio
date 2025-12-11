@@ -1,17 +1,20 @@
 import customtkinter as ctk
 import os
-import wave
 import subprocess
-import contextlib
 import threading
 import time
 import shutil
 import json
-from tkinter import messagebox
 from pathlib import Path
+from tkinter import ttk, messagebox
 
-from audio.audio_renamer import AudioRenameWindow
+# Próba importu okna do naprawy nazw plików (AudioRenameWindow)
+try:
+    from audio.audio_renamer import AudioRenameWindow
+except ImportError:
+    AudioRenameWindow = None
 
+# Próba importu mutagen dla MP3
 try:
     from mutagen.mp3 import MP3
 
@@ -27,157 +30,634 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.audio_dir = Path(audio_dir)
         self.subtitles = subtitles
 
-        # Stan procesu
+        # --- Stan Aplikacji ---
         self.running = False
-        self.paused = False
         self.stop_event = threading.Event()
-        self.current_index = 0
 
-        # Wyniki
+        # Dane
         self.analysis_results = []
-        self.error_details = {}
+        self.filtered_items = []
         self.cache_data = {}
 
-        # Audio process
         self.current_audio_process = None
-        self.ffplay_path = shutil.which("ffplay")
-        self.ffprobe_path = shutil.which("ffprobe")
-
-        self.avg_cps = 15.0
-        self.calibration_done = False
+        self.processed_indices = set()
 
         # Cache setup
         self.cache_file = None
         if self.app.loaded_path:
             self.cache_file = self.app.loaded_path.with_suffix(".cps_cache.json")
 
-        self.title(f"Weryfikacja audio ({len(subtitles)} linii)")
-        self.geometry("1300x850")
+        # Sprawdzanie narzędzi
+        self.ffplay_path = shutil.which("ffplay")
+        self.ffprobe_path = shutil.which("ffprobe")
 
+        self.avg_cps = 15.0
+        self.error_details = {}
+
+        # --- Ustawienia Okna ---
+        self.title(f"Weryfikacja audio ({len(subtitles)} linii)")
+        self.geometry("1280x850")
+
+        # FIX: Okno pojawia się na wierzchu, ale nie jest "przyspawane" (nie blokuje dialogów)
         self.lift()
         self.focus_force()
-        self.after(100, self.lift)
+        self.attributes("-topmost", True)
+        self.after(200, lambda: self.attributes("-topmost", False))
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._setup_treeview_style()
 
-        # --- GŁÓWNY GRID ---
+        # --- UKŁAD GRID ---
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(2, weight=1)  # Tabela rozciąga się w pionie
 
         # =====================================================================
-        # 1. PANEL STEROWANIA
+        # 1. GÓRNY PANEL (Sterowanie)
         # =====================================================================
         self.top_frame = ctk.CTkFrame(self)
         self.top_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         self.top_frame.grid_columnconfigure(2, weight=1)
 
-        # -- Sekcja Przycisków (Lewa) --
-        self.btn_frame = ctk.CTkFrame(self.top_frame, fg_color="transparent")
-        self.btn_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        # -- Sekcja A: Przyciski Start/Stop --
+        self.ctrl_frame = ctk.CTkFrame(self.top_frame, fg_color="transparent")
+        self.ctrl_frame.grid(row=0, column=0, sticky="ns", padx=5, pady=5)
 
-        # Jeden główny przycisk akcji (Start/Wznów)
-        self.btn_action = ctk.CTkButton(self.btn_frame, text="Rozpocznij Analizę", fg_color="green",
-                                        hover_color="darkgreen",
-                                        command=self.on_action_click, width=160)
-        self.btn_action.pack(side="left", padx=5)
+        self.btn_start = ctk.CTkButton(self.ctrl_frame, text="Start", command=self.toggle_analysis,
+                                       fg_color="green", width=120)
+        self.btn_start.pack(side="left", padx=5)
 
-        self.btn_stop = ctk.CTkButton(self.btn_frame, text="Zatrzymaj", fg_color="gray", hover_color="gray",
-                                      command=self.stop_analysis, state="disabled", width=100)
+        self.btn_stop = ctk.CTkButton(self.ctrl_frame, text="Zatrzymaj", command=self.stop_analysis,
+                                      fg_color="red", state="disabled", width=100)
         self.btn_stop.pack(side="left", padx=5)
 
-        # Button: Usuń błędne
-        self.btn_del_errors = ctk.CTkButton(self.btn_frame, text="🗑 Usuń błędne", fg_color="darkred",
-                                            hover_color="#800000",
-                                            command=self.delete_all_errors_action, width=120)
-        self.btn_del_errors.pack(side="left", padx=20)
-
-        # -- Opcje sterowania błędami --
+        # -- Sekcja B: Opcje Skanowania --
         self.opts_frame = ctk.CTkFrame(self.top_frame, fg_color="transparent")
-        self.opts_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.opts_frame.grid(row=0, column=1, sticky="ns", padx=20, pady=5)
 
         self.var_stop_on_error = ctk.BooleanVar(value=True)
-        self.cb_stop_on_error = ctk.CTkCheckBox(self.opts_frame, text="Zatrzymaj na błędzie",
-                                                variable=self.var_stop_on_error)
-        self.cb_stop_on_error.pack(anchor="w")
+        ctk.CTkCheckBox(self.opts_frame, text="Zatrzymaj na błędzie",
+                        variable=self.var_stop_on_error).pack(anchor="w")
+
+        self.var_auto_sync = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(self.opts_frame, text="Auto-kalibracja (po 20 plikach)", variable=self.var_auto_sync).pack(
+            anchor="w")
 
         self.var_force_refresh = ctk.BooleanVar(value=False)
-        self.cb_force_refresh = ctk.CTkCheckBox(self.opts_frame, text="Wymuś odświeżenie (bez cache)",
-                                                variable=self.var_force_refresh)
-        self.cb_force_refresh.pack(anchor="w")
+        ctk.CTkCheckBox(self.opts_frame, text="Wymuś pełną analizę (ignoruj cache)",
+                        variable=self.var_force_refresh).pack(anchor="w")
 
-        # -- Filtry i Suwaki (Prawa) --
-        self.filters_frame = ctk.CTkFrame(self.top_frame)
-        self.filters_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
+        # -- Sekcja C: Status i Pasek Postępu --
+        self.status_frame = ctk.CTkFrame(self.top_frame, fg_color="transparent")
+        self.status_frame.grid(row=0, column=2, sticky="nsew", padx=5)
 
-        ctk.CTkLabel(self.filters_frame, text="Tolerancja CPS (Auto-kalibracja po 20 plikach)",
-                     font=("", 11, "bold")).grid(row=0, column=0, columnspan=4, pady=(2, 0))
+        self.lbl_status = ctk.CTkLabel(self.status_frame, text="Gotowy do startu.", font=("", 14, "bold"))
+        self.lbl_status.pack(anchor="e", padx=10)
 
-        self.lbl_min_cps = ctk.CTkLabel(self.filters_frame, text="Min: 3.0")
-        self.lbl_min_cps.grid(row=1, column=0, padx=5)
-        self.slider_min_cps = ctk.CTkSlider(self.filters_frame, from_=0.1, to=20.0, number_of_steps=199,
+        self.progress_bar = ctk.CTkProgressBar(self.status_frame)
+        self.progress_bar.pack(fill="x", pady=5, padx=10)
+        self.progress_bar.set(0)
+
+        # =====================================================================
+        # 2. PANEL FILTRÓW
+        # =====================================================================
+        self.filter_frame = ctk.CTkFrame(self)
+        self.filter_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.filter_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self.filter_frame, text="Filtry Wyświetlania:", font=("", 12, "bold")).pack(side="left", padx=10)
+
+        self.slider_cont = ctk.CTkFrame(self.filter_frame, fg_color="transparent")
+        self.slider_cont.pack(side="left", fill="x", expand=True, padx=10)
+
+        self.lbl_min_cps = ctk.CTkLabel(self.slider_cont, text="Min CPS: 3.0", width=80)
+        self.lbl_min_cps.pack(side="left")
+        self.slider_min_cps = ctk.CTkSlider(self.slider_cont, from_=1.0, to=20.0, number_of_steps=190,
                                             command=self.on_slider_change)
         self.slider_min_cps.set(3.0)
-        self.slider_min_cps.grid(row=1, column=1, padx=5, sticky="ew")
+        self.slider_min_cps.pack(side="left", fill="x", expand=True, padx=5)
 
-        self.lbl_max_cps = ctk.CTkLabel(self.filters_frame, text="Max: 30.0")
-        self.lbl_max_cps.grid(row=1, column=2, padx=5)
-        self.slider_max_cps = ctk.CTkSlider(self.filters_frame, from_=10.0, to=60.0, number_of_steps=250,
+        self.lbl_max_cps = ctk.CTkLabel(self.slider_cont, text="Max CPS: 25.0", width=80)
+        self.lbl_max_cps.pack(side="left")
+        self.slider_max_cps = ctk.CTkSlider(self.slider_cont, from_=10.0, to=50.0, number_of_steps=400,
                                             command=self.on_slider_change)
-        self.slider_max_cps.set(30.0)
-        self.slider_max_cps.grid(row=1, column=3, padx=5, sticky="ew")
-
-        # Filtry widoku
-        self.filter_opts_frame = ctk.CTkFrame(self.filters_frame, fg_color="transparent")
-        self.filter_opts_frame.grid(row=2, column=0, columnspan=4, sticky="ew")
+        self.slider_max_cps.set(25.0)
+        self.slider_max_cps.pack(side="left", fill="x", expand=True, padx=5)
 
         self.var_ignore_short = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(self.filter_opts_frame, text="Ignoruj < 5 zn.", variable=self.var_ignore_short,
+        ctk.CTkCheckBox(self.filter_frame, text="Ignoruj krótkie (<5 zn.)", variable=self.var_ignore_short,
                         command=self.refresh_list_view).pack(side="left", padx=10)
 
         self.var_show_only_errors = ctk.BooleanVar(value=True)
-        self.sw_filter = ctk.CTkSwitch(self.filter_opts_frame, text="Tylko problemy",
-                                       variable=self.var_show_only_errors, command=self.refresh_list_view)
+        self.sw_filter = ctk.CTkSwitch(self.filter_frame, text="Tylko problemy", variable=self.var_show_only_errors,
+                                       command=self.refresh_list_view)
         self.sw_filter.pack(side="right", padx=10)
 
         # =====================================================================
-        # 2. STATUS I POSTĘP
+        # 3. TABELA (Treeview)
         # =====================================================================
-        self.status_frame = ctk.CTkFrame(self)
-        self.status_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.tree_frame = ctk.CTkFrame(self)
+        self.tree_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 5))
+        self.tree_frame.grid_columnconfigure(0, weight=1)
+        self.tree_frame.grid_rowconfigure(0, weight=1)
 
-        self.progress_bar = ctk.CTkProgressBar(self.status_frame)
-        self.progress_bar.pack(fill="x", padx=5, pady=5)
-        self.progress_bar.set(0)
+        columns = ("id", "text", "duration", "cps", "status", "format")
+        self.tree = ttk.Treeview(self.tree_frame, columns=columns, show="headings", selectmode="browse")
 
-        self.lbl_status = ctk.CTkLabel(self.status_frame, text="Gotowy. Naciśnij 'Rozpocznij Analizę'.",
-                                       font=("", 12, "bold"))
-        self.lbl_status.pack(side="left", padx=10, pady=2)
+        self.tree.heading("id", text="ID")
+        self.tree.heading("text", text="Tekst (fragment)")
+        self.tree.heading("duration", text="Czas [s]")
+        self.tree.heading("cps", text="CPS")
+        self.tree.heading("status", text="Status")
+        self.tree.heading("format", text="Format")
 
-        self.lbl_stats = ctk.CTkLabel(self.status_frame, text="--", font=("", 12))
-        self.lbl_stats.pack(side="right", padx=10, pady=2)
+        self.tree.column("id", width=50, anchor="center")
+        self.tree.column("text", width=600, anchor="w")
+        self.tree.column("duration", width=80, anchor="center")
+        self.tree.column("cps", width=60, anchor="center")
+        self.tree.column("status", width=200, anchor="center")
+        self.tree.column("format", width=60, anchor="center")
+
+        self.scrollbar = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.tree.tag_configure("ok", foreground="white")
+        self.tree.tag_configure("warn", foreground="orange")
+        self.tree.tag_configure("error", foreground="#ff5555")
+        self.tree.tag_configure("short", foreground="gray")
+
+        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        self.tree.bind("<Double-1>", self.on_tree_double_click)
 
         # =====================================================================
-        # 3. LISTA WYNIKÓW
+        # 4. PANEL AKCJI
         # =====================================================================
-        self.scroll_frame = ctk.CTkScrollableFrame(self)
-        self.scroll_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.actions_frame = ctk.CTkFrame(self)
+        self.actions_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=10)
 
-        headers = ["ID", "Tekst (fragment)", "Czas", "CPS", "Status", "Format", "Akcje"]
-        self.scroll_frame.grid_columnconfigure(1, weight=1)
+        self.lbl_stats = ctk.CTkLabel(self.actions_frame, text="Oczekiwanie na start...")
+        self.lbl_stats.pack(side="left", padx=10)
 
-        for idx, h in enumerate(headers):
-            ctk.CTkLabel(self.scroll_frame, text=h, font=("", 12, "bold")).grid(row=0, column=idx, padx=5, pady=5,
-                                                                                sticky="w")
+        self.btn_fix_sync = ctk.CTkButton(self.actions_frame, text="🛠 Napraw (Przesunięcie)",
+                                          command=self.open_renamer, width=160, fg_color="#726a95", state="disabled")
+        self.btn_fix_sync.pack(side="right", padx=5)
+
+        self.btn_del_single = ctk.CTkButton(self.actions_frame, text="🗑 Usuń plik",
+                                            command=self.delete_current_audio, width=100, fg_color="#a83232",
+                                            state="disabled")
+        self.btn_del_single.pack(side="right", padx=5)
+
+        self.btn_play = ctk.CTkButton(self.actions_frame, text="▶ Odtwórz",
+                                      command=self.play_selected, width=100, state="disabled")
+        self.btn_play.pack(side="right", padx=5)
+
+        # Akcje globalne
+        self.actions_global = ctk.CTkFrame(self)
+        self.actions_global.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 10))
+
+        self.btn_del_all_errors = ctk.CTkButton(self.actions_global, text="🗑 Usuń WSZYSTKIE błędne pliki",
+                                                command=self.delete_all_bad_audio, fg_color="darkred", width=200,
+                                                state="disabled")
+        self.btn_del_all_errors.pack(side="right", padx=10)
+
+        self.btn_open_folder = ctk.CTkButton(self.actions_global, text="📂 Otwórz folder",
+                                             command=self.open_folder_selected, width=120, fg_color="#444")
+        self.btn_open_folder.pack(side="left", padx=10)
 
         if not self.ffprobe_path and not MUTAGEN_AVAILABLE:
-            self.lbl_status.configure(text="Ostrzeżenie: Brak ffprobe! Analiza MP3 może nie działać.",
-                                      text_color="orange")
+            self.lbl_status.configure(text="Ostrzeżenie: Brak ffprobe! Analiza może być niepełna.", text_color="orange")
+
+        self._load_cache()
+
+    def _setup_treeview_style(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        bg = "#2b2b2b"
+        fg = "white"
+        header_bg = "#1f1f1f"
+
+        style.configure("Treeview", background=bg, foreground=fg, fieldbackground=bg, borderwidth=0, rowheight=25)
+        style.configure("Treeview.Heading", background=header_bg, foreground=fg, relief="flat")
+        style.map("Treeview", background=[("selected", "#1f538d")], foreground=[("selected", "white")])
+        style.map("Treeview.Heading", background=[("active", "#333333")])
+
+    # --- Logika Sterowania ---
+
+    def toggle_analysis(self):
+        if not self.running:
+            self.start_analysis()
+
+    def start_analysis(self):
+        self.running = True
+        self.stop_event.clear()
+        self.btn_start.configure(state="disabled", text="Przetwarzanie...")
+        self.btn_stop.configure(state="normal")
+        self.btn_del_all_errors.configure(state="disabled")
+
+        force_refresh = self.var_force_refresh.get()
+        stop_on_error = self.var_stop_on_error.get()
+        auto_sync = self.var_auto_sync.get()
+
+        if force_refresh:
+            for item in self.tree.get_children(): self.tree.delete(item)
+            self.analysis_results = []
+            self.processed_indices.clear()
+
+        thread = threading.Thread(
+            target=self._analysis_worker,
+            args=(force_refresh, stop_on_error, auto_sync),
+            daemon=True
+        )
+        thread.start()
+
+    def stop_analysis(self):
+        self.running = False
+        self.stop_event.set()
+        self.lbl_status.configure(text="Zatrzymywanie...", text_color="orange")
+        self.btn_stop.configure(state="disabled")
+        self.btn_start.configure(state="normal", text="Wznów")
 
     def on_close(self):
-        if self.running:
-            self.stop_analysis()
+        self.stop_analysis()
         self.stop_audio()
         self.destroy()
+
+    # --- Worker Analizy ---
+
+    def _analysis_worker(self, force_refresh, stop_on_error, auto_sync):
+        if force_refresh:
+            self.cache_data = {}
+
+        total_lines = len(self.subtitles)
+        processed_count = 0
+        valid_files_cps_sum = 0
+        valid_files_count = 0
+        stopped_on_error_flag = False
+
+        if not self.analysis_results:
+            for i, text in enumerate(self.subtitles):
+                self.analysis_results.append({
+                    "id": i + 1,
+                    "text": text,
+                    "duration": 0.0,
+                    "cps": 0.0,
+                    "raw_status": "PENDING",
+                    "path": None,
+                    "ext": ""
+                })
+
+        new_cache_data = self.cache_data.copy()
+
+        for i, text in enumerate(self.subtitles):
+            if self.stop_event.is_set():
+                break
+
+            ident_str = str(i + 1)
+
+            if (i in self.processed_indices) and not force_refresh:
+                processed_count += 1
+                continue
+
+            text_clean = text.strip()
+            if not text_clean:
+                processed_count += 1
+                continue
+
+            # Szukanie plików
+            audio_file = None
+            found_ext = ""
+            paths_to_check = [
+                (self.audio_dir / f"output1 ({ident_str}).wav", "wav"),
+                (self.audio_dir / f"output1 ({ident_str}).mp3", "mp3"),
+                (self.audio_dir / "ready" / f"output1 ({ident_str}).ogg", "ogg"),
+                (self.audio_dir / "ready" / f"output1 ({ident_str}).mp3", "mp3")
+            ]
+
+            for p, ext in paths_to_check:
+                if p.exists():
+                    audio_file = p
+                    found_ext = ext
+                    break
+
+            duration = 0.0
+            error_msg = None
+            cache_hit = False
+
+            if not force_refresh and ident_str in self.cache_data:
+                entry = self.cache_data[ident_str]
+                if entry.get("text") == text_clean and entry.get("path") and os.path.exists(entry["path"]):
+                    duration = entry["duration"]
+                    error_msg = entry.get("error")
+                    audio_file = Path(entry["path"])
+                    found_ext = entry.get("ext", "")
+                    cache_hit = True
+
+            if not cache_hit and audio_file:
+                duration, error_msg = self.get_audio_duration(audio_file, found_ext)
+                if duration > 0:
+                    new_cache_data[ident_str] = {
+                        "text": text_clean, "duration": duration,
+                        "path": str(audio_file), "ext": found_ext, "error": None
+                    }
+
+            raw_status = "OK"
+            cps = 0.0
+
+            if not audio_file:
+                raw_status = "MISSING"
+            elif duration < 0:
+                raw_status = "ERROR"
+                self.error_details[ident_str] = f"Błąd: {error_msg}"
+            elif duration == 0:
+                raw_status = "EMPTY"
+            else:
+                cps = len(text_clean) / duration
+                valid_files_cps_sum += cps
+                valid_files_count += 1
+
+            self.analysis_results[i].update({
+                "duration": duration,
+                "cps": cps,
+                "raw_status": raw_status,
+                "path": audio_file,
+                "ext": found_ext
+            })
+
+            self.processed_indices.add(i)
+            processed_count += 1
+
+            if auto_sync and valid_files_count == 20:
+                avg = valid_files_cps_sum / 20
+                self.app.after(0, lambda a=avg: self._auto_adjust_thresholds(a))
+
+            # Zatrzymanie na błędzi
+            if stop_on_error and raw_status in ["ERROR", "EMPTY"]:
+                msg_txt = f"Wykryto problem z plikiem ID {ident_str}!\n{error_msg or 'Pusty plik (0s)'}"
+                self.app.after(0, lambda m=msg_txt: messagebox.showerror("Błąd Audio", m))
+                stopped_on_error_flag = True
+                break
+
+            if processed_count % 10 == 0:
+                self.app.after(0, lambda p=processed_count / total_lines: self.progress_bar.set(p))
+                self.app.after(0,
+                               lambda c=processed_count: self.lbl_status.configure(text=f"Analiza: {c}/{total_lines}"))
+                if processed_count % 50 == 0:
+                    self.app.after(0, self.refresh_list_view)
+
+        self.cache_data = new_cache_data
+        self._save_cache()
+        self.app.after(0, lambda: self._finalize_ui(processed_count, stopped_on_error_flag))
+
+    def _finalize_ui(self, count, stopped_on_error=False):
+        self.running = False
+        self.btn_start.configure(state="normal", text="Start")
+        self.btn_stop.configure(state="disabled")
+
+        if not stopped_on_error:
+            self.progress_bar.set(1.0)
+            self.lbl_status.configure(text=f"Zakończono. Przeanalizowano: {count}")
+        else:
+            self.lbl_status.configure(text=f"Zatrzymano na błędzie. Przeanalizowano: {count}", text_color="red")
+
+        self.refresh_list_view()
+        self.btn_del_all_errors.configure(state="normal")
+
+    def _auto_adjust_thresholds(self, avg_cps):
+        new_min = max(1.0, avg_cps - 5.0)
+        new_max = avg_cps + 5.0
+        self.slider_min_cps.set(new_min)
+        self.slider_max_cps.set(new_max)
+        self.on_slider_change(None)
+
+    def get_audio_duration(self, file_path, ext):
+        file_path = str(file_path)
+        if ext == 'mp3' and MUTAGEN_AVAILABLE:
+            try:
+                return MP3(file_path).info.length, None
+            except:
+                pass
+
+        if self.ffprobe_path:
+            try:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                cmd = [self.ffprobe_path, "-v", "error", "-show_entries", "format=duration",
+                       "-of", "default=noprint_wrappers=1:nokey=1", file_path]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                     startupinfo=startupinfo)
+                if res.returncode == 0 and res.stdout.strip():
+                    return float(res.stdout.strip()), None
+                return -1.0, res.stderr
+            except Exception as e:
+                return -1.0, str(e)
+        return -1.0, "Brak ffprobe"
+
+    # --- Lista i Filtrowanie ---
+
+    def refresh_list_view(self, *args):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        min_cps = self.slider_min_cps.get()
+        max_cps = self.slider_max_cps.get()
+        ignore_short = self.var_ignore_short.get()
+        show_errors = self.var_show_only_errors.get()
+
+        self.filtered_items = []
+        suspicious_count = 0
+
+        for item in self.analysis_results:
+            if item["raw_status"] == "PENDING": continue
+
+            display_status = "OK"
+            tag = "ok"
+            is_problem = False
+
+            if item["raw_status"] != "OK":
+                display_status = item["raw_status"]
+                is_problem = True
+                tag = "error"
+            else:
+                cps = item["cps"]
+                txt_len = len(item["text"])
+
+                if ignore_short and txt_len < 5:
+                    display_status = "SHORT"
+                    tag = "short"
+                else:
+                    if cps < min_cps:
+                        display_status = f"ZA WOLNO (<{min_cps:.1f})"
+                        is_problem = True
+                        tag = "warn"
+                    elif cps > max_cps:
+                        display_status = f"ZA SZYBKO (>{max_cps:.1f})"
+                        is_problem = True
+                        tag = "warn"
+
+            item["display_status"] = display_status
+
+            if is_problem: suspicious_count += 1
+
+            if show_errors and not is_problem:
+                continue
+
+            self.filtered_items.append(item)
+
+            val_txt = (item["text"][:80] + "...") if len(item["text"]) > 80 else item["text"]
+            val_dur = f"{item['duration']:.2f}" if item["duration"] > 0 else "-"
+            val_cps = f"{item['cps']:.1f}" if item["duration"] > 0 else "-"
+            val_fmt = item["ext"].upper()
+
+            self.tree.insert("", "end", values=(item["id"], val_txt, val_dur, val_cps, display_status, val_fmt),
+                             tags=(tag,))
+
+        self.lbl_stats.configure(text=f"Wyświetlono: {len(self.filtered_items)} | Problemy: {suspicious_count}")
+
+    # --- Akcje ---
+
+    def on_tree_select(self, event):
+        item = self.get_selected_item()
+
+        if item:
+            self.btn_fix_sync.configure(state="normal")
+        else:
+            self.btn_fix_sync.configure(state="disabled")
+
+        if item and item["path"]:
+            self.btn_play.configure(state="normal")
+            self.btn_del_single.configure(state="normal")
+        else:
+            self.btn_play.configure(state="disabled")
+            self.btn_del_single.configure(state="disabled")
+
+    def on_tree_double_click(self, event):
+        self.play_selected()
+
+    def get_selected_item(self):
+        sel = self.tree.selection()
+        if not sel: return None
+        item_id = self.tree.item(sel[0])['values'][0]
+        return next((x for x in self.analysis_results if x["id"] == int(item_id)), None)
+
+    def play_selected(self):
+        item = self.get_selected_item()
+        if item and item["path"]: self.play_audio(item["path"])
+
+    def open_renamer(self):
+        if AudioRenameWindow is None:
+            messagebox.showerror("Błąd", "Moduł AudioRenameWindow nie jest dostępny.")
+            return
+
+        item = self.get_selected_item()
+        if not item: return
+
+        self.stop_audio()
+        win = AudioRenameWindow(self.app, self.audio_dir, initial_target=item["id"])
+        self.wait_window(win)
+        self.refresh_list_view()
+
+    def open_folder_selected(self):
+        item = self.get_selected_item()
+        p = item["path"] if item and item["path"] else self.audio_dir
+        path = Path(p).parent if p else self.audio_dir
+        if os.name == 'nt':
+            os.startfile(path)
+        else:
+            subprocess.call(['xdg-open', path])
+
+    def delete_current_audio(self):
+        item = self.get_selected_item()
+        if not item or not item["path"]: return
+
+        self.stop_audio()
+
+        if messagebox.askyesno("Usuń", f"Usunąć plik ID {item['id']}?"):
+            try:
+                os.remove(item["path"])
+                idx = item["id"] - 1
+                self.analysis_results[idx]["raw_status"] = "MISSING"
+                self.analysis_results[idx]["path"] = None
+                self.analysis_results[idx]["duration"] = 0
+                self.processed_indices.discard(idx)
+
+                if str(item["id"]) in self.cache_data:
+                    del self.cache_data[str(item["id"])]
+
+                self.refresh_list_view()
+                messagebox.showinfo("OK", "Plik usunięty.")
+            except Exception as e:
+                messagebox.showerror("Błąd", str(e))
+
+    def delete_all_bad_audio(self):
+        # Usuwamy pliki widoczne jako błędne na podstawie filtered_items
+        to_del = []
+        for item in self.filtered_items:
+            # Musi mieć ścieżkę (istnieć) i być błędem
+            if not item.get("path"):
+                continue
+
+            status = item.get("display_status", "OK")
+            # Akceptujemy statusy wskazujące na błąd/ostrzeżenie
+            if status not in ["OK", "SHORT", "MISSING", "PENDING"]:
+                to_del.append(item)
+
+        if not to_del:
+            messagebox.showinfo("Info", "Brak błędnych plików do usunięcia (w aktualnym widoku).")
+            return
+
+        self.stop_audio()
+
+        if messagebox.askyesno("Potwierdź", f"Usunąć {len(to_del)} widocznych błędnych plików?"):
+            count = 0
+            errors = []
+
+            for item in to_del:
+                path_to_remove = Path(item["path"])
+                try:
+                    if path_to_remove.exists():
+                        os.remove(path_to_remove)
+
+                    # Aktualizacja stanu
+                    idx = item["id"] - 1
+                    self.analysis_results[idx]["raw_status"] = "MISSING"
+                    self.analysis_results[idx]["path"] = None
+                    self.analysis_results[idx]["duration"] = 0
+                    self.analysis_results[idx]["display_status"] = "MISSING"
+
+                    if str(item["id"]) in self.cache_data:
+                        del self.cache_data[str(item["id"])]
+
+                    count += 1
+                except Exception as e:
+                    errors.append(f"ID {item['id']}: {str(e)}")
+
+            self.refresh_list_view()
+
+            if errors:
+                msg = f"Usunięto {count} plików.\nBłędy:\n" + "\n".join(errors[:10])
+                if len(errors) > 10: msg += "\n..."
+                messagebox.showwarning("Wynik", msg)
+            else:
+                messagebox.showinfo("Zakończono", f"Pomyślnie usunięto {count} plików.")
+
+    def play_audio(self, path):
+        self.stop_audio()
+        path = str(path)
+        if self.ffplay_path:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            self.current_audio_process = subprocess.Popen(
+                [self.ffplay_path, "-nodisp", "-autoexit", path],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo
+            )
+        else:
+            if os.name == 'nt':
+                os.startfile(path)
+            else:
+                subprocess.call(['xdg-open', path])
 
     def stop_audio(self):
         if self.current_audio_process:
@@ -185,23 +665,12 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                 self.current_audio_process.terminate()
             self.current_audio_process = None
 
-    def stop_analysis(self):
-        """Pełne zatrzymanie przez użytkownika."""
-        if self.running:
-            self.stop_event.set()
-            self.lbl_status.configure(text="Zatrzymywanie...")
-            self.btn_stop.configure(state="disabled", fg_color="gray")
-            self.paused = False
-            # Reset przycisku na start
-            self.btn_action.configure(text="Rozpocznij Analizę", state="normal", fg_color="green")
-
-    # --- Cache Logic ---
     def _load_cache(self):
         if self.cache_file and self.cache_file.exists():
             try:
                 with open(self.cache_file, 'r', encoding='utf-8') as f:
                     self.cache_data = json.load(f)
-            except Exception:
+            except:
                 self.cache_data = {}
 
     def _save_cache(self):
@@ -209,530 +678,10 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             try:
                 with open(self.cache_file, 'w', encoding='utf-8') as f:
                     json.dump(self.cache_data, f, ensure_ascii=False)
-            except Exception:
+            except:
                 pass
 
-    # --- Sterowanie Procesem ---
-
-    def on_action_click(self):
-        """Obsługa głównego przycisku Start/Wznów."""
-        if self.paused:
-            # Jeśli zapauzowany -> Wznów
-            self.resume_analysis()
-        else:
-            # Jeśli nie działa -> Start od nowa
-            if not self.running:
-                self.start_analysis_fresh()
-
-    def start_analysis_fresh(self):
-        """Rozpoczyna analizę od początku."""
-        self.current_index = 0
-        self.analysis_results = []
-        self.error_details = {}
-        self.calibration_done = False
-        self.paused = False
-
-        # Reset UI listy
-        for widget in self.scroll_frame.winfo_children():
-            if int(widget.grid_info()["row"]) > 0:
-                widget.destroy()
-
-        self._start_worker()
-
-    def resume_analysis(self):
-        """Wznawia analizę od ostatniego indeksu."""
-        self.paused = False
-        self._start_worker()
-
-    def _start_worker(self):
-        self.running = True
-        self.stop_event.clear()
-
-        # UI Update
-        self.btn_action.configure(text="Analiza w toku...", state="disabled", fg_color="gray")
-        self.btn_stop.configure(state="normal", fg_color="red")
-        self.cb_force_refresh.configure(state="disabled")
-        self.lbl_status.configure(text="Analiza w toku...", text_color=["black", "white"])
-
-        thread = threading.Thread(target=self._analysis_worker, daemon=True)
-        thread.start()
-
-    # --- Worker ---
-
-    def _analysis_worker(self):
-        force_refresh = self.var_force_refresh.get()
-        if not force_refresh and not self.cache_data:
-            self._load_cache()
-        elif force_refresh and not self.analysis_results:
-            if self.current_index == 0:
-                self.cache_data = {}
-
-        total_lines = len(self.subtitles)
-
-        rolling_chars = 0
-        rolling_duration = 0
-        calibration_count = 0
-
-        last_update_time = time.time()
-
-        for i in range(self.current_index, total_lines):
-            if self.stop_event.is_set():
-                break
-
-            text = self.subtitles[i]
-            ident = str(i + 1)
-            text_clean = text.strip()
-
-            if not text_clean:
-                self.current_index = i + 1
-                continue
-
-            # --- FIND FILE ---
-            audio_file = None
-            found_ext = ""
-
-            paths_to_check = [
-                (self.audio_dir / f"output1 ({ident}).wav", "wav"),
-                (self.audio_dir / f"output1 ({ident}).mp3", "mp3"),
-                (self.audio_dir / "ready" / f"output1 ({ident}).ogg", "ogg"),
-                (self.audio_dir / "ready" / f"output1 ({ident}).mp3", "mp3")
-            ]
-
-            cached_entry = self.cache_data.get(ident)
-            cache_hit = False
-            duration = 0.0
-            error_msg = None
-
-            if not force_refresh and cached_entry:
-                if cached_entry.get("text") == text_clean:
-                    c_path = cached_entry.get("path")
-                    if c_path and os.path.exists(c_path):
-                        audio_file = Path(c_path)
-                        found_ext = cached_entry.get("ext", "")
-                        duration = cached_entry.get("duration", 0.0)
-                        error_msg = cached_entry.get("error")
-                        cache_hit = True
-
-            if not cache_hit:
-                for p, ext in paths_to_check:
-                    if p.exists():
-                        audio_file = p
-                        found_ext = ext
-                        break
-
-                if audio_file:
-                    duration, error_msg = self.get_audio_duration(audio_file, found_ext)
-
-            # --- INTERPRETATION ---
-            cps = 0.0
-            raw_status = "MISSING"
-
-            if audio_file:
-                if duration < 0:
-                    raw_status = "ERROR"
-                    self.error_details[ident] = f"{found_ext.upper()}: {error_msg}"
-                    duration = 0.0
-                elif duration == 0.0:
-                    raw_status = "EMPTY"
-                else:
-                    raw_status = "OK"
-                    char_count = len(text_clean)
-                    cps = char_count / duration
-
-                    self.cache_data[ident] = {
-                        "text": text_clean,
-                        "duration": duration,
-                        "path": str(audio_file),
-                        "ext": found_ext,
-                        "error": None
-                    }
-
-                    rolling_chars += char_count
-                    rolling_duration += duration
-                    calibration_count += 1
-            else:
-                self.cache_data[ident] = {
-                    "text": text_clean, "duration": 0, "path": None, "error": "Missing"
-                }
-
-            result_item = {
-                "id": int(ident),
-                "text": text,
-                "duration": duration,
-                "cps": cps,
-                "raw_status": raw_status,
-                "path": audio_file,
-                "ext": found_ext
-            }
-            self.analysis_results.append(result_item)
-
-            self.current_index = i + 1
-
-            # --- AUTO-CALIBRATION ---
-            if not self.calibration_done and calibration_count >= 20:
-                self.calibration_done = True
-                curr_avg = rolling_chars / rolling_duration if rolling_duration > 0 else 15.0
-                self.avg_cps = curr_avg
-                self.app.after(0, lambda a=curr_avg: self._apply_calibration(a))
-
-            # --- ERROR CHECK & STOP ---
-            is_error = self._check_if_error(result_item)
-
-            if is_error and self.var_stop_on_error.get():
-                self.paused = True
-                self.app.after(0, lambda: self._handle_pause_on_error(result_item))
-                break
-
-            current_time = time.time()
-            if (i % 20 == 0) or (current_time - last_update_time > 0.1):
-                progress = self.current_index / total_lines
-                self.app.after(0, lambda p=progress, c=self.current_index: self._update_progress_ui(p, c, total_lines))
-                last_update_time = current_time
-
-        # --- END OF LOOP ---
-        self._save_cache()
-
-        if not self.paused:
-            self.app.after(0, lambda: self._finalize_ui(self.current_index))
-
-    def _check_if_error(self, item):
-        if item["raw_status"] != "OK":
-            return True
-
-        min_cps = self.slider_min_cps.get()
-        max_cps = self.slider_max_cps.get()
-        ignore_short = self.var_ignore_short.get()
-
-        if ignore_short and len(item["text"]) < 5:
-            return False
-
-        if item["cps"] < min_cps or item["cps"] > max_cps:
-            return True
-
-        return False
-
-    def _apply_calibration(self, avg):
-        new_min = max(0.1, avg - 4.0)
-        new_max = avg + 8.0
-
-        self.slider_min_cps.set(new_min)
-        self.slider_max_cps.set(new_max)
-
-        self.lbl_min_cps.configure(text=f"Min: {new_min:.1f}")
-        self.lbl_max_cps.configure(text=f"Max: {new_max:.1f}")
-        self.refresh_list_view()
-
-    def _handle_pause_on_error(self, error_item):
-        self.running = False
-        self.btn_stop.configure(state="disabled", fg_color="gray")
-
-        # Zmiana przycisku na "Wznów"
-        self.btn_action.configure(text="Wznów", state="normal", fg_color="#1f6aa5")
-
-        self.cb_force_refresh.configure(state="normal")
-
-        err_txt = f"Zatrzymano na błędzie w linii {error_item['id']}!"
-        self.lbl_status.configure(text=err_txt, text_color="red")
-
-        self.refresh_list_view()
-
-    def _update_progress_ui(self, progress, current, total):
-        self.progress_bar.set(progress)
-        self.lbl_status.configure(text=f"Analiza: {current}/{total}...")
-
-    def _finalize_ui(self, total_processed):
-        if self.paused: return
-
-        self.running = False
-        self.btn_stop.configure(state="disabled", fg_color="gray")
-        # Reset na Start
-        self.btn_action.configure(text="Rozpocznij Analizę", state="normal", fg_color="green")
-        self.cb_force_refresh.configure(state="normal")
-        self.progress_bar.set(1.0)
-
-        if self.stop_event.is_set():
-            self.lbl_status.configure(text="Analiza przerwana przez użytkownika.", text_color="orange")
-        else:
-            self.lbl_status.configure(text="Analiza zakończona.", text_color="green")
-
-        self.refresh_list_view()
-
-    # --- Wyświetlanie listy ---
-
-    def on_slider_change(self, value):
+    def on_slider_change(self, _):
         self.lbl_min_cps.configure(text=f"Min: {self.slider_min_cps.get():.1f}")
         self.lbl_max_cps.configure(text=f"Max: {self.slider_max_cps.get():.1f}")
         self.refresh_list_view()
-
-    def refresh_list_view(self, *args):
-        for widget in self.scroll_frame.winfo_children():
-            if int(widget.grid_info()["row"]) > 0:
-                widget.destroy()
-
-        min_cps = self.slider_min_cps.get()
-        max_cps = self.slider_max_cps.get()
-        ignore_short = self.var_ignore_short.get()
-        show_errors_only = self.var_show_only_errors.get()
-
-        filtered_items = []
-        suspicious_count = 0
-
-        for item in self.analysis_results:
-            status = "OK"
-            is_error = False
-
-            if item["raw_status"] != "OK":
-                status = item["raw_status"]
-                is_error = True
-                if status == "MISSING" or status == "USUNIĘTO":
-                    item["display_status"] = "BRAK/USUN."
-                else:
-                    item["display_status"] = status
-            else:
-                cps = item["cps"]
-                text_len = len(item["text"])
-
-                if ignore_short and text_len < 5:
-                    status = "SHORT"
-                    is_error = False
-                else:
-                    if cps < min_cps:
-                        status = f"ZA WOLNO (<{min_cps:.1f})"
-                        is_error = True
-                    elif cps > max_cps:
-                        status = f"ZA SZYBKO (>{max_cps:.1f})"
-                        is_error = True
-                item["display_status"] = status
-
-            item["is_error"] = is_error
-            if is_error: suspicious_count += 1
-
-            if show_errors_only:
-                if is_error: filtered_items.append(item)
-            else:
-                filtered_items.append(item)
-
-        self.lbl_stats.configure(text=f"Błędy: {suspicious_count} | Przeanalizowano: {len(self.analysis_results)}")
-
-        LIMIT = 25
-        row = 1
-
-        if not filtered_items:
-            ctk.CTkLabel(self.scroll_frame, text="Brak wyników do wyświetlenia.").grid(row=row, column=1)
-            return
-
-        for item in filtered_items[:LIMIT]:
-            color = "white"
-            st = item["display_status"]
-            if "SZYBKO" in st or "WOLNO" in st:
-                color = "orange"
-            elif st in ["ERROR", "MISSING", "EMPTY", "BRAK/USUN.", "USUNIĘTO"]:
-                color = "red"
-            elif st == "OK":
-                color = "green"
-            elif st == "SHORT":
-                color = "gray"
-
-            ctk.CTkLabel(self.scroll_frame, text=str(item["id"])).grid(row=row, column=0, sticky="w", padx=5)
-
-            txt = (item["text"][:25] + '..') if len(item["text"]) > 25 else item["text"]
-            ctk.CTkLabel(self.scroll_frame, text=txt).grid(row=row, column=1, sticky="w", padx=5)
-
-            dur = f"{item['duration']:.2f}s" if item["duration"] > 0 else "-"
-            ctk.CTkLabel(self.scroll_frame, text=dur).grid(row=row, column=2, sticky="w", padx=5)
-
-            cps_val = f"{item['cps']:.1f}" if item["duration"] > 0 else "-"
-            ctk.CTkLabel(self.scroll_frame, text=cps_val).grid(row=row, column=3, sticky="w", padx=5)
-
-            ctk.CTkLabel(self.scroll_frame, text=st, text_color=color).grid(row=row, column=4, sticky="w", padx=5)
-
-            fmt = item["ext"].upper() if item["ext"] else "-"
-            ctk.CTkLabel(self.scroll_frame, text=fmt).grid(row=row, column=5, sticky="w", padx=5)
-
-            # Action Buttons Frame
-            act_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-            act_frame.grid(row=row, column=6, padx=5, pady=2)
-
-            # 1. Odtwarzanie
-            if item["path"]:
-                ctk.CTkButton(act_frame, text="▶", width=30, height=24,
-                              command=lambda p=item["path"]: self.play_audio(p)).pack(side="left", padx=2)
-
-            # 2. Naprawa (Dopasuj) - otwiera AudioRenameWindow
-            # UWAGA: Używa nowej nazwy okna AudioRenameWindow
-            ctk.CTkButton(act_frame, text="🛠", width=30, height=24, fg_color="#E0A800", text_color="black",
-                          hover_color="#C09000",
-                          command=lambda i=item["id"]: self.open_rename_window(i)).pack(side="left", padx=2)
-
-            # 3. Usuwanie (Kosz)
-            if item["path"] or item["raw_status"] == "OK":
-                ctk.CTkButton(act_frame, text="🗑", width=30, height=24, fg_color="darkred", hover_color="red",
-                              command=lambda i=item["id"]: self.delete_audio(i)).pack(side="left", padx=2)
-
-            row += 1
-
-        if len(filtered_items) > LIMIT:
-            ctk.CTkLabel(self.scroll_frame, text=f"... {len(filtered_items) - LIMIT} więcej ...").grid(row=row,
-                                                                                                       column=1)
-
-    # --- Actions ---
-
-    def delete_all_errors_action(self):
-        """Usuwa wszystkie pliki oznaczone jako błąd (czerwony/pomarańczowy)."""
-        items_to_delete = [item for item in self.analysis_results if item.get("is_error", False) and item.get("path")]
-
-        if not items_to_delete:
-            messagebox.showinfo("Info", "Brak błędnych plików audio do usunięcia.", parent=self)
-            return
-
-        count = len(items_to_delete)
-        if not messagebox.askyesno("Potwierdzenie",
-                                   f"Czy na pewno chcesz usunąć {count} plików audio oznaczonych jako błędne?",
-                                   parent=self):
-            return
-
-        deleted_count = 0
-        for item in items_to_delete:
-            if self.delete_audio(item["id"], refresh_ui=False):
-                deleted_count += 1
-
-        self.refresh_list_view()
-        messagebox.showinfo("Sukces", f"Usunięto {deleted_count} plików.", parent=self)
-
-    def open_rename_window(self, ident):
-        """Otwiera AudioRenameWindow dla danej linii."""
-        start_index = ident - 1
-
-        try:
-            win = None
-            # Opcja 1: Jeśli zaimportowano klasę bezpośrednio
-            if AudioRenameWindow:
-                win = AudioRenameWindow(self.app, self.audio_dir)
-
-            # Opcja 2: Użycie metody z app (jeśli klasa niezaimportowana)
-            elif hasattr(self.app, 'open_audio_rename_window'):
-                # Ta metoda prawdopodobnie tworzy okno i zapisuje referencję
-                self.app.open_audio_rename_window()
-                # Próbujemy znaleźć referencję do otwartego okna
-                # (Zależy to od implementacji w studio.py, ale często jest to self.app.audio_rename_window)
-                if hasattr(self.app, 'audio_rename_window') and self.app.audio_rename_window:
-                    win = self.app.audio_rename_window
-
-            if win:
-                # Próba ustawienia indeksu na wybraną linię
-                if hasattr(win, 'current_index'):
-                    win.current_index = start_index
-                    # Odświeżenie widoku w oknie (metody typowe dla takich okien)
-                    if hasattr(win, 'load_pair'):
-                        win.load_pair()
-                    elif hasattr(win, 'update_ui'):
-                        win.update_ui()
-                    elif hasattr(win, 'refresh'):
-                        win.refresh()
-                win.lift()
-                win.focus_force()
-            else:
-                messagebox.showerror("Błąd", "Nie znaleziono klasy AudioRenameWindow.", parent=self)
-
-        except Exception as e:
-            print(f"Błąd otwierania okna dopasowania: {e}")
-            messagebox.showerror("Błąd", f"Nie udało się otworzyć okna naprawy:\n{e}", parent=self)
-
-    def delete_audio(self, ident, refresh_ui=True):
-        """Usuwa pliki audio skojarzone z danym ID. Zwraca True jeśli coś usunięto."""
-        ident_str = str(ident)
-        deleted_any = False
-
-        files_to_remove = [
-            self.audio_dir / f"output1 ({ident_str}).wav",
-            self.audio_dir / f"output1 ({ident_str}).mp3",
-            self.audio_dir / "ready" / f"output1 ({ident_str}).ogg",
-            self.audio_dir / "ready" / f"output1 ({ident_str}).mp3",
-            self.audio_dir / "ready" / f"output1 ({ident_str}).wav"
-        ]
-
-        for f in files_to_remove:
-            if f.exists():
-                try:
-                    os.remove(f)
-                    deleted_any = True
-                except Exception as e:
-                    print(f"Nie udało się usunąć {f}: {e}")
-
-        if deleted_any:
-            for item in self.analysis_results:
-                if item["id"] == ident:
-                    item["path"] = None
-                    item["duration"] = 0.0
-                    item["cps"] = 0.0
-                    item["raw_status"] = "USUNIĘTO"
-                    item["ext"] = ""
-                    item["is_error"] = True
-                    break
-
-            if ident_str in self.cache_data:
-                del self.cache_data[ident_str]
-                self._save_cache()
-
-            if refresh_ui:
-                self.refresh_list_view()
-
-        return deleted_any
-
-    # --- Audio helpers ---
-
-    def get_audio_duration(self, file_path, ext):
-        file_path = str(file_path)
-        if ext == 'wav':
-            try:
-                with contextlib.closing(wave.open(file_path, 'r')) as f:
-                    frames = f.getnframes()
-                    rate = f.getframerate()
-                    return (frames / float(rate)), None
-            except Exception:
-                pass
-        if ext == 'mp3' and MUTAGEN_AVAILABLE:
-            try:
-                audio = MP3(file_path)
-                return audio.info.length, None
-            except Exception:
-                pass
-        if self.ffprobe_path:
-            try:
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                cmd = [self.ffprobe_path, "-v", "error", "-show_entries", "format=duration", "-of",
-                       "default=noprint_wrappers=1:nokey=1", file_path]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                     startupinfo=startupinfo, timeout=5)
-                if res.returncode != 0: return -1.0, res.stderr.strip()
-                val = res.stdout.strip()
-                return float(val) if val else -1.0, None
-            except Exception as e:
-                return -1.0, str(e)
-        return -1.0, "Brak narzędzia"
-
-    def play_audio(self, path):
-        self.stop_audio()
-        path = str(path)
-        if self.ffplay_path:
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            try:
-                self.current_audio_process = subprocess.Popen([self.ffplay_path, "-nodisp", "-autoexit", path],
-                                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                                              startupinfo=startupinfo)
-            except Exception:
-                self._play_fallback(path)
-        else:
-            self._play_fallback(path)
-
-    def _play_fallback(self, path):
-        if os.name == 'nt':
-            os.startfile(path)
-        else:
-            subprocess.call(['xdg-open', path])
