@@ -54,11 +54,15 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.avg_cps = 15.0
         self.error_details = {}
 
+        # Wartości do skanowania (aktualizowane przez slidery)
+        self.scan_min_cps = 3.0
+        self.scan_max_cps = 25.0
+
         # --- Ustawienia Okna ---
         self.title(f"Weryfikacja audio ({len(subtitles)} linii)")
         self.geometry("1280x850")
 
-        # FIX: Okno pojawia się na wierzchu, ale nie jest "przyspawane" (nie blokuje dialogów)
+        # Okno pojawia się na wierzchu, ale nie jest "przyspawane" (nie blokuje dialogów)
         self.lift()
         self.focus_force()
         self.attributes("-topmost", True)
@@ -95,8 +99,8 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.opts_frame.grid(row=0, column=1, sticky="ns", padx=20, pady=5)
 
         self.var_stop_on_error = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(self.opts_frame, text="Zatrzymaj na błędzie",
-                        variable=self.var_stop_on_error).pack(anchor="w")
+        ctk.CTkCheckBox(self.opts_frame, text="Zatrzymaj na błędzie (CPS/ERROR)", variable=self.var_stop_on_error).pack(
+            anchor="w")
 
         self.var_auto_sync = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(self.opts_frame, text="Auto-kalibracja (po 20 plikach)", variable=self.var_auto_sync).pack(
@@ -129,18 +133,18 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.slider_cont = ctk.CTkFrame(self.filter_frame, fg_color="transparent")
         self.slider_cont.pack(side="left", fill="x", expand=True, padx=10)
 
-        self.lbl_min_cps = ctk.CTkLabel(self.slider_cont, text="Min CPS: 3.0", width=80)
+        self.lbl_min_cps = ctk.CTkLabel(self.slider_cont, text=f"Min CPS: {self.scan_min_cps}", width=80)
         self.lbl_min_cps.pack(side="left")
         self.slider_min_cps = ctk.CTkSlider(self.slider_cont, from_=1.0, to=20.0, number_of_steps=190,
                                             command=self.on_slider_change)
-        self.slider_min_cps.set(3.0)
+        self.slider_min_cps.set(self.scan_min_cps)
         self.slider_min_cps.pack(side="left", fill="x", expand=True, padx=5)
 
-        self.lbl_max_cps = ctk.CTkLabel(self.slider_cont, text="Max CPS: 25.0", width=80)
+        self.lbl_max_cps = ctk.CTkLabel(self.slider_cont, text=f"Max CPS: {self.scan_max_cps}", width=80)
         self.lbl_max_cps.pack(side="left")
         self.slider_max_cps = ctk.CTkSlider(self.slider_cont, from_=10.0, to=50.0, number_of_steps=400,
                                             command=self.on_slider_change)
-        self.slider_max_cps.set(25.0)
+        self.slider_max_cps.set(self.scan_max_cps)
         self.slider_max_cps.pack(side="left", fill="x", expand=True, padx=5)
 
         self.var_ignore_short = ctk.BooleanVar(value=True)
@@ -257,9 +261,14 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.btn_stop.configure(state="normal")
         self.btn_del_all_errors.configure(state="disabled")
 
+        # Pobranie ustawień GUI
         force_refresh = self.var_force_refresh.get()
         stop_on_error = self.var_stop_on_error.get()
         auto_sync = self.var_auto_sync.get()
+        ignore_short = self.var_ignore_short.get()
+
+        # Upewnienie się, że wartości skanowania są zsynchronizowane ze sliderami
+        self.on_slider_change(None)
 
         if force_refresh:
             for item in self.tree.get_children(): self.tree.delete(item)
@@ -268,7 +277,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
 
         thread = threading.Thread(
             target=self._analysis_worker,
-            args=(force_refresh, stop_on_error, auto_sync),
+            args=(force_refresh, stop_on_error, auto_sync, ignore_short),
             daemon=True
         )
         thread.start()
@@ -287,7 +296,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
 
     # --- Worker Analizy ---
 
-    def _analysis_worker(self, force_refresh, stop_on_error, auto_sync):
+    def _analysis_worker(self, force_refresh, stop_on_error, auto_sync, ignore_short):
         if force_refresh:
             self.cache_data = {}
 
@@ -393,10 +402,26 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                 avg = valid_files_cps_sum / 20
                 self.app.after(0, lambda a=avg: self._auto_adjust_thresholds(a))
 
-            # Zatrzymanie na błędzi
-            if stop_on_error and raw_status in ["ERROR", "EMPTY"]:
-                msg_txt = f"Wykryto problem z plikiem ID {ident_str}!\n{error_msg or 'Pusty plik (0s)'}"
-                self.app.after(0, lambda m=msg_txt: messagebox.showerror("Błąd Audio", m))
+            # --- Sprawdzenie warunków zatrzymania (ERROR, EMPTY, CPS Limits) ---
+            should_stop = False
+            stop_reason = ""
+
+            if raw_status in ["ERROR", "EMPTY"]:
+                should_stop = True
+                stop_reason = f"Plik {ident_str}: {raw_status} ({error_msg or 'Pusty'})"
+
+            # Sprawdzenie CPS (tylko jeśli status pliku jest OK)
+            elif raw_status == "OK":
+                is_short_ignored = (ignore_short and len(text_clean) < 5)
+                if not is_short_ignored:
+                    if cps < self.scan_min_cps:
+                        should_stop = True
+                        stop_reason = f"Plik {ident_str}: ZA WOLNO ({cps:.1f} CPS < {self.scan_min_cps:.1f})"
+                    elif cps > self.scan_max_cps:
+                        should_stop = True
+                        stop_reason = f"Plik {ident_str}: ZA SZYBKO ({cps:.1f} CPS > {self.scan_max_cps:.1f})"
+
+            if stop_on_error and should_stop:
                 stopped_on_error_flag = True
                 break
 
@@ -682,6 +707,11 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                 pass
 
     def on_slider_change(self, _):
-        self.lbl_min_cps.configure(text=f"Min: {self.slider_min_cps.get():.1f}")
-        self.lbl_max_cps.configure(text=f"Max: {self.slider_max_cps.get():.1f}")
+        # Aktualizacja zmiennych dla workera
+        self.scan_min_cps = self.slider_min_cps.get()
+        self.scan_max_cps = self.slider_max_cps.get()
+
+        # UI
+        self.lbl_min_cps.configure(text=f"Min: {self.scan_min_cps:.1f}")
+        self.lbl_max_cps.configure(text=f"Max: {self.scan_max_cps:.1f}")
         self.refresh_list_view()
