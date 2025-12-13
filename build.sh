@@ -36,6 +36,7 @@ python -m nuitka \
   --include-package=elevenlabs \
   --include-package=elevenlabs.types \
   --include-package=pydub \
+  --include-module=pydub.pyaudioop \
   --include-package=google.cloud \
   "$ENTRY_FILE" \
   -o "$APP_NAME"
