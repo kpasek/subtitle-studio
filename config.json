@@ -1,0 +1,44 @@
+{
+  "recent_projects": [
+    "/home/kpasek/Projects/lektor/avatar/avatar.json"
+  ],
+  "last_project": "/home/kpasek/Projects/lektor/avatar/avatar.json",
+  "last_view_mode": "TTS",
+  "start_directory": "/home/kpasek/Projects/lektor",
+  "conversion_workers": 8,
+  "local_api_url": "http://127.0.0.1:8001",
+  "audio_output_format": "mp3",
+  "xtts_voice_path": "",
+  "elevenlabs_api_key": "",
+  "elevenlabs_voice_id": "",
+  "google_credentials_path": "",
+  "google_voice_name": "pl-PL-Wavenet-B",
+  "ffmpeg_filters": {
+    "highpass": {
+      "enabled": false,
+      "params": "f=70"
+    },
+    "lowpass": {
+      "enabled": false,
+      "params": "f=14000"
+    },
+    "deesser": {
+      "enabled": false,
+      "params": "i=0.4:m=0.3"
+    },
+    "acompressor": {
+      "enabled": false,
+      "params": "threshold=-18dB:ratio=2:attack=5:release=120:makeup=2"
+    },
+    "loudnorm": {
+      "enabled": false,
+      "params": "I=-16:TP=-1.5:LRA=11"
+    },
+    "alimiter": {
+      "enabled": false,
+      "params": "limit=-1dB"
+    }
+  },
+  "appearance_mode": "System",
+  "color_theme": "blue"
+}

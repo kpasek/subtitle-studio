@@ -24,8 +24,9 @@ class GenerationProgressWindow(ctk.CTkToplevel):
         self.cancel_button.pack(pady=10, padx=20)
 
         self.protocol("WM_DELETE_WINDOW", self.on_cancel)
-        self.transient(master)  # Trzymaj okno na wierzchu
-        self.grab_set()  # Ustaw modalność
+        self.transient(master)
+        self.wait_visibility()
+        self.grab_set()
 
     def update_progress(self, current: int, total: int, message: str):
         """Aktualizuje pasek postępu dla określonej liczby zadań."""

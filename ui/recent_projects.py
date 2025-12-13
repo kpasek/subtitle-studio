@@ -14,6 +14,7 @@ class RecentProjectsWindow(ctk.CTkToplevel):
         self.title("Ostatnie projekty")
         self.geometry("600x400")
         self.transient(parent)
+        self.wait_visibility()
         self.grab_set()
 
         self.on_open = on_open_callback

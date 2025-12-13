@@ -21,6 +21,7 @@ class GameReaderExportWindow(ctk.CTkToplevel):
 
         # Ustawienie okna jako modalne
         self.transient(app)
+        self.wait_visibility()
         self.grab_set()
 
         self.grid_columnconfigure(0, weight=1)

@@ -15,6 +15,7 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
         self.geometry("400x300")
         self.resizable(False, False)
         self.transient(parent)
+        self.wait_visibility()
         self.grab_set()
 
         self.grid_columnconfigure(0, weight=1)

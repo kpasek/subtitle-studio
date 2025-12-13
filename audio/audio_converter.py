@@ -135,7 +135,7 @@ class AudioConverter:
     def convert_dir(self, audio_dir: str, output_dir: str, max_workers: int = 4,
                     progress_callback: Optional[Callable[[
                         int, int], None]] = None,
-                    cancel_event: Optional[threading.Event] = None):
+                    cancel_event: Optional[threading.Event] = None, out_format: str = 'mp3'):
         """
         Converts all audio files in `audio_dir` (excluding /ready/)
         and saves them to `output_dir` using a process pool.

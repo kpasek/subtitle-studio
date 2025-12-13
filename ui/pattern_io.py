@@ -18,6 +18,7 @@ class PatternIOWindow(ctk.CTkToplevel):
 
         # Okno modalne
         self.transient(app)
+        self.wait_visibility()
         self.grab_set()
 
         # Zakładki dla Importu i Eksportu

@@ -1139,7 +1139,7 @@ class SubtitleStudioApp(ctk.CTk):
 
     def _gather_tts_config(self):
         return {
-            'local_api_url': self.global_config.get('local_api_url'),
+            'local_api_url': self.global_config.get('local_api_url', 'http://127.0.0.1:8001'),
             'xtts_voice_path': self.project_config.get('xtts_voice_path') or self.global_config.get('xtts_voice_path'),
             'elevenlabs_api_key': self.global_config.get('elevenlabs_api_key'),
             'elevenlabs_voice_id': self.global_config.get('elevenlabs_voice_id'),
@@ -1235,14 +1235,14 @@ class SubtitleStudioApp(ctk.CTk):
         if not self.processed_clean: return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self)
         if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self)
 
-        AudioDeleterWindow(self, self.processed_clean, str(self.audio_dir)).grab_set()
+        AudioDeleterWindow(self, self.processed_clean, str(self.audio_dir)).wait_visibility().grab_set()
 
     def open_global_settings(self):
-        SettingsWindow(self, self.torch_installed, mode='global').grab_set()
+        SettingsWindow(self, self.torch_installed, mode='global').wait_visibility().grab_set()
 
     def open_project_settings(self):
         if not self.current_project_path: return messagebox.showwarning("Brak projektu", "Zapisz projekt.", parent=self)
-        SettingsWindow(self, self.torch_installed, mode='project').grab_set()
+        SettingsWindow(self, self.torch_installed, mode='project').wait_visibility().grab_set()
 
     def choose_audio_dir(self):
         init_dir = self.global_config.get('start_directory') or (str(self.audio_dir) if self.audio_dir else None)

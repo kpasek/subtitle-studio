@@ -15,6 +15,7 @@ class NamesManagerWindow(ctk.CTkToplevel):
         self.resizable(False, True)
 
         self.transient(app)
+        self.wait_visibility()
         self.grab_set()
 
         # Header
