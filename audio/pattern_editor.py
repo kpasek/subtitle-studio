@@ -57,9 +57,8 @@ class PatternEditorWindow(ctk.CTkToplevel):
         self.lbl_replace = ctk.CTkLabel(main_frame, text="Zamień na:")
         self.ent_replace = ctk.CTkEntry(main_frame, placeholder_text="Zostaw puste aby usunąć")
 
-        if self.pattern_type == 'replace':
-            self.lbl_replace.pack(anchor="w")
-            self.ent_replace.pack(fill="x", pady=(0, 10))
+        self.lbl_replace.pack(anchor="w")
+        self.ent_replace.pack(fill="x", pady=(0, 10))
 
         # -- Opcje --
         self.var_case_sensitive = tk.BooleanVar(value=True)
@@ -85,8 +84,7 @@ class PatternEditorWindow(ctk.CTkToplevel):
             self.ent_pattern.insert(0, self.existing_pattern.pattern)
 
             # Zamiennik
-            if self.pattern_type == 'replace':
-                self.ent_replace.insert(0, self.existing_pattern.replace)
+            self.ent_replace.insert(0, self.existing_pattern.replace)
 
             # Case sensitive
             self.var_case_sensitive.set(self.existing_pattern.case_sensitive)
@@ -95,10 +93,7 @@ class PatternEditorWindow(ctk.CTkToplevel):
         name = self.ent_name.get().strip()
         pattern = self.ent_pattern.get()
 
-        # Jeśli type='remove', replace jest zawsze pustym stringiem
-        replace = ""
-        if self.pattern_type == 'replace':
-            replace = self.ent_replace.get()
+        replace = self.ent_replace.get()
 
         case_sensitive = self.var_case_sensitive.get()
 
