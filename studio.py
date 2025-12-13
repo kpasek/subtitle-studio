@@ -653,123 +653,78 @@ class SubtitleStudioApp(ctk.CTk):
 
     def _finalize_processing(self, remove_empty: bool, remove_duplicates: bool):
         """
-        Zatwierdza zmiany z okna podsumowania.
-        Implementuje ścisłe wiązanie ID linii z plikami audio przed przetworzeniem.
+        Zatwierdza zmiany zgodnie z nową logiką:
+        1. Aplikuje wzorce (remove + replace).
+        2. Aplikuje edycje ręczne.
+        3. Filtruje (puste/duplikaty).
+        4. Zapisuje wynik do nowego pliku z timestampem.
+        5. Ustawia nowy plik jako aktualny w projekcie.
         """
-        rem_patterns, rep_patterns = self._gather_active_patterns()
+        import datetime
+        import re
 
-        # 1. Przygotuj bazę tekstową (Regex) - to nie zmienia indeksów
-        base_processed = apply_remove_patterns(self.original_lines, rem_patterns)
+        # 1. Pobierz aktywne wzorce
+        rem_patterns, _ = self._gather_active_patterns()
 
-        # Nałóż edycje manualne
+        # 2. Aplikuj wzorce usuwające na ORYGINALNYCH liniach
+        # (Zaczynamy od czystej wersji, by nałożyć obecny stan przetworzenia)
+        working_lines = list(self.original_lines)
+        processed_lines = apply_remove_patterns(working_lines, rem_patterns)
+
         for idx, text in self.manual_edits.items():
-            if 0 <= idx < len(base_processed):
-                base_processed[idx] = text
+            if 0 <= idx < len(processed_lines):
+                processed_lines[idx] = text
 
-        # 2. IN-MEMORY BINDING: Zbuduj strukturę danych wiążącą linię z jej plikami audio
-        # Każdy element to słownik: { 'old_id': int, 'text': str, 'audio_files': List[Path] }
-        lines_data = []
-
-        # Helper do szukania plików dla danego ID
-        def find_files_for_id(ident: int) -> List[Path]:
-            found = []
-            if not self.audio_dir: return found
-
-            # Sprawdź główne rozszerzenia
-            for ext in ['.wav', '.mp3']:
-                f = self.audio_dir / f"output1 ({ident}){ext}"
-                if f.exists(): found.append(f)
-
-            # Sprawdź folder ready
-            ready_dir = self.audio_dir / "ready"
-            if ready_dir.exists():
-                for ext in ['.ogg', '.mp3']:
-                    f = ready_dir / f"output1 ({ident}){ext}"
-                    if f.exists(): found.append(f)
-
-            return found
-
-        for i, text in enumerate(base_processed):
-            old_id = i + 1
-            entry = {
-                'old_id': old_id,
-                'text': text,
-                'audio_files': find_files_for_id(old_id),  # Tu następuje "przypięcie" plików
-                'keep': True
-            }
-            lines_data.append(entry)
-
-        # 3. Logika filtrowania (oznaczamy co usunąć)
-        seen = set()
-        for entry in lines_data:
-            text = entry['text']
-
-            if remove_empty and not text.strip():
-                entry['keep'] = False
-
-            if remove_duplicates and entry['keep']:  # Sprawdzamy tylko jeśli jeszcze nie odpadło
-                if text in seen:
-                    entry['keep'] = False
-                elif text.strip():
-                    seen.add(text)
-
-        # 4. Generowanie nowej listy linii i planu dla plików
+        # 5. Filtrowanie (Puste linie i Duplikaty)
         final_lines = []
-        audio_operations = []  # Lista krotek dla AudioSyncWindow
+        seen = set()
 
-        new_idx_counter = 1
+        for line in processed_lines:
+            # -- Usuwanie pustych --
+            if remove_empty and not line.strip():
+                continue
 
-        for entry in lines_data:
-            if entry['keep']:
-                final_lines.append(entry['text'])
+            # -- Usuwanie duplikatów --
+            if remove_duplicates:
+                # Normalizujemy (strip) aby wykryć duplikaty różniące się tylko spacją
+                normalized = line.strip()
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+            
+            final_lines.append(line)
 
-                # Jeśli linia zostaje, sprawdzamy czy zmienił się jej numer
-                new_id = new_idx_counter
-                new_idx_counter += 1
+        if not self.current_project_path:
+            tk.messagebox.showerror("Błąd", "Brak otwartego pliku projektu.")
+            return
 
-                if new_id != entry['old_id']:
-                    # Linia zmienia numer -> Przenieś WSZYSTKIE jej pliki
-                    for src in entry['audio_files']:
-                        # Oblicz nową nazwę zachowując rozszerzenie i folder
-                        is_ready_folder = src.parent.name == "ready"
-                        if is_ready_folder:
-                            dst = self.audio_dir / "ready" / f"output1 ({new_id}){src.suffix}"
-                        else:
-                            dst = self.audio_dir / f"output1 ({new_id}){src.suffix}"
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        original_stem = self.current_project_path.stem
+        new_filename = f"{timestamp}_{original_stem}.txt"
+        new_path = self.current_project_path.parent / new_filename
 
-                        audio_operations.append(('rename', src, dst))
-            else:
-                # Linia usuwana -> Usuń jej pliki
-                for src in entry['audio_files']:
-                    audio_operations.append(('delete', src, None))
+        try:
+            with open(new_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(final_lines))
+        except Exception as e:
+            tk.messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać nowego pliku:\n{e}")
+            return
 
-        # 5. Wykonanie zmian
-
-        # Jeśli są operacje na plikach, uruchom okno synchronizacji
-        if audio_operations:
-            if self.audio_dir and self.audio_dir.exists():
-                AudioSyncWindow(self, audio_operations)
-            else:
-                messagebox.showwarning("Błąd",
-                                       "Katalog audio nie jest dostępny, ale wykryto zmiany wymagające synchronizacji.")
-
-        # Aktualizacja stanu aplikacji
-        if len(final_lines) != len(base_processed):
-            self.processed_clean = final_lines
-            self.manual_edits = {}
-            self.tts_edits = {}
-            self.set_status(
-                f'Zatwierdzono. Usunięto {len(base_processed) - len(final_lines)} linii. Przygotowano {len(audio_operations)} operacji na plikach.')
-        else:
-            self.processed_clean = base_processed
-            self.set_status('Zatwierdzono zmiany. Brak linii do usunięcia.')
-
-        self._refresh_custom_lists()
-        self.mark_as_unsaved()
-
+        self.loaded_path = new_path
+        self.original_lines = final_lines
+        self.processed_clean = list(final_lines)
+        
+        self.manual_edits = {}
+        for p in self.custom_remove:
+            p.enabled = False
+        
         self._cache_replace_result = None
         self._last_replace_signature = None
-        self.apply_patterns()
+
+        self._refresh_custom_lists()
+        self.save_project()
+                                
+        self.set_status(f"Zatwierdzono. Utworzono nową wersję: {new_filename}")
 
     # --- GENEROWANIE ---
 
