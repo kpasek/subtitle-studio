@@ -30,11 +30,14 @@ class PatternEditorWindow(ctk.CTkToplevel):
         self.title(f"{title_prefix} wzorzec {type_label}")
         self.geometry("500x450")
 
-        self.transient(master)
-        self.grab_set()
-
         self._create_widgets()
         self._populate_fields()
+
+        self.transient(master)
+        self.wait_visibility()
+        self.grab_set()
+        self.lift()
+        self.focus_force()
 
     def _create_widgets(self):
         main_frame = ctk.CTkFrame(self)
