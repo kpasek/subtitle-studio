@@ -10,12 +10,14 @@ def _convert_worker(task_args):
     Funkcja robocza (top-level) dla puli procesów.
     Tworzy własną instancję konwertera i wywołuje parse_ogg.
     """
-    input_file, output_file, filter_settings = task_args
+    # ZMIANA: Dodano out_format do argumentów
+    input_file, output_file, filter_settings, out_format = task_args
 
-    print(f"[Worker] Przetwarzam: {input_file} -> {output_file}")
+    print(f"[Worker] Przetwarzam: {input_file} -> {output_file} (format: {out_format})")
 
     try:
-        converter_instance = AudioConverter(filter_settings=filter_settings)
+        # ZMIANA: Przekazujemy out_format do konstruktora
+        converter_instance = AudioConverter(filter_settings=filter_settings, out_format=out_format)
         converter_instance.parse_ogg(input_file, output_file)
         return (input_file, True, None)
     except Exception as e:
@@ -28,33 +30,26 @@ class AudioConverter:
     Handles audio conversion, applying FFmpeg filters.
     """
 
-    def __init__(self, filter_settings: Optional[Dict[str, Any]] = None):
+    def __init__(self, filter_settings: Optional[Dict[str, Any]] = None, out_format: str = 'mp3'):
         """
         Initializes the converter.
 
         Args:
             filter_settings: A dictionary of filter configurations from global settings.
+            out_format: Target output format ('ogg' or 'mp3').
         """
         self.filter_settings = filter_settings if filter_settings is not None else {}
+        self.out_format = out_format.lower()
 
     def parse_ogg(self, input_file: str, output_file: str):
         """
-        Converts a single audio file (.wav, .mp3, .ogg) to two .ogg files
-        in the /ready/ directory (output1) with filters applied.
+        Converts a single audio file (.wav, .mp3, .ogg) to the target file
+        in the /ready/ directory with filters applied.
 
         Args:
             input_file: Path to the source audio file.
+            output_file: Path to the destination file.
         """
-
-        input_filename = os.path.basename(input_file)
-        input_dir = os.path.dirname(output_file)
-
-        base_name_match = os.path.splitext(input_filename)[0]
-        if base_name_match.startswith("output1 "):
-            base_name = base_name_match[8:]
-        else:
-            base_name = base_name_match
-
 
         if os.path.exists(output_file):
             return
@@ -79,20 +74,17 @@ class AudioConverter:
                 except Exception as remove_err:
                     print(
                         f"Nie udało się usunąć pliku {output_file}: {remove_err}")
-            # Rzuć błąd dalej, aby _convert_worker go złapał
             raise e
 
     def export_file(self, audio: AudioSegment, output_file: str):
         """
-        Eksportuje AudioSegment bezpośrednio do finalnego pliku .ogg,
-        przekazując filtry i prędkość do FFmpeg za pomocą pydub.
+        Eksportuje AudioSegment bezpośrednio do finalnego pliku,
+        przekazując filtry i kodeki do FFmpeg za pomocą pydub.
 
         Args:
             audio: Obiekt Pydub AudioSegment.
-            output_file: Docelowa ścieżka dla pliku .ogg.
+            output_file: Docelowa ścieżka dla pliku.
         """
-
-        # 1. Budowanie łańcucha filtrów (tak jak wcześniej)
         filter_list = []
         filter_order = ['highpass', 'lowpass', 'deesser',
                         'acompressor', 'loudnorm', 'alimiter']
@@ -106,32 +98,31 @@ class AudioConverter:
 
         filter_str = ",".join(filter_list)
 
-        if filter_str:
-            final_filter_chain = filter_str
-        else:
-            final_filter_chain = ""
         export_params = ['-loglevel', 'error']
 
-        if final_filter_chain:
-            export_params.extend(['-af', final_filter_chain])
-            export_params.extend(['-c:a', 'libvorbis'])
+        if self.out_format == 'mp3':
+            target_format = 'mp3'
+            codec_args = ['-c:a', 'libmp3lame', '-q:a', '2']
         else:
-            pass
+            target_format = 'ogg'
+            codec_args = ['-c:a', 'libvorbis']
 
-        # 3. Wykonanie eksportu w jednym kroku
-        #    Nie ma już pliku .temp.ogg ani bloku subprocess.
+        if filter_str:
+            export_params.extend(['-af', filter_str])
+            export_params.extend(codec_args)
+        else:
+            export_params.extend(codec_args)
+
         try:
             audio.export(
                 output_file,
-                format="ogg",
+                format=target_format,
                 parameters=export_params
             )
         except Exception as e:
-            # Łapiemy błąd, jeśli ffmpeg zawiedzie
             print(f"Błąd FFmpeg podczas eksportu do {output_file}: {e}")
-            # Rzuć błąd dalej, aby parse_ogg i _convert_worker go złapały
             raise e
-            
+
     def convert_dir(self, audio_dir: str, output_dir: str, max_workers: int = 4,
                     progress_callback: Optional[Callable[[
                         int, int], None]] = None,
@@ -139,17 +130,13 @@ class AudioConverter:
         """
         Converts all audio files in `audio_dir` (excluding /ready/)
         and saves them to `output_dir` using a process pool.
-
-        Args:
-            audio_dir: Source directory with raw .wav/.mp3/.ogg files.
-            output_dir: Target directory (usually '.../ready/').
-            max_workers: The number of processes to use.
-            progress_callback: Optional function to call with (current, total) progress.
         """
+        self.out_format = out_format
+
         tasks = []
         os.makedirs(output_dir, exist_ok=True)
 
-        print(f"Rozpoczynam skanowanie {audio_dir} dla konwersji...")
+        print(f"Rozpoczynam skanowanie {audio_dir} dla konwersji (format: {out_format})...")
 
         for filename in os.listdir(audio_dir):
             if filename.lower().endswith((".wav", ".ogg", ".mp3")):
@@ -157,27 +144,22 @@ class AudioConverter:
                     continue
 
                 input_path = os.path.join(audio_dir, filename)
-                output_path_ogg = self.build_output_file_path(
-                    filename, output_dir)
 
-                base_name_match = os.path.splitext(filename)[0]
-                if base_name_match.startswith("output1 "):
-                    base_name = base_name_match[8:]
-                else:
-                    base_name = base_name_match
+                # ZMIANA: Przekazujemy out_format do budowania ścieżki
+                output_path_final = self.build_output_file_path(
+                    filename, output_dir, out_format)
 
-                if os.path.exists(output_path_ogg) :
+                if os.path.exists(output_path_final):
                     continue
 
-                task_args = (input_path, output_path_ogg, self.filter_settings)
+                # ZMIANA: Przekazujemy out_format w krotce argumentów
+                task_args = (input_path, output_path_final, self.filter_settings, out_format)
                 tasks.append(task_args)
 
         if not tasks:
             print(f"Nie znaleziono plików do konwersji w {audio_dir}.")
-            print(
-                f"✅ Zakończono przetwarzanie wszystkich plików audio dla {audio_dir}")
             if progress_callback:
-                progress_callback(1, 1)  # Pokaż 100% jeśli nie ma zadań
+                progress_callback(1, 1)
             return
 
         print(
@@ -197,10 +179,9 @@ class AudioConverter:
 
                 if cancel_event and cancel_event.is_set():
                     print("Anulowanie konwersji wymuszone przez użytkownika.")
-                    # Anuluj wszystkie oczekujące zadania (nie są one jeszcze uruchomione)
                     for remaining_future in futures:
                         remaining_future.cancel()
-                    break  # Wyjdź z pętli as_completed
+                    break
 
                 try:
                     _, success, error_msg = future.result()
@@ -222,25 +203,21 @@ class AudioConverter:
 
             if cancel_event and cancel_event.is_set():
                 print("Proces konwersji zakończony anulowaniem.")
-                # Nie rzucamy wyjątku, tylko kończymy normalnie.
             else:
                 print(f"✅ Zakończono przetwarzanie dla {audio_dir}.")
                 print(
                     f"Pomyślnie: {successful_count}, Nie powiodło się: {failed_count}")
-                # Upewnij się, że pasek postępu pokazuje 100% po zakończeniu
                 if progress_callback:
                     progress_callback(total_tasks, total_tasks)
 
-    def build_output_file_path(self, filename: str, output_dir: str) -> str:
+    def build_output_file_path(self, filename: str, output_dir: str, out_format: str = 'ogg') -> str:
         """
-        Constructs the standard 'output1 (ID).ogg' path.
+        Constructs the standard 'output1 (ID).ext' path.
 
         Args:
-            filename: The source filename (e.g., "output1 (123).wav").
+            filename: The source filename.
             output_dir: The target directory.
-
-        Returns:
-            The full path for the 'output1' file.
+            out_format: The target format ('mp3' or 'ogg').
         """
         base_name_match = os.path.splitext(filename)[0]
         if base_name_match.startswith("output1 "):
@@ -248,6 +225,8 @@ class AudioConverter:
         else:
             base_name = base_name_match
 
-        output_file_name = f"output1 {base_name}.ogg"
-        output_path_ogg = os.path.join(output_dir, output_file_name)
-        return output_path_ogg
+        ext = ".mp3" if out_format == 'mp3' else ".ogg"
+        output_file_name = f"output1 {base_name}{ext}"
+
+        output_path = os.path.join(output_dir, output_file_name)
+        return output_path

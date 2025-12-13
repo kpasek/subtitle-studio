@@ -301,7 +301,7 @@ class GenerationManager:
             default_workers = max(1, os.cpu_count() // 2 if os.cpu_count() else 4)
             max_workers = int(config.get('conversion_workers', default_workers))
 
-            converter = AudioConverter(filter_settings=filter_settings)
+            converter = AudioConverter(filter_settings=filter_settings, out_format=config.get('audio_output_format', 'mp3'))
             output_dir = audio_dir / "ready"
             os.makedirs(output_dir, exist_ok=True)
 

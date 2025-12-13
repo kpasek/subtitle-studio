@@ -219,7 +219,7 @@ class SettingsWindow(ctk.CTkToplevel):
             row=2, column=0, sticky="w", padx=10, pady=(0, 10))
 
         self.audio_format_var = tk.StringVar(
-            value=self.master.global_config.get('audio_output_format', 'ogg'))
+            value=self.master.global_config.get('audio_output_format', 'mp3'))
 
         format_menu = ctk.CTkOptionMenu(
             frame_main,
