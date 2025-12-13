@@ -402,8 +402,18 @@ class SubtitleStudioApp(ctk.CTk):
     def open_pattern_manager(self):
         if self.pattern_manager_window is None or not self.pattern_manager_window.winfo_exists():
             self.pattern_manager_window = PatternManagerWindow(self)
+            # Podpinamy się pod zdarzenie zamknięcia okna "krzyżykiem"
+            self.pattern_manager_window.protocol("WM_DELETE_WINDOW", self._on_pattern_manager_close)
         else:
             self.pattern_manager_window.lift()
+
+    def _on_pattern_manager_close(self):
+        """Obsługa zamknięcia menedżera wzorców - odświeżenie widoku."""
+        if self.pattern_manager_window:
+            self.pattern_manager_window.destroy()
+            self.pattern_manager_window = None
+        # Odśwież widok (przelicz ponownie wzorce i zaktualizuj listę)
+        self.apply_patterns()
 
     def build_clean_list_frame(self, parent_frame, row_nr) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(parent_frame)
@@ -723,6 +733,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         self._refresh_custom_lists()
         self.save_project()
+        self.apply_patterns()
                                 
         self.set_status(f"Zatwierdzono. Utworzono nową wersję: {new_filename}")
 

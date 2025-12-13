@@ -8,9 +8,7 @@ class ProcessingSummaryWindow(ctk.CTkToplevel):
         self.callback = callback
         self.title("Podsumowanie zmian")
         self.geometry("400x350")
-        self.transient(master)
-        self.grab_set()
-
+        
         self.grid_columnconfigure(0, weight=1)
 
         # Tytuł
@@ -37,6 +35,12 @@ class ProcessingSummaryWindow(ctk.CTkToplevel):
 
         ctk.CTkButton(btn_frame, text="Anuluj", command=self.destroy, fg_color="gray").pack(side="left", expand=True, padx=5)
         ctk.CTkButton(btn_frame, text="Zatwierdź", command=self.on_confirm).pack(side="right", expand=True, padx=5)
+
+        self.transient(master)
+        self.wait_visibility()
+        self.grab_set() 
+        self.lift()
+        self.focus_force()
 
     def on_confirm(self):
         """Przekazuje wybrane opcje z powrotem do aplikacji."""
