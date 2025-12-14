@@ -6,3 +6,6 @@ elevenlabs
 requests
 packaging
 audioop-lts
+nuitka
+pydub
+

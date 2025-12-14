@@ -100,7 +100,7 @@ class SubtitleStudioApp(ctk.CTk):
     APP_VERSION = "0.11.0"
 
     def __init__(self):
-        super().__init__()
+        super().__init__(className="SubtitleStudio")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.has_unsaved_changes = False
         self.global_config = {}
