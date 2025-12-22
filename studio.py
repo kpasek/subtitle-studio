@@ -751,18 +751,19 @@ class SubtitleStudioApp(ctk.CTk):
             return False
         return True
 
-    def enqueue_generate_single(self):
-        if self.selected_line_index is None:
-            messagebox.showwarning("Brak zaznaczenia", "Najpierw wybierz linię.", parent=self)
-            return
+    def enqueue_generate_single(self, line_no = None):
 
         if not self._prepare_job_dependencies(): return
+        if line_no == None:
+            if self.selected_line_index is None:
+                messagebox.showwarning("Brak zaznaczenia", "Najpierw wybierz linię.", parent=self)
+                return
+            line_no = int(self.selected_line_index + 1)
 
-        identifier = str(self.selected_line_index + 1)
+        identifier = (line_no - 1)
         try:
-            # Ważne: pobieramy tekst z processed_replace, który zawiera już tts_edits
-            text = self.processed_replace[self.selected_line_index]
-            lines_to_gen = [(identifier, text)]
+            text = self.processed_replace[identifier]
+            lines_to_gen = [(line_no, text)]
         except (IndexError, ValueError):
             return
 
@@ -772,7 +773,7 @@ class SubtitleStudioApp(ctk.CTk):
             return
 
         job = GenerationJob(
-            project_path=f"POJEDYNCZY ({identifier}) - {self.current_project_path.name}",
+            project_path=f"POJEDYNCZY ({line_no}) - {self.current_project_path.name}",
             audio_dir=self.audio_dir,
             lines_to_generate=lines_to_gen,
             tts_model_name=tts_model,
@@ -780,7 +781,7 @@ class SubtitleStudioApp(ctk.CTk):
             converter_config=self._gather_converter_config()
         )
         GenerationManager.get_instance().add_job(job)
-        self.set_status(f"Dodano zadanie (linia {identifier}) do kolejki.")
+        self.set_status(f"Dodano zadanie (linia {line_no}) do kolejki.")
 
     def enqueue_generate_all(self):
         if not self._prepare_job_dependencies(): return

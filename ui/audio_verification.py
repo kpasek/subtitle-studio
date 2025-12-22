@@ -55,8 +55,8 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.error_details = {}
 
         # Wartości do skanowania (aktualizowane przez slidery)
-        self.scan_min_cps = 3.0
-        self.scan_max_cps = 25.0
+        self.scan_min_cps = 7.0
+        self.scan_max_cps = 20.0
 
         # --- Ustawienia Okna ---
         self.title(f"Weryfikacja audio ({len(subtitles)} linii)")
@@ -98,11 +98,11 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.opts_frame = ctk.CTkFrame(self.top_frame, fg_color="transparent")
         self.opts_frame.grid(row=0, column=1, sticky="ns", padx=20, pady=5)
 
-        self.var_stop_on_error = ctk.BooleanVar(value=True)
+        self.var_stop_on_error = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(self.opts_frame, text="Zatrzymaj na błędzie (CPS/ERROR)", variable=self.var_stop_on_error).pack(
             anchor="w")
 
-        self.var_auto_sync = ctk.BooleanVar(value=True)
+        self.var_auto_sync = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(self.opts_frame, text="Auto-kalibracja (po 20 plikach)", variable=self.var_auto_sync).pack(
             anchor="w")
 
@@ -146,6 +146,10 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                                             command=self.on_slider_change)
         self.slider_max_cps.set(self.scan_max_cps)
         self.slider_max_cps.pack(side="left", fill="x", expand=True, padx=5)
+
+        self.var_hide_missing = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(self.filter_frame, text="Ukryj brakujące", variable=self.var_hide_missing,
+                        command=self.refresh_list_view).pack(side="left", padx=10)
 
         self.var_ignore_short = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(self.filter_frame, text="Ignoruj krótkie (<5 zn.)", variable=self.var_ignore_short,
@@ -211,7 +215,12 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.btn_del_single = ctk.CTkButton(self.actions_frame, text="🗑 Usuń plik",
                                             command=self.delete_current_audio, width=100, fg_color="#a83232",
                                             state="disabled")
+
         self.btn_del_single.pack(side="right", padx=5)
+        self.btn_generate_single = ctk.CTkButton(self.actions_frame, text="Generuj",
+                                            command=self.generate_selected, width=100, fg_color="green")
+        self.btn_generate_single.pack(side="right", padx=5)
+
 
         self.btn_play = ctk.CTkButton(self.actions_frame, text="▶ Odtwórz",
                                       command=self.play_selected, width=100, state="disabled")
@@ -230,10 +239,17 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                                              command=self.open_folder_selected, width=120, fg_color="#444")
         self.btn_open_folder.pack(side="left", padx=10)
 
+        self.btn_refresh = ctk.CTkButton(self.actions_global, text="Odśwież",
+                                             command=self.refresh_list_view, width=120, fg_color="#444")
+        self.btn_refresh.pack(side="left", padx=10)
+
         if not self.ffprobe_path and not MUTAGEN_AVAILABLE:
             self.lbl_status.configure(text="Ostrzeżenie: Brak ffprobe! Analiza może być niepełna.", text_color="orange")
 
         self._load_cache()
+
+        self.tree.bind("<Delete>", lambda e: self.delete_current_audio())
+        self.tree.bind("<G>", lambda e: self.generate_selected())
 
     def _setup_treeview_style(self):
         style = ttk.Style()
@@ -467,12 +483,17 @@ class AudioVerificationWindow(ctk.CTkToplevel):
 
         if self.ffprobe_path:
             try:
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
                 cmd = [self.ffprobe_path, "-v", "error", "-show_entries", "format=duration",
-                       "-of", "default=noprint_wrappers=1:nokey=1", file_path]
+                    "-of", "default=noprint_wrappers=1:nokey=1", file_path]
+                
+                # Parametr startupinfo=None jest ignorowany na Linuxie
                 res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                     startupinfo=startupinfo)
+                                 startupinfo=startupinfo)
                 if res.returncode == 0 and res.stdout.strip():
                     return float(res.stdout.strip()), None
                 return -1.0, res.stderr
@@ -489,6 +510,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         min_cps = self.slider_min_cps.get()
         max_cps = self.slider_max_cps.get()
         ignore_short = self.var_ignore_short.get()
+        hide_missing = self.var_hide_missing.get()
         show_errors = self.var_show_only_errors.get()
 
         self.filtered_items = []
@@ -496,6 +518,9 @@ class AudioVerificationWindow(ctk.CTkToplevel):
 
         for item in self.analysis_results:
             if item["raw_status"] == "PENDING": continue
+
+            if hide_missing and item["raw_status"] == "MISSING":
+                continue
 
             display_status = "OK"
             tag = "ok"
@@ -571,6 +596,9 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         item = self.get_selected_item()
         if item and item["path"]: self.play_audio(item["path"])
 
+    def generate_selected(self):
+        self.app.enqueue_generate_single(self.get_selected_item()['id'] )
+
     def open_renamer(self):
         if AudioRenameWindow is None:
             messagebox.showerror("Błąd", "Moduł AudioRenameWindow nie jest dostępny.")
@@ -599,22 +627,20 @@ class AudioVerificationWindow(ctk.CTkToplevel):
 
         self.stop_audio()
 
-        if messagebox.askyesno("Usuń", f"Usunąć plik ID {item['id']}?"):
-            try:
-                os.remove(item["path"])
-                idx = item["id"] - 1
-                self.analysis_results[idx]["raw_status"] = "MISSING"
-                self.analysis_results[idx]["path"] = None
-                self.analysis_results[idx]["duration"] = 0
-                self.processed_indices.discard(idx)
+        try:
+            os.remove(item["path"])
+            idx = item["id"] - 1
+            self.analysis_results[idx]["raw_status"] = "MISSING"
+            self.analysis_results[idx]["path"] = None
+            self.analysis_results[idx]["duration"] = 0
+            self.processed_indices.discard(idx)
 
-                if str(item["id"]) in self.cache_data:
-                    del self.cache_data[str(item["id"])]
+            if str(item["id"]) in self.cache_data:
+                del self.cache_data[str(item["id"])]
 
-                self.refresh_list_view()
-                messagebox.showinfo("OK", "Plik usunięty.")
-            except Exception as e:
-                messagebox.showerror("Błąd", str(e))
+            self.refresh_list_view()
+        except Exception as e:
+            messagebox.showerror("Błąd", str(e))
 
     def delete_all_bad_audio(self):
         # Usuwamy pliki widoczne jako błędne na podstawie filtered_items
@@ -630,12 +656,12 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                 to_del.append(item)
 
         if not to_del:
-            messagebox.showinfo("Info", "Brak błędnych plików do usunięcia (w aktualnym widoku).")
+            messagebox.showinfo("Info", "Brak błędnych plików do usunięcia (w aktualnym widoku).", parent=self)
             return
 
         self.stop_audio()
 
-        if messagebox.askyesno("Potwierdź", f"Usunąć {len(to_del)} widocznych błędnych plików?"):
+        if messagebox.askyesno("Potwierdź", f"Usunąć {len(to_del)} widocznych błędnych plików?", parent=self):
             count = 0
             errors = []
 
@@ -664,16 +690,19 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             if errors:
                 msg = f"Usunięto {count} plików.\nBłędy:\n" + "\n".join(errors[:10])
                 if len(errors) > 10: msg += "\n..."
-                messagebox.showwarning("Wynik", msg)
+                messagebox.showwarning("Wynik", msg, parent=self)
             else:
-                messagebox.showinfo("Zakończono", f"Pomyślnie usunięto {count} plików.")
+                messagebox.showinfo("Zakończono", f"Pomyślnie usunięto {count} plików.", parent=self)
 
     def play_audio(self, path):
         self.stop_audio()
         path = str(path)
         if self.ffplay_path:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
             self.current_audio_process = subprocess.Popen(
                 [self.ffplay_path, "-nodisp", "-autoexit", path],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo
