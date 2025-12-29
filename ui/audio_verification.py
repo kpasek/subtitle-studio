@@ -1,3 +1,5 @@
+from collections import Counter
+
 import customtkinter as ctk
 import os
 import subprocess
@@ -399,7 +401,14 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             elif duration == 0:
                 raw_status = "EMPTY"
             else:
-                cps = len(text_clean) / duration
+                stats = Counter(text_clean.strip('.?!'))
+
+                short = stats[','] + stats['-']
+                long = stats['.'] + stats['!'] + stats['?']
+
+                pauses = (short * 0.4) + (long * 0.6)
+
+                cps = len(text_clean) / (duration - pauses)
                 valid_files_cps_sum += cps
                 valid_files_count += 1
 
