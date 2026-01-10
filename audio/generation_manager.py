@@ -198,13 +198,12 @@ class GenerationManager:
                 # Zabezpieczenie przed różnicą wielkości liter (xtts vs XTTS, stylish vs STylish)
                 model_name_lower = job.tts_model_name.lower()
 
-                if model_name_lower in ['xtts', 'stylish']:
+                if model_name_lower in ['xtts', 'stylish', 'piper']:
                     # Obsługa modeli API (dict)
                     print(f"DEBUG: Wywołanie API ({model_name_lower}) dla id={identifier}")
                     self._call_local_api(tts_model_instance, text, str(output_path), job.tts_config)
                 
                 elif isinstance(tts_model_instance, TTSBase):
-                    # Obsługa modeli klasowych (Google, ElevenLabs)
                     tts_model_instance.tts(text, str(output_path))
                 
                 else:
@@ -268,6 +267,15 @@ class GenerationManager:
                 raise ValueError("Nieprawidłowa ścieżka do credentials Google TTS.")
             return GoogleCloudTTS(credentials_path=creds_path, voice_name=voice_name)
 
+        elif m_name == 'piper':
+            api_url = config.get('local_api_url')
+            if not api_url:
+                raise ValueError("Brak URL dla Piper API w ustawieniach (Globalne).")
+            print(f"DEBUG: Piper URL: {api_url}")
+            session = requests.Session()
+            session.headers.update({'Content-Type': 'application/json'})
+            return {'url': api_url.rstrip('/') + '/piper/tts', 'session': session}
+
         raise ValueError(f"Nieznany model TTS: {model_name}")
 
     def _call_local_api(self, tts_model: dict, text: str, output_file: str, config: dict):
@@ -278,6 +286,9 @@ class GenerationManager:
         # XTTS wymaga dodatkowego parametru
         if "xtts" in api_url.lower():
             payload["voice_file"] = config.get('xtts_voice_path', '')
+        # Piper wymaga dodatkowego parametru
+        if "piper" in api_url.lower():
+            payload["voice_file"] = config.get('piper_model_path', '')
 
         try:
             response = session.post(api_url, json=payload, timeout=90)

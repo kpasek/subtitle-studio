@@ -139,15 +139,15 @@ class SettingsWindow(ctk.CTkToplevel):
             entry_xtts_url, "Adres URL działającego serwera XTTS API.", wraplength=300)
         # --- Koniec nowego pola ---
         ctk.CTkLabel(tab_xtts, text="Ścieżka głosu XTTS (.wav):").grid(
-            row=1, column=0, sticky="w", padx=10, pady=(5, 10))  # Zmieniono row na 1
+            row=1, column=0, sticky="w", padx=10, pady=(5, 10))
         self.xtts_voice_path_var = tk.StringVar(
             value=self.master.global_config.get('xtts_voice_path', ''))
         entry_voice = ctk.CTkEntry(
             tab_xtts, textvariable=self.xtts_voice_path_var)
         entry_voice.grid(row=1, column=1, sticky="ew",
-                         padx=(0, 10), pady=(5, 10))  # Zmieniono row na 1
+                         padx=(0, 10), pady=(5, 10))
         ctk.CTkButton(tab_xtts, text="...", width=40, command=self.select_voice_file).grid(
-            row=1, column=2, sticky="e", padx=10, pady=(5, 10))  # Zmieniono row na 1
+            row=1, column=2, sticky="e", padx=10, pady=(5, 10))
         CreateToolTip(
             entry_voice, "Ścieżka do pliku .wav używanego przez XTTS API (jeśli wymagane).", wraplength=300)
         # Usunięto wyłączanie zakładki - teraz zawsze widoczna
@@ -192,6 +192,20 @@ class SettingsWindow(ctk.CTkToplevel):
         entry_gcp_voice.grid(row=1, column=1, sticky="ew",
                              padx=10, pady=(5, 10))
         CreateToolTip(entry_gcp_voice, "Np. pl-PL-Wavenet-B", wraplength=300)
+
+        # Zakładka Piper
+        ctk.CTkLabel(tab_xtts, text="Ścieżka modelu Piper (.onnx):").grid(
+            row=1, column=0, sticky="w", padx=10, pady=(5, 10))
+        self.piper_model_path_var = tk.StringVar(
+            value=self.master.global_config.get('piper_model_path', ''))
+        entry_model = ctk.CTkEntry(
+            tab_xtts, textvariable=self.piper_model_path_var)
+        entry_model.grid(row=1, column=1, sticky="ew",
+                         padx=(0, 10), pady=(5, 10))
+        ctk.CTkButton(tab_xtts, text="...", width=40, command=self.select_model_file).grid(
+            row=1, column=2, sticky="e", padx=10, pady=(5, 10))
+        CreateToolTip(
+            entry_model, "Ścieżka do pliku .onnx używanego przez Piper API (jeśli wymagane).", wraplength=300)
 
         theme_frame = ctk.CTkFrame(frame)
         theme_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=6)
@@ -268,7 +282,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(frame, text="Aktywny model TTS:").grid(
             row=2, column=0, sticky="w", padx=10, pady=10)
         available_models = ["XTTS", "STylish", "ElevenLabs",
-                            "Google Cloud TTS"]  # Teraz wszystkie są "dostępne"
+                            "Google Cloud TTS", "Piper"]
         saved_model = self.master.project_config.get(
             'active_tts_model', available_models[0])
         self.active_model_var = tk.StringVar(value=saved_model)
@@ -296,6 +310,27 @@ class SettingsWindow(ctk.CTkToplevel):
         CreateToolTip(self.ent_xtts_voice_project,
                       "Opcjonalne: Nadpisz globalną ścieżkę do pliku .wav z głosem XTTS tylko dla tego projektu.")
 
+
+        ctk.CTkLabel(frame, text="Ścieżka modelu Piper (Projekt)").grid(
+            row=5, column=0, padx=10, pady=5, sticky="w")
+
+        self.piper_model_project_path_var = tk.StringVar(
+            value=self.master.project_config.get('piper_model_path', ''))
+
+        self.ent_piper_model_project = ctk.CTkEntry(
+            frame, width=350, textvariable=self.piper_model_project_path_var)
+        self.ent_piper_model_project.grid(
+            row=5, column=1, padx=(0, 10), pady=5, sticky="ew")
+        self.btn_browse_piper_model_project = ctk.CTkButton(frame, text="...", width=30,
+                                                           command=lambda: self.select_model_file(
+                                                               self.piper_model_project_path_var))
+        self.btn_browse_piper_model_project.grid(
+            row=5, column=2, padx=10, pady=5)
+
+        CreateToolTip(self.ent_piper_model_project,
+                      "Opcjonalne: Nadpisz globalną ścieżkę do pliku .onnx z modelem Piper tylko dla tego projektu.")
+
+
     def select_voice_file(self, ent_path_var=None):
         """Opens dialog to select XTTS voice file."""
         path = filedialog.askopenfilename(title="Wybierz plik głosu .wav", filetypes=[
@@ -303,6 +338,15 @@ class SettingsWindow(ctk.CTkToplevel):
         if path:
             if ent_path_var is None:
                 ent_path_var = self.xtts_voice_path_var
+            ent_path_var.set(path)
+
+    def select_model_file(self, ent_path_var=None):
+        """Opens dialog to select XTTS voice file."""
+        path = filedialog.askopenfilename(title="Wybierz plik głosu .onnx", filetypes=[
+            ("Model", "*.onnx")], initialdir=self._get_initial_dir(), parent=self)
+        if path:
+            if ent_path_var is None:
+                ent_path_var = self.piper_model_path_var
             ent_path_var.set(path)
 
     def select_gcp_creds(self):
@@ -340,7 +384,7 @@ class SettingsWindow(ctk.CTkToplevel):
             filters_data = {key: {"enabled": en_var.get(), "params": par_var.get()}
                             for key, (par_var, en_var) in self.filter_vars.items()}
 
-            # *** ZMIANA: Walidacja i zapis conversion_workers ***
+            self.master.global_config["piper_model_path"] = self.piper_model_path_var.get().strip()
             try:
                 cpu_count = os.cpu_count()
                 workers = int(self.conversion_workers_var.get())
@@ -390,6 +434,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 'active_tts_model', self.active_model_var.get())
             self.master.set_project_config(
                 'xtts_voice_path', self.xtts_voice_project_path_var.get())
+            self.master.set_project_config(
+                'piper_model_path', self.piper_model_project_path_var.get().strip())
         except ValueError:
             messagebox.showerror(
                 "Błędna wartość", "Przyspieszenie musi być liczbą.", parent=self)

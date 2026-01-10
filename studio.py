@@ -52,9 +52,10 @@ except ImportError:
 if getattr(sys, 'frozen', False):
     application_path = os.path.dirname(sys.executable)
 else:
-    application_path = os.path.dirname(os.path.abspath(__file__))
+    home = Path.home()
+    application_path = home / '.config'
 
-APP_CONFIG = os.path.join(application_path, "config.json")
+APP_CONFIG = os.path.join(application_path, "subtitle-studio.json")
 
 APP_TITLE = "Subtitle Studio"
 
@@ -1142,6 +1143,7 @@ class SubtitleStudioApp(ctk.CTk):
         return {
             'local_api_url': self.global_config.get('local_api_url', 'http://127.0.0.1:8001'),
             'xtts_voice_path': self.project_config.get('xtts_voice_path') or self.global_config.get('xtts_voice_path'),
+            'piper_model_path': self.project_config.get('piper_model_path') or self.global_config.get('piper_model_path'),
             'elevenlabs_api_key': self.global_config.get('elevenlabs_api_key'),
             'elevenlabs_voice_id': self.global_config.get('elevenlabs_voice_id'),
             'google_credentials_path': self.global_config.get('google_credentials_path'),
