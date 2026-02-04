@@ -1,16 +1,14 @@
 import shutil
-
 import customtkinter as ctk
 import tkinter as tk
-import re
+from tkinter import ttk
 import subprocess
 import os
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 from tkinter import messagebox
 
 from app.editor import LineEditor
-
 
 FFPLAY_AVAILABLE = shutil.which("ffplay") is not None
 
@@ -26,6 +24,12 @@ class SubtitlePanel(ctk.CTkFrame):
         self.app = app
         self.current_audio_process: Optional[subprocess.Popen] = None
         self._search_job = None
+
+        # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
+        self.columns_config = [
+            {"id": "line_nr", "text": "Nr", "width": 25, "anchor": "center"},
+            {"id": "content", "text": "Tekst", "width": 600, "anchor": "w"},
+        ]
 
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -101,16 +105,57 @@ class SubtitlePanel(ctk.CTkFrame):
         self.search_button = ctk.CTkButton(audio_btn_frame, text="Szukaj", command=self.app.apply_patterns, width=60)
         self.search_button.grid(row=0, column=6, padx=(6, 0))
 
-        # --- Preview Textbox (Lista napisów) - Row 2 ---
-        self.txt_preview = ctk.CTkTextbox(self)
-        self.txt_preview.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
-        self.txt_preview.configure(state=tk.DISABLED)
-        self.txt_preview.tag_config("selected_line", background="gray25", foreground="white")
-        self.txt_preview.bind("<ButtonRelease-1>", self.on_preview_click)
-        self.txt_preview.bind("<Double-Button-1>", self.play_selected_audio)
-        self.txt_preview.bind("<Control-Button-1>", self.app.add_replace_pattern_from_selection)
-        self.txt_preview.bind("<Button-3>", self._show_context_menu)
-        self.txt_preview.configure(cursor="hand2")
+        # --- Preview Table (Lista napisów jako Tabela) - Row 2 ---
+        # Kontener dla tabeli i paska przewijania
+        table_frame = ctk.CTkFrame(self, fg_color="transparent")
+        table_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+
+        # Stylizacja Treeview (aby pasowało do ciemnego motywu CustomTkinter)
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview",
+                        background="#2b2b2b",
+                        foreground="white",
+                        fieldbackground="#2b2b2b",
+                        bordercolor="#2b2b2b",
+                        lightcolor="#2b2b2b",
+                        darkcolor="#2b2b2b",
+                        rowheight=25)
+        style.configure("Treeview.Heading",
+                        background="#1c1c1c",
+                        foreground="white",
+                        relief="flat")
+        style.map("Treeview.Heading",
+                  background=[('active', '#252525')])
+        style.map("Treeview",
+                  background=[('selected', '#1f538d')],
+                  foreground=[('selected', 'white')])
+
+        # Pobieramy ID kolumn z konfiguracji
+        column_ids = [col["id"] for col in self.columns_config]
+
+        self.tree = ttk.Treeview(table_frame, columns=column_ids, show="headings", selectmode="browse")
+
+        # Konfiguracja nagłówków i kolumn na podstawie self.columns_config
+        for col_conf in self.columns_config:
+            self.tree.heading(col_conf["id"], text=col_conf["text"])
+            self.tree.column(col_conf["id"], width=col_conf["width"], anchor=col_conf["anchor"])
+
+        self.tree.grid(row=0, column=0, sticky="nsew")
+
+        # Scrollbar
+        self.scrollbar = ctk.CTkScrollbar(table_frame, orientation="vertical", command=self.tree.yview)
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+
+        # Eventy
+        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        self.tree.bind("<Double-Button-1>", self.play_selected_audio)
+        self.tree.bind("<Button-3>", self._show_context_menu)
+        # Obsługa Ctrl+Klik (dodawanie wzorca)
+        self.tree.bind("<Control-Button-1>", self.app.add_replace_pattern_from_selection)
 
         # --- Editor (Edytor Linii) - Row 3 ---
         self.editor = LineEditor(self, on_save_callback=self.on_manual_edit_save)
@@ -124,16 +169,6 @@ class SubtitlePanel(ctk.CTkFrame):
             self.editor.clear()
         self.app.save_app_setting('last_view_mode', value)
 
-    def filter_preview(self, lines: List[str]) -> List[str]:
-        search_term = self.search_entry.get()
-        if not search_term:
-            return lines
-        try:
-            pattern = search_term.lower()
-            return [line for line in lines if pattern in line.lower()]
-        except re.error:
-            return lines
-
     def _schedule_jump_to_line(self, event=None):
         """Opóźnia wywołanie skoku do linii (debounce), aby uniknąć migania."""
         if self._search_job:
@@ -141,37 +176,34 @@ class SubtitlePanel(ctk.CTkFrame):
         self._search_job = self.after(200, self._jump_to_line)
 
     def _jump_to_line(self, event=None):
-        """Przewija widok do wpisanego numeru linii i zaznacza ją."""
+        """Przewija widok do wpisanego numeru linii i zaznacza ją w tabeli."""
         val = self.search_line_nr.get().strip()
         if not val.isdigit():
             return
 
         target_nr = int(val)
-        content = self.txt_preview.get("1.0", "end-1c").splitlines()
-        found_row_idx = -1
 
-        for i, line in enumerate(content):
-            parts = line.split('|', 1)
-            if len(parts) >= 2:
-                try:
-                    if int(parts[0].strip()) == target_nr:
-                        found_row_idx = i + 1
-                        break
-                except ValueError:
-                    continue
+        # Przeszukujemy elementy drzewa, aby znaleźć odpowiednią linię
+        found_item = None
+        for item_id in self.tree.get_children():
+            item_vals = self.tree.item(item_id, "values")
+            # Zakładamy, że kolumna z numerem linii jest pierwsza ("line_nr")
+            # item_vals[0] zawiera numer linii jako string
+            try:
+                if int(item_vals[0]) == target_nr:
+                    found_item = item_id
+                    break
+            except (ValueError, IndexError):
+                continue
 
-        if found_row_idx != -1:
-            self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
-            start = f"{found_row_idx}.0"
-            end = f"{found_row_idx}.end"
-            self.txt_preview.tag_add("selected_line", start, end)
-            self.txt_preview.see(start)
+        if found_item:
+            self.tree.selection_set(found_item)
+            self.tree.see(found_item)
+            self.tree.focus(found_item)  # Ustaw focus, aby klawiatura działała od razu tutaj
 
-            # Aktualizacja stanu (to wywoła update_audio_buttons_state)
-            self.app.selected_line_index = target_nr - 1
-            self._reload_editor_for_selected()
+            # Stan zaktualizuje się automatycznie przez callback on_tree_select
         else:
-            # Nie znaleziono - nie czyścimy, żeby nie migać
+            # Nie znaleziono
             pass
 
     def _reload_editor_for_selected(self):
@@ -197,85 +229,85 @@ class SubtitlePanel(ctk.CTkFrame):
         self.update_audio_buttons_state()
 
     def set_preview(self, lines_to_show: list[str]):
+        """
+        Wypełnia tabelę danymi.
+        Argument lines_to_show to lista tekstów. Numer linii jest wyliczany z indeksu.
+        """
         preserved_index = self.app.selected_line_index
-        self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
 
-        total_lines = len(lines_to_show)
-        num_digits = len(str(total_lines)) if total_lines > 0 else 1
-        numbered_lines = [
-            f"{str(i + 1).zfill(num_digits)} | {line}"
-            for i, line in enumerate(lines_to_show)
-        ]
+        # Wyczyść tabelę
+        for item in self.tree.get_children():
+            self.tree.delete(item)
 
-        filtered = self.filter_preview(numbered_lines)
+        search_term = self.search_entry.get().lower()
 
-        self.txt_preview.configure(state='normal')
-        self.txt_preview.delete('1.0', tk.END)
-        if filtered:
-            self.txt_preview.insert('1.0', '\n'.join(filtered))
-        self.txt_preview.configure(state='disabled')
+        # Przygotuj dane do wstawienia
+        # Jeśli w przyszłości lines_to_show będzie listą słowników/obiektów,
+        # tutaj trzeba będzie dostosować mapowanie na kolumny.
 
-        if preserved_index is not None:
-            content = self.txt_preview.get("1.0", "end-1c").splitlines()
-            found_row = -1
-            target_nr = preserved_index + 1
+        item_to_select = None
 
-            for i, line in enumerate(content):
-                parts = line.split('|', 1)
-                if len(parts) >= 2:
-                    try:
-                        if int(parts[0].strip()) == target_nr:
-                            found_row = i + 1
-                            break
-                    except ValueError:
-                        continue
+        for i, line_text in enumerate(lines_to_show):
+            # Filtrowanie tekstu (szukajka)
+            if search_term and search_term not in line_text.lower():
+                continue
 
-            if found_row != -1:
-                line_start = f"{found_row}.0"
-                line_end = f"{found_row}.end"
-                self.txt_preview.tag_add("selected_line", line_start, line_end)
-                self.txt_preview.see(line_start)
-            else:
-                self.editor.clear()
+            line_nr = i + 1
+
+            # Budowanie wartości dla wiersza zgodnie z self.columns_config
+            row_values = []
+            for col in self.columns_config:
+                col_id = col["id"]
+                if col_id == "line_nr":
+                    # Formatowanie numeru linii (padding zerami np. 001)
+                    # Opcjonalnie można to zrobić dynamicznie na podstawie len(lines_to_show)
+                    row_values.append(f"{line_nr:03d}")
+                elif col_id == "content":
+                    row_values.append(line_text)
+                else:
+                    # Placeholder dla przyszłych kolumn
+                    row_values.append("")
+
+            # Wstawienie wiersza
+            item_id = self.tree.insert("", "end", values=tuple(row_values))
+
+            # Sprawdzenie czy ten wiersz ma być zaznaczony (przy odświeżaniu widoku)
+            if preserved_index is not None and line_nr == preserved_index + 1:
+                item_to_select = item_id
+
+        # Przywrócenie zaznaczenia
+        if item_to_select:
+            self.tree.selection_set(item_to_select)
+            self.tree.see(item_to_select)
         else:
             self.editor.clear()
+            self.app.selected_line_index = None
+            self.update_audio_buttons_state()
 
-    def on_preview_click(self, event):
-        try:
-            if event:
-                click_index = self.txt_preview.index(f"@{event.x},{event.y}")
-            else:
-                click_index = self.txt_preview.index(tk.INSERT)
-
-            line_number_str = click_index.split('.')[0]
-            visible_line_index = int(line_number_str) - 1
-
-            all_visible_lines = self.txt_preview.get("1.0", tk.END).splitlines()
-            if visible_line_index >= len(all_visible_lines):
-                return
-
-            clicked_line_content = all_visible_lines[visible_line_index]
-            match = re.match(r"^\s*(\d+)\s*\|", clicked_line_content)
-
-            if match:
-                original_line_number = int(match.group(1))
-                self.app.selected_line_index = original_line_number - 1
-
-                self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
-                line_start = f"{line_number_str}.0"
-                line_end = f"{line_number_str}.end"
-                self.txt_preview.tag_add("selected_line", line_start, line_end)
-
-                self._reload_editor_for_selected()
-            else:
-                self.app.selected_line_index = None
-                self.editor.clear()
-                self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
-
-        except (ValueError, tk.TclError, IndexError):
+    def on_tree_select(self, event):
+        """Obsługa wyboru wiersza w tabeli."""
+        selected_items = self.tree.selection()
+        if not selected_items:
             self.app.selected_line_index = None
             self.editor.clear()
-            self.txt_preview.tag_remove("selected_line", "1.0", tk.END)
+            self.update_audio_buttons_state()
+            return
+
+        # Pobierz pierwszy zaznaczony element
+        item_id = selected_items[0]
+        item_values = self.tree.item(item_id, "values")
+
+        try:
+            # Pobieramy numer linii z pierwszej kolumny (zakładamy że tam jest 'line_nr')
+            # Jeśli kolejność kolumn się zmieni, trzeba to zaktualizować lub szukać po indeksie w columns_config
+            line_nr_str = item_values[0]
+            line_nr = int(line_nr_str)
+
+            self.app.selected_line_index = line_nr - 1
+            self._reload_editor_for_selected()
+        except (ValueError, IndexError):
+            self.app.selected_line_index = None
+            self.editor.clear()
 
         self.update_audio_buttons_state()
 
@@ -298,9 +330,14 @@ class SubtitlePanel(ctk.CTkFrame):
             self._reload_editor_for_selected()
 
     def _show_context_menu(self, event):
-        try:
-            self.on_preview_click(event)
-        except Exception:
+        # W Treeview zaznaczenie pod prawym przyciskiem myszy nie dzieje się automatycznie w każdym OS
+        # Wymuszamy zaznaczenie wiersza pod kursorem
+        item_id = self.tree.identify_row(event.y)
+        if item_id:
+            self.tree.selection_set(item_id)
+
+        # Pobieramy aktualne zaznaczenie (powinno być ustawione wyżej lub wcześniej)
+        if not self.tree.selection():
             return
 
         if self.app.selected_line_index is None:

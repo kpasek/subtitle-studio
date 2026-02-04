@@ -98,7 +98,7 @@ if os.name == "nt":
 
 class SubtitleStudioApp(ctk.CTk):
     """Główna klasa aplikacji Subtitle Studio."""
-    APP_VERSION = "0.12.0"
+    APP_VERSION = "0.13.0"
 
     def __init__(self):
         super().__init__(className="SubtitleStudio")
@@ -314,7 +314,7 @@ class SubtitleStudioApp(ctk.CTk):
                 self.subtitle_panel.on_manual_edit_save(self.subtitle_panel.editor.entry.get())
 
             self.selected_line_index = None
-            self.subtitle_panel.txt_preview.tag_remove("selected_line", "1.0", tk.END)
+            self.subtitle_panel.set_preview.tag_remove("selected_line", "1.0", tk.END)
             self.subtitle_panel.editor.clear()
             self.set_status("Wyszukiwanie anulowane, linia odznaczona.")
 
