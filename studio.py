@@ -24,7 +24,7 @@ from ui.menu import AppMenu
 
 # Refaktoryzacja IO -> app.io
 from app.io import load_subtitle_file, save_lines_to_file
-from app.patterns import gather_active_patterns, get_patterns_signature, apply_patterns as patterns_apply
+from app.patterns import apply_patterns as patterns_apply
 
 from audio.audio_renamer import AudioRenameWindow
 from audio.pattern_editor import PatternEditorWindow

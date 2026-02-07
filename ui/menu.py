@@ -1,7 +1,4 @@
 import tkinter as tk
-from tkinter import messagebox
-
-from ui.audio_verification import AudioVerificationWindow
 
 
 class AppMenu:
@@ -40,7 +37,6 @@ class AppMenu:
         gen_menu.add_separator()
         gen_menu.add_command(label="Dopasuj identyfikatory audio", command=self.app.open_audio_rename_window)
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=self.app.delete_all_converted_audio)
-        # gen_menu.add_command(label="Weryfikacja audio (CPS)", command=self.open_audio_verification)
         gen_menu.add_separator()
         gen_menu.add_command(label="Imiona", command=self.app.open_names_manager, accelerator="Ctrl+Shift+N")
         gen_menu.add_separator()
@@ -74,20 +70,6 @@ class AppMenu:
         menubar.add_cascade(label="Pomoc", menu=help_menu)
 
         self.app.config(menu=menubar)
-    
-    
-    def open_audio_verification(self):
-        if not self.app.audio_dir:
-            messagebox.showwarning("Brak audio", "Najpierw wybierz katalog audio.", parent=self)
-            return
-
-
-        if not self.app.lines:
-            messagebox.showwarning("Brak tekstu", "Brak napisów do weryfikacji.", parent=self)
-            return
-
-        # Zachowujemy dotychczasową możliwość otwarcia dedykowanego okna
-        AudioVerificationWindow(self, self.app.audio_dir, self.app.lines)
         
     
     def open_verification_window(self):
