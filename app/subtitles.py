@@ -36,7 +36,7 @@ class SubtitlePanel(ctk.CTkFrame):
             {"id": "content", "text": "Tekst", "width": 500, "anchor": "w"},
             {"id": "duration", "text": "Czas [s]", "width": 80, "anchor": "center"},
             {"id": "cps", "text": "CPS", "width": 60, "anchor": "center"},
-            {"id": "status", "text": "Status", "width": 150, "anchor": "center"},
+            {"id": "similarity", "text": "Podobieństwo", "width": 120, "anchor": "center"},
             {"id": "format", "text": "Format", "width": 60, "anchor": "center"},
             {"id": "audio_file", "text": "Plik audio", "width": 200, "anchor": "w"},
         ]
@@ -486,9 +486,9 @@ class SubtitlePanel(ctk.CTkFrame):
                     except Exception:
                         cps_val = 0.0
                     row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
-                if 'status' in col_pos:
-                    display_status = getattr(line_obj, 'audio_status', None) or (self.ver_analysis_results[i].get('display_status') if i < len(self.ver_analysis_results) else '')
-                    row_values[col_pos['status']] = display_status or ''
+                if 'similarity' in col_pos:
+                    similarity_val = float(getattr(line_obj, 'audio_similarity', 0.0) or 0.0) if line_obj else (float(self.ver_analysis_results[i].get('similarity', 0.0) or 0.0) if i < len(self.ver_analysis_results) else 0.0)
+                    row_values[col_pos['similarity']] = f"{similarity_val:.0%}" if similarity_val > 0 else '-'
                 if 'format' in col_pos:
                     fmt = (getattr(line_obj, 'audio_format', '') or '')
                     if not fmt and i < len(self.ver_analysis_results):

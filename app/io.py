@@ -168,9 +168,20 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
 
 
 def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
-    """Aktualizuje pojedynczą linię w pliku CSV (przede wszystkim pola text i tts_text)."""
+    """Aktualizuje pojedynczą linię w pliku CSV z danymi audio.
+    Jeśli oryginalny plik to TXT, tworzy obok niego plik CSV z tymi samymi wierszami.
+    """
     p = Path(csv_path)
-    if not p.exists() or p.suffix.lower() != '.csv':
+    
+    # Jeśli plik to TXT, konwertuj do CSV (dodaj .csv zamiast .txt)
+    if p.suffix.lower() == '.txt':
+        csv_path = str(p.with_suffix('.csv'))
+        p = Path(csv_path)
+        print(f"[INFO] Konwertowanie audio danych do CSV: {csv_path}")
+    
+    # Jeśli plik nie istnieje i nie jest CSV, przerw
+    if p.suffix.lower() != '.csv':
+        print(f"[WARNING] Plik nie jest CSV: {csv_path}, przerwanie zapisu audio danych")
         return
     
     try:
@@ -230,8 +241,8 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
             fieldnames = ['original_text', 'text', 'tts_text', 'audio_duration', 'audio_filename', 'audio_similarity', 'audio_format', 'audio_transcribed_text']
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
             writer.writeheader()
-            for item in all_lines:
-                writer.writerow({
+            for idx, item in enumerate(all_lines):
+                row_dict = {
                     'original_text': item.original_text,
                     'text': item.text,
                     'tts_text': item.tts_text,
@@ -240,6 +251,9 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
                     'audio_similarity': item.audio_similarity,
                     'audio_format': item.audio_format,
                     'audio_transcribed_text': getattr(item, 'audio_transcribed_text', '')
-                })
+                }
+                if idx == line_index:
+                    print(f"[DEBUG] Writing line {line_index} to CSV: audio_transcribed_text = {repr(row_dict['audio_transcribed_text'])}")
+                writer.writerow(row_dict)
     except Exception as e:
         print(f"Błąd aktualizacji linii w CSV: {e}")

@@ -277,12 +277,14 @@ class VerificationManager:
             original_text = line.original_text.strip()
             tts_text = line.tts_text.strip()
             
-            # Porównanie z oryginalnym tekstem - token sort ratio jest bardziej tolerancyjny
-            similarity = fuzz.token_sort_ratio(transcribed_text, original_text) / 100.0
+            # Porównanie z tekstem do TTS - token sort ratio jest bardziej tolerancyjny
+            # Porównujemy transcribed_text z tts_text (to co powinno być wypowiadane)
+            similarity = fuzz.token_sort_ratio(transcribed_text, tts_text) / 100.0
             
             result['similarity'] = similarity
             result['transcribed_text'] = transcribed_text
             result['success'] = True
+            print(f"[DEBUG] verify_similarity: transcribed_text = {repr(transcribed_text)}, similarity = {similarity:.2%}")
             
         except Exception as e:
             error_msg = f'Błąd porównania: {str(e)}'
@@ -309,12 +311,14 @@ class VerificationManager:
             if result.get('success'):
                 line.audio_similarity = result.get('similarity', 0.0)
                 line.audio_transcribed_text = result.get('transcribed_text', '')
+                print(f"[DEBUG] apply_similarity_to_line: set audio_transcribed_text = {repr(line.audio_transcribed_text)}")
             else:
                 line.audio_similarity = 0.0
                 line.audio_transcribed_text = ''
             
             return line
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] apply_similarity_to_line exception: {e}")
             return line
 
     def add_job(self, job: VerificationJob):

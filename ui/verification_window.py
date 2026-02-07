@@ -96,9 +96,18 @@ class VerificationWindow(ctk.CTkToplevel):
                     if panel.ver_stop_event.is_set():
                         break
 
-                    # If not forcing refresh and line already has duration or transcribed text, skip verification
+                    # If not forcing refresh and line already has audio_filename or transcribed text, skip verification
                     force = self.force_refresh.get()
-                    if not force and (getattr(line, 'audio_duration', 0) or getattr(line, 'audio_transcribed_text', '')):
+                    has_audio_filename = getattr(line, 'audio_filename', '')
+                    has_transcribed_text = getattr(line, 'audio_transcribed_text', '')
+                    should_skip = not force and (has_audio_filename or has_transcribed_text)
+                    
+                    if should_skip:
+                        print(f"[SKIP] Linia {i+1}: audio_filename={repr(has_audio_filename)}, audio_transcribed_text={repr(has_transcribed_text)}")
+                    else:
+                        print(f"[VERIFY] Linia {i+1}: potrzebuje weryfikacji (audio_filename={repr(has_audio_filename)}, audio_transcribed_text={repr(has_transcribed_text)})")
+                    
+                    if should_skip:
                         # build result entry from existing Line data
                         entry = {}
                         entry['id'] = i + 1
@@ -144,7 +153,9 @@ class VerificationWindow(ctk.CTkToplevel):
                             line = VerificationManager.apply_similarity_to_line(line, res.get('path'))
                             res['similarity'] = getattr(line, 'audio_similarity', 0.0)
                             res['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
-                        except Exception:
+                            print(f"[DEBUG] Line {i+1}: transcribed_text = {repr(res['transcribed_text'])}, line.audio_transcribed_text = {repr(getattr(line, 'audio_transcribed_text', ''))}")
+                        except Exception as e:
+                            print(f"[ERROR] apply_similarity_to_line failed for line {i+1}: {e}")
                             res['similarity'] = 0.0
                             res['transcribed_text'] = ''
 
@@ -155,9 +166,12 @@ class VerificationWindow(ctk.CTkToplevel):
                     if res.get('path'):
                         line.audio_filename = Path(res.get('path')).name
                     line.audio_format = res.get('ext', '') or ''
-                    # transcribed text stored by apply_similarity_to_line
-                    if res.get('transcribed_text'):
-                        line.audio_transcribed_text = res.get('transcribed_text')
+                    
+                    # Update similarity and transcribed text from Line object
+                    if hasattr(line, 'audio_similarity'):
+                        res['similarity'] = line.audio_similarity
+                    if hasattr(line, 'audio_transcribed_text'):
+                        res['transcribed_text'] = line.audio_transcribed_text
 
                     panel.ver_analysis_results[i] = res
                     panel.ver_processed_indices.add(i)
@@ -167,8 +181,8 @@ class VerificationWindow(ctk.CTkToplevel):
                         lp = getattr(self.master_app, 'loaded_path', None)
                         if lp:
                             update_line_in_csv(str(lp), i, line)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[WARNING] Failed to update CSV at line {i}: {e}")
 
                     # Update UI every 20 files to reduce rapid status updates
                     update_counter += 1
@@ -180,6 +194,11 @@ class VerificationWindow(ctk.CTkToplevel):
                         except Exception:
                             pass
 
+                # Podsumowanie weryfikacji
+                num_skipped = len(panel.ver_analysis_results) - len(panel.ver_processed_indices)
+                num_verified = len(panel.ver_processed_indices)
+                print(f"\n[SUMMARY] Weryfikacja zakończona: {num_verified} zweryfikowanych, {num_skipped} pominiętych (razem: {total})")
+                
                 panel.ver_running = False
 
                 # results persisted per-line into the original CSV during processing

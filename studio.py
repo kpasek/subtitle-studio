@@ -735,27 +735,29 @@ class SubtitleStudioApp(ctk.CTk):
                 save_lines_to_file(path, [l.tts_text for l in self.lines])
             messagebox.showinfo('Gotowe', f'Zapisano: {path}')
 
-    def generate_game_reader_preset(self):
-        """Otwiera okno konfiguracji eksportu do Game Readera."""
-        if not self.lines:
-            messagebox.showwarning('Brak danych', 'Brak przetworzonych napisów do wyeksportowania.', parent=self)
-            return
-
-        if not self.audio_dir:
-            messagebox.showwarning('Brak audio', 'Nie wybrano katalogu audio w projekcie.', parent=self)
-            return
-
-        # Otwórz nowe okno konfiguracji
-        GameReaderExportWindow(self)
-
     def add_new_subtitles(self):
-        """Dodaje nowe wiersze do aktualnego pliku CSV z napisami."""
+        """Dodaje nowe wiersze do pliku CSV z napisami. Jeśli plik nie istnieje, tworzy nowy."""
+        from tkinter import simpledialog
+        
+        # Jeśli nie ma załadowanego pliku, pytamy użytkownika gdzie go stworzyć
         if not self.loaded_path:
-            messagebox.showwarning('Brak pliku', 'Najpierw załaduj lub utwórz plik CSV z napisami.', parent=self)
-            return
+            init_dir = self.global_config.get('start_directory')
+            path = filedialog.asksaveasfilename(
+                title="Utwórz nowy plik CSV z napisami",
+                defaultextension='.csv',
+                filetypes=[('CSV', '*.csv')],
+                initialdir=init_dir,
+                parent=self
+            )
+            
+            if not path:
+                return
+            
+            self.loaded_path = Path(path)
+            if self.lbl_filename:
+                self.lbl_filename.configure(text=f"Plik: {self.loaded_path.name}")
         
         # Dialog z pytaniem ile wierszy dodać
-        from tkinter import simpledialog
         num_rows = simpledialog.askinteger(
             "Dodaj napisy",
             "Ile nowych wierszy dodać?",
@@ -792,6 +794,186 @@ class SubtitleStudioApp(ctk.CTk):
             
             self.set_status(f"Dodano {num_rows} nowych wierszy do {self.loaded_path.name}")
             messagebox.showinfo('Gotowe', f'Dodano {num_rows} nowych wierszy do pliku CSV.')
+        except Exception as e:
+            messagebox.showerror('Błąd', f'Nie udało się dodać wierszy: {str(e)}', parent=self)
+
+    def change_subtitle_file(self):
+        """Zmienia plik CSV z napisami na inny."""
+        init_dir = self.global_config.get('start_directory')
+        path = filedialog.askopenfilename(
+            title="Wybierz plik CSV z napisami",
+            filetypes=[('CSV', '*.csv'), ('Wszystkie pliki', '*.*')],
+            initialdir=init_dir,
+            parent=self
+        )
+        
+        if not path:
+            return
+        
+        # Sprawdzenie czy plik istnieje
+        csv_path = Path(path)
+        if not csv_path.exists():
+            messagebox.showerror('Błąd', 'Wybrany plik nie istnieje.', parent=self)
+            return
+        
+        try:
+            # Wczytaj nowy plik
+            self.lines = load_subtitle_file(str(csv_path))
+            self.loaded_path = csv_path
+            
+            # Zaktualizuj etykietę z nazwą pliku
+            if self.lbl_filename:
+                self.lbl_filename.configure(text=f"Plik: {csv_path.name}")
+            
+            # Odśwież UI
+            self.apply_patterns()
+            
+            self.set_status(f"Wczytano: {csv_path.name}")
+            messagebox.showinfo('Gotowe', f'Wczytano plik: {csv_path.name}')
+        except Exception as e:
+            messagebox.showerror('Błąd', f'Nie udało się wczytać pliku: {str(e)}', parent=self)
+
+    def generate_game_reader_preset(self):
+        """Otwiera okno konfiguracji eksportu do Game Readera."""
+        if not self.lines:
+            messagebox.showwarning('Brak danych', 'Brak przetworzonych napisów do wyeksportowania.', parent=self)
+            return
+
+        if not self.audio_dir:
+            messagebox.showwarning('Brak audio', 'Nie wybrano katalogu audio w projekcie.', parent=self)
+            return
+
+        # Otwórz nowe okno konfiguracji
+        GameReaderExportWindow(self)
+
+    def add_new_subtitles(self):
+        """Dodaje nowe wiersze do pliku CSV. Może załadować z istniejącego CSV lub pliku TXT."""
+        import datetime
+        
+        # Pytanie czy załadować z CSV czy TXT
+        choice = messagebox.askyesno(
+            "Dodaj napisy",
+            "Czy załadować z pliku?\n\nTAK  - wybierz plik CSV lub TXT\nNIE - dodaj puste wiersze",
+            parent=self
+        )
+        
+        new_lines_to_add = []
+        
+        if choice:
+            # Użytkownik wybrał załadowanie z pliku
+            init_dir = self.global_config.get('start_directory')
+            file_path = filedialog.askopenfilename(
+                title="Wybierz plik CSV lub TXT z napisami",
+                filetypes=[('CSV files', '*.csv'), ('Text files', '*.txt'), ('All files', '*.*')],
+                initialdir=init_dir,
+                parent=self
+            )
+            
+            if not file_path:
+                return
+            
+            file_path = Path(file_path)
+            
+            # Wczytaj plik w zależności od rozszerzenia
+            try:
+                if file_path.suffix.lower() == '.csv':
+                    # Załaduj CSV
+                    from app.io import load_subtitle_file
+                    new_lines_to_add = load_subtitle_file(str(file_path))
+                else:
+                    # Załaduj TXT - każda linia jako original_text
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines_text = f.readlines()
+                    
+                    for line_text in lines_text:
+                        line_text = line_text.rstrip('\n\r')
+                        if line_text:  # Pomijaj puste linie
+                            new_line = Line(
+                                original_text=line_text,
+                                text="",
+                                tts_text="",
+                                audio_duration=0.0,
+                                audio_filename="",
+                                audio_similarity=0.0,
+                                audio_transcribed_text="",
+                                audio_status="",
+                                audio_format=""
+                            )
+                            new_lines_to_add.append(new_line)
+                
+                if not new_lines_to_add:
+                    messagebox.showwarning('Brak danych', 'Plik nie zawiera żadnych danych.', parent=self)
+                    return
+                
+            except Exception as e:
+                messagebox.showerror('Błąd', f'Nie udało się wczytać pliku: {str(e)}', parent=self)
+                return
+        else:
+            # Użytkownik wybrał dodanie ręczne
+            from tkinter import simpledialog
+            num_rows = simpledialog.askinteger(
+                "Dodaj napisy",
+                "Ile nowych wierszy dodać?",
+                parent=self,
+                minvalue=1,
+                maxvalue=1000,
+                initialvalue=10
+            )
+            
+            if num_rows is None or num_rows <= 0:
+                return
+            
+            # Utwórz puste wiersze
+            for _ in range(num_rows):
+                new_line = Line(
+                    original_text="",
+                    text="",
+                    tts_text="",
+                    audio_duration=0.0,
+                    audio_filename="",
+                    audio_similarity=0.0,
+                    audio_transcribed_text="",
+                    audio_status="",
+                    audio_format=""
+                )
+                new_lines_to_add.append(new_line)
+        
+        # Automatycznie stwórz nowy plik CSV jeśli go nie ma
+        if not self.loaded_path:
+            try:
+                # Określ katalog docelowy
+                if self.current_project_path:
+                    target_dir = self.current_project_path.parent / 'subtitles'
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                else:
+                    start_dir = self.global_config.get('start_directory')
+                    target_dir = Path(start_dir) if start_dir else Path.home()
+                
+                # Utwórz nazwę pliku z timestampem
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                new_csv_filename = f"{timestamp}_subtitles.csv"
+                self.loaded_path = target_dir / new_csv_filename
+                
+                if self.lbl_filename:
+                    self.lbl_filename.configure(text=f"Plik: {self.loaded_path.name}")
+                
+            except Exception as e:
+                messagebox.showerror('Błąd', f'Nie udało się utworzyć ścieżki pliku CSV: {str(e)}', parent=self)
+                return
+        
+        # Dodaj nowe wiersze do self.lines i zapisz
+        try:
+            self.lines.extend(new_lines_to_add)
+            
+            # Zapisz do CSV
+            save_lines_to_file(str(self.loaded_path), self.lines)
+            
+            # Odświeź UI
+            self.apply_patterns()
+            
+            num_added = len(new_lines_to_add)
+            self.set_status(f"Dodano {num_added} wierszy do {self.loaded_path.name}")
+            messagebox.showinfo('Gotowe', f'Dodano {num_added} wierszy do pliku CSV.')
         except Exception as e:
             messagebox.showerror('Błąd', f'Nie udało się dodać wierszy: {str(e)}', parent=self)
 
