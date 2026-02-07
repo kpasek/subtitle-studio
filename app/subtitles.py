@@ -6,6 +6,7 @@ import subprocess
 import os
 from pathlib import Path
 from typing import List, Tuple, Optional
+from app.entity import Line
 from tkinter import messagebox
 import threading
 import time
@@ -187,7 +188,7 @@ class SubtitlePanel(ctk.CTkFrame):
 
     def _on_view_mode_change(self, value):
         self.app.apply_patterns()
-        self.set_preview([str(self._get_line_text(i)) for i in range(len(self.app.lines))])
+        self.set_preview(self.app.lines)
         self.app.save_app_setting('last_view_mode', value)
 
     def _schedule_jump_to_line(self, event=None):
@@ -313,10 +314,10 @@ class SubtitlePanel(ctk.CTkFrame):
 
     
 
-    def set_preview(self, lines_to_show: list[str]):
+    def set_preview(self, lines_to_show: list[Line]):
         """
         Wypełnia tabelę danymi.
-        Argument lines_to_show to lista tekstów. Numer linii jest wyliczany z indeksu.
+        Argument lines_to_show to lista obiektów `Line`.
         """
         preserved_index = self.app.selected_line_index
 
@@ -332,12 +333,14 @@ class SubtitlePanel(ctk.CTkFrame):
 
         item_to_select = None
 
-        for i, line_text in enumerate(lines_to_show):
-            # Prefer Line object data when available
-            try:
-                line_obj = self.app.lines[i]
-            except Exception:
+        for i, item in enumerate(lines_to_show):
+            # item is expected to be a Line object; fall back to string if necessary
+            if isinstance(item, str):
+                line_text = item
                 line_obj = None
+            else:
+                line_obj = item
+                line_text = (line_obj.text or '') if line_obj is not None else ''
 
             # derive content text based on view mode
             try:
@@ -647,7 +650,7 @@ class SubtitlePanel(ctk.CTkFrame):
         
         # Odśwież UI
         self.app.apply_patterns()
-        self.set_preview([str(self._get_line_text(i)) for i in range(len(self.app.lines))])
+        self.set_preview(self.app.lines)
 
     def _cancel_inline_edit(self, event=None):
         """Anuluje edycję inline bez zmian."""
@@ -810,7 +813,7 @@ class SubtitlePanel(ctk.CTkFrame):
         # Triggers UI refresh (re-populate table which reads ver_analysis_results)
         preserved = self.app.selected_line_index
         try:
-            self.set_preview([str(self._get_line_text(i)) for i in range(len(self.app.lines))])
+            self.set_preview(self.app.lines)
         except Exception:
             pass
         if preserved is not None and preserved < len(self.tree.get_children()):

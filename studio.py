@@ -346,7 +346,7 @@ class SubtitleStudioApp(ctk.CTk):
             print(f"Błąd zapisu do CSV: {e}")
 
         self.apply_patterns()
-        self.subtitle_panel.set_preview([str(self.subtitle_panel._get_line_text(i)) for i in range(len(self.lines))])
+        self.subtitle_panel.set_preview(self.lines)
         self.set_status(f"Wyczyszczono zawartość linii {idx + 1}")
 
     def open_shortcuts_window(self):
@@ -490,7 +490,8 @@ class SubtitleStudioApp(ctk.CTk):
         self.lbl_count_after.configure(text=f'Linie po: {len(self.lines):,}'.replace(",", " "))
         self.lbl_count_words.configure(text=f'Słowa: {total_words:,}'.replace(",", " "))
         self.lbl_count_chars.configure(text=f'Znaki: {total_chars:,}'.replace(",", " "))
-        self.subtitle_panel.set_preview(display_list)
+        # pass Line objects instead of strings
+        self.subtitle_panel.set_preview(self.lines)
         self.subtitle_panel.update_audio_buttons_state()
 
 
