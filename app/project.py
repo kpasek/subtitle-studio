@@ -51,7 +51,20 @@ def open_project(app, path: Optional[str] = None):
 
         subtitle_path = cfg.get("subtitle_path")
         if subtitle_path and Path(subtitle_path).exists():
-            app.load_file(subtitle_path, bypass_save_check=True)
+            # Load subtitles via central IO helper to ensure audio metadata is populated
+            try:
+                from app.io import load_subtitle_file
+                loaded = load_subtitle_file(subtitle_path)
+                app.loaded_path = Path(subtitle_path)
+                app.lines = loaded
+                # apply patterns and initialize subtitle panel state
+                try:
+                    app.apply_patterns()
+                except Exception:
+                    pass
+        
+            except Exception:
+                app.lines = []
         else:
             app.lines = []
             app.apply_patterns()

@@ -247,19 +247,48 @@ class SubtitlePanel(ctk.CTkFrame):
                 if col_id == 'duration':
                     return float(getattr(ln, 'audio_duration', 0.0) or 0.0)
                 if col_id == 'cps':
-                    # try ver_analysis_results
-                    if i < len(self.ver_analysis_results):
-                        return float(self.ver_analysis_results[i].get('cps') or 0.0)
-                    return 0.0
+                    # Prefer Line-based CPS calculation, fallback to ver_analysis_results
+                    try:
+                        txt = (ln.tts_text or '').strip('.?!')
+                        from collections import Counter
+                        stats = Counter(txt)
+                        short = stats[','] + stats['-']
+                        long = stats['.'] + stats['!'] + stats['?']
+                        pauses = (short * 0.4) + (long * 0.6)
+                        duration = float(getattr(ln, 'audio_duration', 0.0) or 0.0)
+                        return len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+                    except Exception:
+                        if i < len(self.ver_analysis_results):
+                            return float(self.ver_analysis_results[i].get('cps') or 0.0)
+                        return 0.0
                 if col_id == 'status':
+                    # Prefer Line audio_status or derived status
+                    try:
+                        st = getattr(ln, 'audio_status', None)
+                        if st:
+                            return st
+                    except Exception:
+                        pass
                     if i < len(self.ver_analysis_results):
                         return self.ver_analysis_results[i].get('display_status') or ''
                     return ''
                 if col_id == 'format':
+                    try:
+                        fmt = getattr(ln, 'audio_format', '') or ''
+                        if fmt:
+                            return fmt.lower()
+                    except Exception:
+                        pass
                     if i < len(self.ver_analysis_results):
                         return (self.ver_analysis_results[i].get('ext') or '').lower()
                     return ''
                 if col_id == 'audio_file':
+                    try:
+                        afn = getattr(ln, 'audio_filename', '')
+                        if afn:
+                            return str(Path(getattr(self, 'app').audio_dir or Path('.')) / afn)
+                    except Exception:
+                        pass
                     if i < len(self.ver_analysis_results):
                         p = self.ver_analysis_results[i].get('path')
                         return (str(p) if p else '')
@@ -304,31 +333,63 @@ class SubtitlePanel(ctk.CTkFrame):
         item_to_select = None
 
         for i, line_text in enumerate(lines_to_show):
-            # Filtrowanie tekstu (szukajka)
-            if search_term and search_term not in line_text.lower():
+            # Prefer Line object data when available
+            try:
+                line_obj = self.app.lines[i]
+            except Exception:
+                line_obj = None
+
+            # derive content text based on view mode
+            try:
+                mode = self.app.view_mode.get()
+                if line_obj is not None:
+                    if mode == 'Napisy':
+                        content_text = (line_obj.text or '').lower()
+                    elif mode == 'TTS':
+                        content_text = (line_obj.tts_text or '').lower()
+                    else:
+                        content_text = (line_obj.text or '').lower()
+                else:
+                    content_text = (line_text or '').lower()
+            except Exception:
+                content_text = (line_text or '').lower()
+
+            if search_term and search_term not in content_text:
                 continue
 
             # Apply user filters if any
             f = getattr(self, 'filter_spec', {}) or {}
+            # Try to get verification entry but prefer Line fields
             try:
                 ar = self.ver_analysis_results[i] if i < len(getattr(self, 'ver_analysis_results', [])) else None
             except Exception:
                 ar = None
             # text length
             try:
-                if f.get('min_len') and len(line_text) < int(f.get('min_len')):
+                if f.get('min_len') and len(content_text) < int(f.get('min_len')):
                     continue
-                if f.get('max_len') and len(line_text) > int(f.get('max_len')):
+                if f.get('max_len') and len(content_text) > int(f.get('max_len')):
                     continue
             except Exception:
                 pass
             # cps
             try:
                 # Jeśli filtr CPS jest ustawiony, pominąć linie bez weryfikacji
-                if (f.get('min_cps') is not None and f.get('min_cps') != '') or (f.get('max_cps') is not None and f.get('max_cps') != ''):
-                    if not ar or ar.get('cps') is None:
-                        continue
-                cps_val = float(ar.get('cps') or 0) if ar else 0.0
+                # compute CPS from Line if available
+                if line_obj is None:
+                    cps_val = float(ar.get('cps') or 0) if ar else 0.0
+                else:
+                    try:
+                        txt = (line_obj.tts_text or '').strip('.?!')
+                        from collections import Counter
+                        stats = Counter(txt)
+                        short = stats[','] + stats['-']
+                        long = stats['.'] + stats['!'] + stats['?']
+                        pauses = (short * 0.4) + (long * 0.6)
+                        duration = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0)
+                        cps_val = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+                    except Exception:
+                        cps_val = float(ar.get('cps') or 0) if ar else 0.0
                 if f.get('min_cps') is not None and f.get('min_cps') != '' and cps_val < float(f.get('min_cps')):
                     continue
                 if f.get('max_cps') is not None and f.get('max_cps') != '' and cps_val > float(f.get('max_cps')):
@@ -339,9 +400,10 @@ class SubtitlePanel(ctk.CTkFrame):
             try:
                 # Jeśli filtr similarity jest ustawiony, pominąć linie bez weryfikacji
                 if (f.get('min_sim') is not None and f.get('min_sim') != '') or (f.get('max_sim') is not None and f.get('max_sim') != ''):
-                    if not ar or ar.get('path') is None:
+                    # require a transcribed text or audio file to compute similarity
+                    if line_obj is None and (not ar or ar.get('path') is None):
                         continue
-                sim_val = float(self.app.lines[i].audio_similarity or 0.0)
+                sim_val = float(getattr(line_obj, 'audio_similarity', 0.0) or 0.0) if line_obj else float(ar.get('similarity') or 0.0 if ar else 0.0)
                 if f.get('min_sim') is not None and f.get('min_sim') != '' and sim_val < float(f.get('min_sim')):
                     continue
                 if f.get('max_sim') is not None and f.get('max_sim') != '' and sim_val > float(f.get('max_sim')):
@@ -353,11 +415,12 @@ class SubtitlePanel(ctk.CTkFrame):
                 show = f.get('show')
                 if show == 'Wygenerowane':
                     # Pokaż tylko linie które mają audio
-                    if not (ar and ar.get('path')):
+                    has_audio = bool(getattr(line_obj, 'audio_filename', '') or (ar and ar.get('path')))
+                    if not has_audio:
                         continue
                 elif show == 'Niewygenerowane':
-                    # Pokaż tylko linie które nie mają audio
-                    if ar and ar.get('path'):
+                    has_audio = bool(getattr(line_obj, 'audio_filename', '') or (ar and ar.get('path')))
+                    if has_audio:
                         continue
             except Exception:
                 pass
@@ -371,7 +434,25 @@ class SubtitlePanel(ctk.CTkFrame):
                 if col_id == "line_nr":
                     # Formatowanie numeru linii (padding zerami np. 001)
                     # Opcjonalnie można to zrobić dynamicznie na podstawie len(lines_to_show)
-                    row_values.append(f"{line_nr:03d}")
+                    row_values.append(f"{line_nr:06d}")
+                elif col_id == "content":
+                    # prefer actual Line text to ensure we display current data
+                    if line_obj is not None:
+                        if self.app.view_mode.get() == 'TTS':
+                            row_values.append(line_obj.tts_text or '')
+                        else:
+                            row_values.append(line_obj.text or '')
+                    else:
+                        row_values.append(line_text)
+                else:
+                    # Placeholder dla przyszłych kolumn
+                    row_values.append("")
+            for col in self.columns_config:
+                col_id = col["id"]
+                if col_id == "line_nr":
+                    # Formatowanie numeru linii (padding zerami np. 001)
+                    # Opcjonalnie można to zrobić dynamicznie na podstawie len(lines_to_show)
+                    row_values.append(f"{line_nr:06d}")
                 elif col_id == "content":
                     row_values.append(line_text)
                 else:
@@ -379,26 +460,46 @@ class SubtitlePanel(ctk.CTkFrame):
                     row_values.append("")
 
             # Jeśli mamy wyniki weryfikacji, wstaw odpowiednie wartości
-            if i < len(getattr(self, 'ver_analysis_results', [])):
-                ar = self.ver_analysis_results[i]
-                # Replace values for duration, cps, status, format, audio_file in row_values by finding indexes
-                # We know column order from self.columns_config
-                # Build a mapping of col_id -> position
-                col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
-                try:
-                    if 'duration' in col_pos:
-                        row_values[col_pos['duration']] = f"{ar.get('duration', 0):.2f}" if ar.get('duration', 0) > 0 else '-'
-                    if 'cps' in col_pos:
-                        row_values[col_pos['cps']] = f"{ar.get('cps', 0):.1f}" if ar.get('duration', 0) > 0 else '-'
-                    if 'status' in col_pos:
-                        row_values[col_pos['status']] = ar.get('display_status', ar.get('raw_status', ''))
-                    if 'format' in col_pos:
-                        row_values[col_pos['format']] = (ar.get('ext') or '').upper()
-                    if 'audio_file' in col_pos:
-                        path = ar.get('path')
-                        row_values[col_pos['audio_file']] = Path(path).name if path else ''
-                except Exception:
-                    pass
+            # Fill columns from Line object first, fallback to ver_analysis_results
+            col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+            try:
+                if 'duration' in col_pos:
+                    duration_val = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0) if line_obj else (self.ver_analysis_results[i].get('duration', 0) if i < len(self.ver_analysis_results) else 0)
+                    row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+                if 'cps' in col_pos:
+                    try:
+                        cps_val = 0.0
+                        if line_obj is not None:
+                            txt = (line_obj.tts_text or '').strip('.?!')
+                            from collections import Counter
+                            stats = Counter(txt)
+                            short = stats[','] + stats['-']
+                            long = stats['.'] + stats['!'] + stats['?']
+                            pauses = (short * 0.4) + (long * 0.6)
+                            duration = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0)
+                            cps_val = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+                        else:
+                            cps_val = float(self.ver_analysis_results[i].get('cps') or 0) if i < len(self.ver_analysis_results) else 0.0
+                    except Exception:
+                        cps_val = 0.0
+                    row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
+                if 'status' in col_pos:
+                    display_status = getattr(line_obj, 'audio_status', None) or (self.ver_analysis_results[i].get('display_status') if i < len(self.ver_analysis_results) else '')
+                    row_values[col_pos['status']] = display_status or ''
+                if 'format' in col_pos:
+                    fmt = (getattr(line_obj, 'audio_format', '') or '')
+                    if not fmt and i < len(self.ver_analysis_results):
+                        fmt = (self.ver_analysis_results[i].get('ext') or '')
+                    row_values[col_pos['format']] = (fmt or '').upper()
+                if 'audio_file' in col_pos:
+                    path = None
+                    if line_obj and getattr(line_obj, 'audio_filename', ''):
+                        path = str(Path(getattr(self, 'app').audio_dir or Path('.')) / line_obj.audio_filename)
+                    elif i < len(self.ver_analysis_results):
+                        path = self.ver_analysis_results[i].get('path')
+                    row_values[col_pos['audio_file']] = Path(path).name if path else ''
+            except Exception:
+                pass
 
             # Wstawienie wiersza
             item_id = self.tree.insert("", "end", values=tuple(row_values))
@@ -1044,7 +1145,7 @@ class SubtitlePanel(ctk.CTkFrame):
             return
         FilterWindow(self, current_filters=getattr(self, 'filter_spec', {}), apply_callback=self._on_filter_apply)
 
-    def _on_filter_apply(self, filters: dict):
+    def _on_filter_apply(self, filters: dict = {}):
         # store filters and refresh view
         self.filter_spec = filters or {}
         try:

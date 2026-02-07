@@ -167,12 +167,13 @@ class SubtitleStudioApp(ctk.CTk):
         self._bind_shortcuts()
 
         threading.Thread(target=self._check_for_updates, daemon=True).start()
-        
+                
         # Sprawdzamy, czy w konfiguracji jest zapisany ostatni projekt i czy plik istnieje
         last_proj = self.global_config.get('last_project')
         if last_proj and os.path.exists(last_proj):
             # Używamy 'after', aby pozwolić GUI na pełną inicjalizację przed wczytaniem ciężkiego projektu
             self.after(100, lambda: self.open_project(last_proj))
+            self.subtitle_panel._on_filter_apply()
 
     def _bind_shortcuts(self):
         """Rejestruje globalne skróty klawiszowe."""
@@ -455,75 +456,6 @@ class SubtitleStudioApp(ctk.CTk):
     def _refresh_custom_lists(self):
         if self.pattern_manager_window and self.pattern_manager_window.winfo_exists():
             self.pattern_manager_window.refresh_ui()
-
-    # --- FILE & PROJECT IO ---
-    def load_file(self, path: Optional[str] = None, bypass_save_check: bool = False):
-        if not path:
-            initial_dir = self.global_config.get('start_directory') or self._get_save_dir()
-            path = filedialog.askopenfilename(title="Wybierz plik napisów",
-                                              filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*")],
-                                              initialdir=initial_dir)
-        if not path:
-            return
-        if not bypass_save_check and not self._check_unsaved_changes():
-            return
-
-        self.loaded_path = Path(path)
-        if not self.current_project_path:
-            self.lbl_filename.configure(text=str(self.loaded_path.name))
-        try:
-            loaded = load_subtitle_file(path)
-            # load_subtitle_file returns list[Line]
-            self.lines = loaded
-
-            self.apply_patterns()
-            # Initialize verification results from CSV data so status shows on load
-            try:
-                if hasattr(self, 'subtitle_panel') and self.subtitle_panel:
-                    panel = self.subtitle_panel
-                    total = len(self.lines)
-                    panel.ver_analysis_results = [{} for _ in range(total)]
-                    panel.ver_processed_indices = set()
-                    audio_dir = getattr(self, 'audio_dir', Path('.'))
-                    for i, line in enumerate(self.lines):
-                        entry = {}
-                        entry['id'] = i + 1
-                        entry['text'] = line.tts_text or ''
-                        entry['duration'] = float(getattr(line, 'audio_duration', 0.0) or 0.0)
-                        # compute simple CPS if possible
-                        try:
-                            from collections import Counter
-                            txt = (line.tts_text or '').strip('.?!')
-                            stats = Counter(txt)
-                            short = stats[','] + stats['-']
-                            long = stats['.'] + stats['!'] + stats['?']
-                            pauses = (short * 0.4) + (long * 0.6)
-                            duration = entry['duration']
-                            cps = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
-                        except Exception:
-                            cps = 0.0
-                        entry['cps'] = cps
-                        entry['raw_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
-                        if getattr(line, 'audio_filename', ''):
-                            entry['path'] = str(Path(audio_dir) / line.audio_filename)
-                        else:
-                            entry['path'] = None
-                        entry['ext'] = getattr(line, 'audio_format', '') or (Path(entry['path']).suffix.lstrip('.') if entry['path'] else '')
-                        entry['display_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
-                        entry['similarity'] = getattr(line, 'audio_similarity', 0.0)
-                        entry['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
-                        panel.ver_analysis_results[i] = entry
-                        if entry.get('path'):
-                            panel.ver_processed_indices.add(i)
-            except Exception:
-                pass
-            self.set_status(f"Wczytano {len(self.lines)} linii")
-            self.has_unsaved_changes = False
-            if self.current_project_path:
-                self.set_project_config('subtitle_path', str(self.loaded_path))
-
-        except Exception as e:
-            messagebox.showerror("Błąd", f"Nie udało się wczytać pliku:\n{e}")
 
     # --- PROCES PRZETWARZANIA ---
 

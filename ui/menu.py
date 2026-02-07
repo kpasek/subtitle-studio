@@ -28,7 +28,7 @@ class AppMenu:
 
         # --- Dialogi ---
         gen_menu = tk.Menu(menubar, tearoff=0)
-        gen_menu.add_command(label="Wczytaj napisy", command=self.app.load_file)
+        # gen_menu.add_command(label="Wczytaj napisy", command=self.app.load_file)
         gen_menu.add_command(label="Wybierz katalog audio", command=self.app.choose_audio_dir)
         gen_menu.add_separator()
         gen_menu.add_command(label="Pokaż kolejkę zadań", command=self.app.show_generation_queue, accelerator="Ctrl+Q")

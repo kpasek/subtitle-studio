@@ -92,15 +92,47 @@ class VerificationWindow(ctk.CTkToplevel):
                     if panel.ver_stop_event.is_set():
                         break
 
-                    # perform verification (respect verify duration option)
-                    res = VerificationManager.verify_line(
-                        line=line,
-                        audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
-                        line_id=i+1,
-                        ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
-                        ignore_short=False,
-                        verify_duration=self.verify_duration_var.get()
-                    )
+                    # If not forcing refresh and line already has duration or transcribed text, skip verification
+                    force = self.force_refresh.get()
+                    if not force and (getattr(line, 'audio_duration', 0) or getattr(line, 'audio_transcribed_text', '')):
+                        # build result entry from existing Line data
+                        entry = {}
+                        entry['id'] = i + 1
+                        entry['text'] = line.tts_text or ''
+                        entry['duration'] = float(getattr(line, 'audio_duration', 0) or 0.0)
+                        # compute simple CPS if possible
+                        try:
+                            from collections import Counter
+                            txt = (line.tts_text or '').strip('.?!')
+                            stats = Counter(txt)
+                            short = stats[','] + stats['-']
+                            long = stats['.'] + stats['!'] + stats['?']
+                            pauses = (short * 0.4) + (long * 0.6)
+                            duration = entry['duration']
+                            cps = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+                        except Exception:
+                            cps = 0.0
+                        entry['cps'] = cps
+                        entry['raw_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
+                        if getattr(line, 'audio_filename', ''):
+                            entry['path'] = str(Path(getattr(self.master_app, 'audio_dir', Path('.'))) / line.audio_filename)
+                        else:
+                            entry['path'] = None
+                        entry['ext'] = getattr(line, 'audio_format', '') or (Path(entry['path']).suffix.lstrip('.') if entry['path'] else '')
+                        entry['display_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
+                        entry['similarity'] = getattr(line, 'audio_similarity', 0.0)
+                        entry['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
+                        res = entry
+                    else:
+                        # perform verification (respect verify duration option)
+                        res = VerificationManager.verify_line(
+                            line=line,
+                            audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
+                            line_id=i+1,
+                            ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
+                            ignore_short=False,
+                            verify_duration=self.verify_duration_var.get()
+                        )
 
                     # if OK and similarity enabled, attempt similarity (may be slow)
                     if self.verify_similarity_var.get() and res.get('path') and res.get('raw_status') == 'OK':
