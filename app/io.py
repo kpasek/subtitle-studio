@@ -87,11 +87,23 @@ def load_subtitle_file(path: str) -> List[Line]:
         try:
             with open(p, 'r', encoding='utf-8', newline='') as f:
                 reader = csv.DictReader(f)
+                # Sprawdzenie jakie kolumny są w CSV
+                fieldnames = reader.fieldnames or []
+                print(f"[LOAD_CSV] Wczytywanie CSV: {path}")
+                print(f"[LOAD_CSV] Kolumny: {fieldnames}")
+                has_transcribed_col = 'audio_transcribed_text' in fieldnames
+                print(f"[LOAD_CSV] Ma kolumnę audio_transcribed_text: {has_transcribed_col}")
+                
+                row_count = 0
                 for row in reader:
+                    row_count += 1
                     try:
                         dur = round(float(row.get('audio_duration') or 0), 3)
                     except Exception:
                         dur = 0.0
+                    
+                    transcribed = row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or ''
+                    
                     l = Line(
                         original_text=row.get('original_text', '') or '',
                         text=row.get('text', '') or '',
@@ -100,19 +112,31 @@ def load_subtitle_file(path: str) -> List[Line]:
                         audio_filename=row.get('audio_filename', '') or '',
                         audio_similarity=float(row.get('audio_similarity') or 0.0),
                         audio_format=row.get('audio_format', '') or '',
-                        audio_transcribed_text=row.get('audio_transcribed_text', '') or ''
+                        audio_transcribed_text=transcribed
                     )
                     out.append(l)
-            return out
+                    
+                    # Log pierwszych 3 wierszy
+                    if row_count <= 3:
+                        print(f"[LOAD_CSV] Linia {row_count}: audio_transcribed_text={repr(transcribed[:30] if transcribed else '')}, audio_filename={repr(l.audio_filename)}")
+                
+                print(f"[LOAD_CSV] Wczytanych linii: {row_count}")
+                return out
         except UnicodeDecodeError:
             # fallback: read as latin-1 then return (we don't auto-rewrite here)
+            print(f"[LOAD_CSV] UTF-8 decode failed, próbuję latin-1...")
             with open(p, 'r', encoding='latin-1', newline='') as f:
                 reader = csv.DictReader(f)
+                row_count = 0
                 for row in reader:
+                    row_count += 1
                     try:
                         dur = round(float(row.get('audio_duration') or 0), 3)
                     except Exception:
                         dur = 0.0
+                    
+                    transcribed = row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or ''
+                    
                     # decode fields from latin-1 to python str (already decoded)
                     l = Line(
                         original_text=row.get('original_text', '') or '',
@@ -122,9 +146,14 @@ def load_subtitle_file(path: str) -> List[Line]:
                         audio_filename=row.get('audio_filename', '') or '',
                         audio_similarity=float(row.get('audio_similarity') or 0.0),
                         audio_format=row.get('audio_format', '') or '',
-                        audio_transcribed_text=row.get('audio_transcribed_text', '') or ''
+                        audio_transcribed_text=transcribed
                     )
                     out.append(l)
+                    
+                    if row_count <= 3:
+                        print(f"[LOAD_CSV] Linia {row_count} (latin-1): audio_transcribed_text={repr(transcribed[:30] if transcribed else '')}")
+                
+                print(f"[LOAD_CSV] Wczytanych linii (latin-1): {row_count}")
             return out
     else:
         with open(p, 'r', encoding='utf-8') as f:

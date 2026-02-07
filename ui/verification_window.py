@@ -87,6 +87,17 @@ class VerificationWindow(ctk.CTkToplevel):
                 lines = getattr(self.master_app, 'lines', [])
                 total = len(lines)
                 panel.ver_analysis_results = [{} for _ in range(total)]
+                
+                # Diagnostyka: sprawdź ile linii ma audio_transcribed_text
+                with_transcribed = sum(1 for line in lines if getattr(line, 'audio_transcribed_text', ''))
+                with_filename = sum(1 for line in lines if getattr(line, 'audio_filename', ''))
+                with_similarity = sum(1 for line in lines if getattr(line, 'audio_similarity', 0))
+                print(f"[DIAGNOSTICS] Linie wczytane: {total}, z transkrypcją: {with_transcribed}, z audio: {with_filename}, z similarity: {with_similarity}")
+                
+                # Pokaż pierwsze 3 linie z ich danymi
+                for idx in range(min(3, total)):
+                    line = lines[idx]
+                    print(f"[SAMPLE] Linia {idx+1}: audio_filename={repr(getattr(line, 'audio_filename', ''))}, audio_transcribed_text={repr(getattr(line, 'audio_transcribed_text', '')[:50])}, audio_similarity={getattr(line, 'audio_similarity', 0)}")
 
                 # Counter for UI refresh throttling (update every 20 files)
                 update_counter = 0
@@ -100,6 +111,13 @@ class VerificationWindow(ctk.CTkToplevel):
                     force = self.force_refresh.get()
                     has_audio_filename = getattr(line, 'audio_filename', '')
                     has_transcribed_text = getattr(line, 'audio_transcribed_text', '')
+                    has_audio_duration = getattr(line, 'audio_duration', 0)
+                    has_audio_similarity = getattr(line, 'audio_similarity', 0)
+                    
+                    print(f"[CHECK] Linia {i+1}: filename={repr(has_audio_filename)}, transcribed={repr(has_transcribed_text[:30] if has_transcribed_text else '')}, duration={has_audio_duration}, similarity={has_audio_similarity}, force={force}")
+                    
+                    # Flaga czy linia została zmodyfikowana (do zapisania do CSV)
+                    line_was_modified = False
                     
                     # Jeśli już ma transkrybowany tekst, całkowite pominięcie
                     if not force and has_transcribed_text:
@@ -116,8 +134,10 @@ class VerificationWindow(ctk.CTkToplevel):
                             'similarity': getattr(line, 'audio_similarity', 0.0),
                             'transcribed_text': has_transcribed_text
                         }
+                        # Nie zapisuj do CSV bo nic się nie zmieniło
+                        line_was_modified = False
                     # Jeśli ma audio_filename ale brak transkrypcji, i similarity jest włączony - pominąć verify_line, ale zweryfikować similarity
-                    elif not force and has_audio_filename and self.verify_similarity_var.get():
+                    elif not force and has_audio_filename and not has_transcribed_text and self.verify_similarity_var.get():
                         print(f"[SKIP_VERIFY_LINE] Linia {i+1}: ma audio, weryfikuję tylko similarity")
                         # Pominąć verify_line ale bezpośrednio przejść do apply_similarity_to_line
                         res = {
@@ -131,6 +151,8 @@ class VerificationWindow(ctk.CTkToplevel):
                             'similarity': 0.0,
                             'transcribed_text': ''
                         }
+                        # Będzie modyfikowana przez apply_similarity_to_line
+                        line_was_modified = True
                     # Pełna weryfikacja
                     else:
                         print(f"[VERIFY] Linia {i+1}: weryfikuję verify_line")
@@ -143,9 +165,11 @@ class VerificationWindow(ctk.CTkToplevel):
                             ignore_short=False,
                             verify_duration=self.verify_duration_var.get()
                         )
+                        line_was_modified = True
 
                     # if OK and similarity enabled, attempt similarity (may be slow)
-                    if self.verify_similarity_var.get() and res.get('path') and res.get('raw_status') == 'OK':
+                    # NIE rób similarity jeśli już ma transkrybowany tekst!
+                    if self.verify_similarity_var.get() and res.get('path') and res.get('raw_status') == 'OK' and not has_transcribed_text:
                         try:
                             line = VerificationManager.apply_similarity_to_line(line, res.get('path'))
                             res['similarity'] = getattr(line, 'audio_similarity', 0.0)
@@ -173,13 +197,14 @@ class VerificationWindow(ctk.CTkToplevel):
                     panel.ver_analysis_results[i] = res
                     panel.ver_processed_indices.add(i)
 
-                    # Persist single-line changes to the original CSV (if loaded)
-                    try:
-                        lp = getattr(self.master_app, 'loaded_path', None)
-                        if lp:
-                            update_line_in_csv(str(lp), i, line)
-                    except Exception as e:
-                        print(f"[WARNING] Failed to update CSV at line {i}: {e}")
+                    # Persist single-line changes to the original CSV (if loaded) - TYLKO jeśli linia była modyfikowana
+                    if line_was_modified:
+                        try:
+                            lp = getattr(self.master_app, 'loaded_path', None)
+                            if lp:
+                                update_line_in_csv(str(lp), i, line)
+                        except Exception as e:
+                            print(f"[WARNING] Failed to update CSV at line {i}: {e}")
 
                     # Update UI every 20 files to reduce rapid status updates
                     update_counter += 1
