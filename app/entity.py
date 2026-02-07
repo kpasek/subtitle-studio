@@ -26,6 +26,7 @@ class Line:
     audio_duration: float = 0.0  # Długość wygenerowanego audio
     audio_filename: str = ""  # Nazwa pliku audio (np. output1 (1).wav)
     audio_similarity: float = 0.0  # Zgodność (np. 0.95)
+    audio_transcribed_text: str = ""  # Tekst odczytany z audio (cache)
 
     # Weryfikacja / metadane audio
     audio_status: str = ""  # MISSING/ERROR/OK/SHORT/etc.

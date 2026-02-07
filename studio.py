@@ -477,6 +477,46 @@ class SubtitleStudioApp(ctk.CTk):
             self.lines = loaded
 
             self.apply_patterns()
+            # Initialize verification results from CSV data so status shows on load
+            try:
+                if hasattr(self, 'subtitle_panel') and self.subtitle_panel:
+                    panel = self.subtitle_panel
+                    total = len(self.lines)
+                    panel.ver_analysis_results = [{} for _ in range(total)]
+                    panel.ver_processed_indices = set()
+                    audio_dir = getattr(self, 'audio_dir', Path('.'))
+                    for i, line in enumerate(self.lines):
+                        entry = {}
+                        entry['id'] = i + 1
+                        entry['text'] = line.tts_text or ''
+                        entry['duration'] = float(getattr(line, 'audio_duration', 0.0) or 0.0)
+                        # compute simple CPS if possible
+                        try:
+                            from collections import Counter
+                            txt = (line.tts_text or '').strip('.?!')
+                            stats = Counter(txt)
+                            short = stats[','] + stats['-']
+                            long = stats['.'] + stats['!'] + stats['?']
+                            pauses = (short * 0.4) + (long * 0.6)
+                            duration = entry['duration']
+                            cps = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+                        except Exception:
+                            cps = 0.0
+                        entry['cps'] = cps
+                        entry['raw_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
+                        if getattr(line, 'audio_filename', ''):
+                            entry['path'] = str(Path(audio_dir) / line.audio_filename)
+                        else:
+                            entry['path'] = None
+                        entry['ext'] = getattr(line, 'audio_format', '') or (Path(entry['path']).suffix.lstrip('.') if entry['path'] else '')
+                        entry['display_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
+                        entry['similarity'] = getattr(line, 'audio_similarity', 0.0)
+                        entry['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
+                        panel.ver_analysis_results[i] = entry
+                        if entry.get('path'):
+                            panel.ver_processed_indices.add(i)
+            except Exception:
+                pass
             self.set_status(f"Wczytano {len(self.lines)} linii")
             self.has_unsaved_changes = False
             if self.current_project_path:

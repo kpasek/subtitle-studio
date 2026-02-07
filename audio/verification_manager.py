@@ -70,7 +70,7 @@ class VerificationManager:
         return cls()
 
     @staticmethod
-    def verify_line(line, audio_dir: str, line_id: int, ffprobe_path: Optional[str] = None, ignore_short: bool = False) -> 'dict':
+    def verify_line(line, audio_dir: str, line_id: int, ffprobe_path: Optional[str] = None, ignore_short: bool = False, verify_duration: bool = True) -> 'dict':
         """
         Weryfikuje pojedynczą linię audio.
         
@@ -133,6 +133,14 @@ class VerificationManager:
         
         entry['path'] = str(audio_file)
         entry['ext'] = found_ext
+
+        # If duration verification is disabled, skip computing duration/CPS
+        if not verify_duration:
+            entry['duration'] = 0.0
+            entry['cps'] = 0.0
+            entry['raw_status'] = 'OK'
+            entry['display_status'] = 'OK'
+            return entry
         
         # Pobieranie długości audio
         duration = VerificationManager._get_audio_duration(audio_file, found_ext, ffprobe_path)
@@ -300,8 +308,10 @@ class VerificationManager:
             
             if result.get('success'):
                 line.audio_similarity = result.get('similarity', 0.0)
+                line.audio_transcribed_text = result.get('transcribed_text', '')
             else:
                 line.audio_similarity = 0.0
+                line.audio_transcribed_text = ''
             
             return line
         except Exception:

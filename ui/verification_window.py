@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 
 from audio.verification_manager import VerificationManager
+from app.tooltip import CreateToolTip
+from app.io import update_line_in_csv
 
 class VerificationWindow(ctk.CTkToplevel):
     """Window with Start / Stop / Ignore cache and progress bar for verification."""
@@ -47,6 +49,24 @@ class VerificationWindow(ctk.CTkToplevel):
         self.status_label = ctk.CTkLabel(frm, text='Status: idle')
         self.status_label.pack(anchor='w', padx=6)
 
+        # Options: verify duration and verify similarity
+        opts_frame = ctk.CTkFrame(frm, fg_color='transparent')
+        opts_frame.pack(fill='x', padx=6, pady=(4,0))
+
+        self.verify_duration_var = tk.BooleanVar(value=True)
+        cb_dur = ctk.CTkCheckBox(opts_frame, text='Weryfikuj długość audio', variable=self.verify_duration_var)
+        cb_dur.pack(side='left', padx=(0,8))
+        lbl_dur_i = ctk.CTkLabel(opts_frame, text='(i)')
+        lbl_dur_i.pack(side='left')
+        CreateToolTip(lbl_dur_i, text='Sprawdza długość pliku audio i oblicza CPS (znaki na sekundę).')
+
+        self.verify_similarity_var = tk.BooleanVar(value=False)
+        cb_sim = ctk.CTkCheckBox(opts_frame, text='Weryfikuj podobieństwo', variable=self.verify_similarity_var)
+        cb_sim.pack(side='left', padx=(12,8))
+        lbl_sim_i = ctk.CTkLabel(opts_frame, text='(i)')
+        lbl_sim_i.pack(side='left')
+        CreateToolTip(lbl_sim_i, text='Uruchamia rozpoznawanie mowy (Whisper) i porównanie tekstu. Proces jest powolny.')
+
     def _on_start(self):
         if not self.subtitle_panel:
             return
@@ -72,28 +92,51 @@ class VerificationWindow(ctk.CTkToplevel):
                     if panel.ver_stop_event.is_set():
                         break
 
-                    # perform verification
+                    # perform verification (respect verify duration option)
                     res = VerificationManager.verify_line(
                         line=line,
                         audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
                         line_id=i+1,
                         ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
-                        ignore_short=False
+                        ignore_short=False,
+                        verify_duration=self.verify_duration_var.get()
                     )
 
-                    # if OK, attempt similarity
-                    if res.get('path') and res.get('raw_status') == 'OK':
+                    # if OK and similarity enabled, attempt similarity (may be slow)
+                    if self.verify_similarity_var.get() and res.get('path') and res.get('raw_status') == 'OK':
                         try:
                             line = VerificationManager.apply_similarity_to_line(line, res.get('path'))
                             res['similarity'] = getattr(line, 'audio_similarity', 0.0)
+                            res['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
                         except Exception:
                             res['similarity'] = 0.0
+                            res['transcribed_text'] = ''
 
                     # store result and mark processed
+                    # update Line fields so they persist to main CSV
+                    if res.get('duration') is not None:
+                        line.audio_duration = round(float(res.get('duration')) * 1000, 3) / 1000
+                    if res.get('path'):
+                        line.audio_filename = Path(res.get('path')).name
+                    line.audio_format = res.get('ext', '') or ''
+                    # transcribed text stored by apply_similarity_to_line
+                    if res.get('transcribed_text'):
+                        line.audio_transcribed_text = res.get('transcribed_text')
+
                     panel.ver_analysis_results[i] = res
                     panel.ver_processed_indices.add(i)
 
+                    # Persist single-line changes to the original CSV (if loaded)
+                    try:
+                        lp = getattr(self.master_app, 'loaded_path', None)
+                        if lp:
+                            update_line_in_csv(str(lp), i, line)
+                    except Exception:
+                        pass
+
                 panel.ver_running = False
+
+                # results persisted per-line into the original CSV during processing
             except Exception:
                 try:
                     panel.ver_running = False

@@ -97,8 +97,8 @@ def load_subtitle_file(path: str) -> List[Line]:
                     audio_duration=dur,
                     audio_filename=row.get('audio_filename', '') or '',
                     audio_similarity=float(row.get('audio_similarity') or 0) if row.get('audio_similarity') else 0.0,
-                    audio_status=row.get('audio_status', '') or '',
-                    audio_format=row.get('audio_format', '') or ''
+                    audio_format=row.get('audio_format', '') or '',
+                    audio_transcribed_text=row.get('audio_transcribed_text', '') or ''
                 )
                 out.append(l)
         return out
@@ -118,7 +118,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
     if isinstance(lines, list) and lines and isinstance(lines[0], Line) or p.suffix.lower() == '.csv':
         # Zapis CSV
         with open(p, 'w', encoding='utf-8', newline='') as f:
-            fieldnames = ['original_text', 'text', 'tts_text', 'audio_duration', 'audio_filename', 'audio_similarity', 'audio_status', 'audio_format']
+            fieldnames = ['original_text', 'text', 'tts_text', 'audio_duration', 'audio_filename', 'audio_similarity', 'audio_format', 'audio_transcribed_text']
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
             writer.writeheader()
             for item in lines:
@@ -130,8 +130,8 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                         'audio_duration': item.audio_duration,
                         'audio_filename': item.audio_filename,
                         'audio_similarity': item.audio_similarity,
-                        'audio_status': item.audio_status,
-                        'audio_format': item.audio_format
+                        'audio_format': item.audio_format,
+                        'audio_transcribed_text': getattr(item, 'audio_transcribed_text', '')
                     })
                 else:
                     # if plain str, write into 'text' field
@@ -168,8 +168,8 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
                     audio_duration=dur,
                     audio_filename=row.get('audio_filename', '') or '',
                     audio_similarity=float(row.get('audio_similarity') or 0) if row.get('audio_similarity') else 0.0,
-                    audio_status=row.get('audio_status', '') or '',
-                    audio_format=row.get('audio_format', '') or ''
+                    audio_format=row.get('audio_format', '') or '',
+                    audio_transcribed_text=row.get('audio_transcribed_text', '') or ''
                 )
                 all_lines.append(l)
         
@@ -179,7 +179,7 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
         
         # Zapisz całość powrotem
         with open(p, 'w', encoding='utf-8', newline='') as f:
-            fieldnames = ['original_text', 'text', 'tts_text', 'audio_duration', 'audio_filename', 'audio_similarity', 'audio_status', 'audio_format']
+            fieldnames = ['original_text', 'text', 'tts_text', 'audio_duration', 'audio_filename', 'audio_similarity', 'audio_format', 'audio_transcribed_text']
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
             writer.writeheader()
             for item in all_lines:
@@ -190,8 +190,8 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
                     'audio_duration': item.audio_duration,
                     'audio_filename': item.audio_filename,
                     'audio_similarity': item.audio_similarity,
-                    'audio_status': item.audio_status,
-                    'audio_format': item.audio_format
+                    'audio_format': item.audio_format,
+                    'audio_transcribed_text': getattr(item, 'audio_transcribed_text', '')
                 })
     except Exception as e:
         print(f"Błąd aktualizacji linii w CSV: {e}")

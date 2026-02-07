@@ -745,6 +745,12 @@ class SubtitlePanel(ctk.CTkFrame):
                         line.audio_filename = str(path)
                 line.audio_status = v.get('display_status') or v.get('raw_status') or ''
                 line.audio_format = (v.get('ext') or '').upper()
+                # similarity and transcribed text
+                try:
+                    line.audio_similarity = float(v.get('similarity') or 0.0)
+                except Exception:
+                    line.audio_similarity = 0.0
+                line.audio_transcribed_text = v.get('transcribed_text', '') or v.get('transcribed_text', '')
 
                 # update ver_analysis_results
                 if idx < len(self.ver_analysis_results):
@@ -755,20 +761,24 @@ class SubtitlePanel(ctk.CTkFrame):
                             'raw_status': v.get('raw_status'),
                             'path': Path(v['path']) if v.get('path') else None,
                             'ext': v.get('ext') or '',
-                            'display_status': v.get('display_status')
+                            'display_status': v.get('display_status'),
+                            'similarity': float(v.get('similarity') or 0.0),
+                            'transcribed_text': v.get('transcribed_text', '')
                         })
                     except Exception:
                         pass
 
                 # persist to cache dict
                 try:
-                    self.ver_cache[str(idx+1)] = {
-                        'text': v.get('text', ''),
-                        'duration': float(v.get('duration') or 0),
-                        'path': v.get('path'),
-                        'ext': v.get('ext') or '',
-                        'error': None
-                    }
+                        self.ver_cache[str(idx+1)] = {
+                            'text': v.get('text', ''),
+                            'duration': float(v.get('duration') or 0),
+                            'path': v.get('path'),
+                            'ext': v.get('ext') or '',
+                            'similarity': float(v.get('similarity') or 0.0),
+                            'transcribed_text': v.get('transcribed_text', ''),
+                            'error': None
+                        }
                 except Exception:
                     pass
 
@@ -866,6 +876,11 @@ class SubtitlePanel(ctk.CTkFrame):
                                 line.audio_filename = Path(path).name
                             line.audio_status = v.get('display_status') or v.get('raw_status') or ''
                             line.audio_format = (v.get('ext') or '').upper()
+                            try:
+                                line.audio_similarity = float(v.get('similarity') or 0.0)
+                            except Exception:
+                                line.audio_similarity = 0.0
+                            line.audio_transcribed_text = v.get('transcribed_text', '')
 
                             if idx < len(self.ver_analysis_results):
                                 try:
@@ -875,7 +890,9 @@ class SubtitlePanel(ctk.CTkFrame):
                                         'raw_status': v.get('raw_status'),
                                         'path': Path(v['path']) if v.get('path') else None,
                                         'ext': v.get('ext') or '',
-                                        'display_status': v.get('display_status')
+                                        'display_status': v.get('display_status'),
+                                        'similarity': float(v.get('similarity') or 0.0),
+                                        'transcribed_text': v.get('transcribed_text', '')
                                     })
                                 except Exception:
                                     pass
@@ -887,6 +904,8 @@ class SubtitlePanel(ctk.CTkFrame):
                                     'duration': float(v.get('duration') or 0),
                                     'path': v.get('path'),
                                     'ext': v.get('ext') or '',
+                                    'similarity': float(v.get('similarity') or 0.0),
+                                    'transcribed_text': v.get('transcribed_text', ''),
                                     'error': None
                                 }
                             except Exception:
