@@ -12,7 +12,7 @@ import time
 import json
 import shutil
 
-from app.editor import LineEditor
+from app.io import update_line_in_csv
 
 FFPLAY_AVAILABLE = shutil.which("ffplay") is not None
 
@@ -178,19 +178,16 @@ class SubtitlePanel(ctk.CTkFrame):
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         self.tree.bind("<Double-Button-1>", self.play_selected_audio)
         self.tree.bind("<Button-3>", self._show_context_menu)
-        # Obsługa Ctrl+Klik (dodawanie wzorca)
-        self.tree.bind("<Control-Button-1>", self.app.add_replace_pattern_from_selection)
+        # Obsługa Ctrl+Klik (edycja inline)
+        self.tree.bind("<Control-Button-1>", self._start_inline_edit)
 
-        # --- Editor (Edytor Linii) - Row 3 ---
-        self.editor = LineEditor(self, on_save_callback=self.on_manual_edit_save)
-        self.editor.grid(row=3, column=0, sticky="ew", padx=5, pady=(0, 5))
+        # Zmienne do edycji inline
+        self.inline_edit_entry = None
+        self.inline_edit_item = None
 
     def _on_view_mode_change(self, value):
         self.app.apply_patterns()
-        if self.app.selected_line_index is not None:
-            self._reload_editor_for_selected()
-        else:
-            self.editor.clear()
+        self.set_preview([str(self._get_line_text(i)) for i in range(len(self.app.lines))])
         self.app.save_app_setting('last_view_mode', value)
 
     def _schedule_jump_to_line(self, event=None):
@@ -230,27 +227,7 @@ class SubtitlePanel(ctk.CTkFrame):
             # Nie znaleziono
             pass
 
-    def _reload_editor_for_selected(self):
-        if self.app.selected_line_index is None:
-            self.editor.clear()
-            return
 
-        mode = self.app.view_mode.get()
-        text_to_edit = ""
-        read_only = (mode == "Oryginał")
-
-        if not read_only:
-            try:
-                idx = self.app.selected_line_index
-                if mode == "Napisy":
-                    text_to_edit = self.app.lines[idx].text
-                elif mode == "TTS":
-                    text_to_edit = self.app.lines[idx].tts_text
-            except IndexError:
-                pass
-
-        self.editor.set_content(text_to_edit, read_only=read_only)
-        self.update_audio_buttons_state()
 
     def _sort_by_column(self, col_id: str):
         """Sortuje `self.app.lines` i `ver_analysis_results` według kolumny, toggle asc/desc."""
@@ -435,7 +412,6 @@ class SubtitlePanel(ctk.CTkFrame):
             self.tree.selection_set(item_to_select)
             self.tree.see(item_to_select)
         else:
-            self.editor.clear()
             self.app.selected_line_index = None
             self.update_audio_buttons_state()
 
@@ -444,7 +420,6 @@ class SubtitlePanel(ctk.CTkFrame):
         selected_items = self.tree.selection()
         if not selected_items:
             self.app.selected_line_index = None
-            self.editor.clear()
             self.update_audio_buttons_state()
             return
 
@@ -459,30 +434,126 @@ class SubtitlePanel(ctk.CTkFrame):
             line_nr = int(line_nr_str)
 
             self.app.selected_line_index = line_nr - 1
-            self._reload_editor_for_selected()
         except (ValueError, IndexError):
             self.app.selected_line_index = None
-            self.editor.clear()
 
         self.update_audio_buttons_state()
 
-    def on_manual_edit_save(self, new_text: str):
-        if self.app.selected_line_index is None:
-            return
-
-        idx = self.app.selected_line_index
+    def _start_inline_edit(self, event):
+        """Uruchamia edycję inline tekstu w tabeli przy Ctrl+Click."""
+        # Sprawdzenie czy jesteśmy w edytowalnym trybie
         mode = self.app.view_mode.get()
+        if mode == "Oryginał":
+            return
+        
+        # Znajdź wiersz i kolumnę pod kursorem
+        item = self.tree.identify_row(event.y)
+        col = self.tree.identify_column(event.x)
+        
+        if not item or not col:
+            return
+        
+        # Pobierz indeks kolumny
+        try:
+            col_idx = int(col[1]) - 1  # col jest w formacie '#1', '#2' itd.
+        except (ValueError, IndexError):
+            return
+        
+        # Sprawdzenie czy to kolumna "content"
+        if col_idx >= len(self.columns_config):
+            return
+        
+        col_id = self.columns_config[col_idx]["id"]
+        if col_id != "content":
+            return
+        
+        # Pobierz numer linii
+        try:
+            item_values = self.tree.item(item, "values")
+            line_nr_str = item_values[0]
+            line_idx = int(line_nr_str) - 1
+        except (ValueError, IndexError):
+            return
+        
+        # Pobierz aktualny tekst
+        try:
+            current_text = item_values[1] or ""
+        except IndexError:
+            current_text = ""
+        
+        # Zaznacz wiersz
+        self.tree.selection_set(item)
+        self.app.selected_line_index = line_idx
+        
+        # Utwórz entry widget dla edycji inline
+        self._create_inline_editor(item, col_idx, current_text, line_idx)
 
+    def _create_inline_editor(self, item_id, col_idx, current_text, line_idx):
+        """Tworzy entry widget dla edycji inline."""
+        # Jeśli już jest edytor, go usuniesz
+        if self.inline_edit_entry:
+            self.inline_edit_entry.destroy()
+            self.inline_edit_entry = None
+        
+        # Pobierz bbox komórki
+        x, y, width, height = self.tree.bbox(item_id, column=col_idx)
+        if x is None:
+            return
+        
+        # Utwórz entry widget nad komórką
+        self.inline_edit_entry = tk.Entry(self.tree, font=("Arial", 12), width=int(width / 8))
+        self.inline_edit_entry.insert(0, current_text)
+        self.inline_edit_entry.place(x=x, y=y, width=width, height=height)
+        
+        # Ustaw fokus i zaznacz tekst
+        self.inline_edit_entry.focus()
+        self.inline_edit_entry.select_range(0, tk.END)
+        
+        # Przechowaj dane o edycji
+        self.inline_edit_item = (item_id, col_idx, line_idx)
+        
+        # Bind zdarzeń
+        self.inline_edit_entry.bind("<Return>", self._save_inline_edit)
+        self.inline_edit_entry.bind("<Escape>", self._cancel_inline_edit)
+        self.inline_edit_entry.bind("<FocusOut>", self._save_inline_edit)
+
+    def _save_inline_edit(self, event=None):
+        """Zapisuje zmianę edycji inline bezpośrednio do CSV."""
+        if not self.inline_edit_entry or not self.inline_edit_item:
+            return
+        
+        item_id, col_idx, line_idx = self.inline_edit_item
+        new_text = self.inline_edit_entry.get()
+        
+        # Usuń entry widget
+        self.inline_edit_entry.destroy()
+        self.inline_edit_entry = None
+        self.inline_edit_item = None
+        
+        # Zaktualizuj bezpośrednio w app.lines (nie w manual_edits/tts_edits)
+        mode = self.app.view_mode.get()
         if mode == "Napisy":
-            self.app.manual_edits[idx] = new_text
-            self.app._save_manual_edits()
+            self.app.lines[line_idx].text = new_text
         elif mode == "TTS":
-            self.app.tts_edits[idx] = new_text
-            self.app._save_tts_edits()
-
+            self.app.lines[line_idx].tts_text = new_text
+        
+        # Zapisz do CSV bezpośrednio
+        try:
+            if self.app.loaded_path:
+                update_line_in_csv(str(self.app.loaded_path), line_idx, self.app.lines[line_idx])
+        except Exception as e:
+            print(f"Błąd zapisu do CSV: {e}")
+        
+        # Odśwież UI
         self.app.apply_patterns()
-        if self.app.selected_line_index is not None:
-            self._reload_editor_for_selected()
+        self.set_preview([str(self._get_line_text(i)) for i in range(len(self.app.lines))])
+
+    def _cancel_inline_edit(self, event=None):
+        """Anuluje edycję inline bez zmian."""
+        if self.inline_edit_entry:
+            self.inline_edit_entry.destroy()
+            self.inline_edit_entry = None
+            self.inline_edit_item = None
 
     def _show_context_menu(self, event):
         # W Treeview zaznaczenie pod prawym przyciskiem myszy nie dzieje się automatycznie w każdym OS
@@ -503,7 +574,7 @@ class SubtitlePanel(ctk.CTkFrame):
         can_play = self.play_button.cget("state") == "normal"
         can_gen = self.generate_button.cget("state") == "normal"
         can_del = self.delete_all_button.cget("state") == "normal"
-        can_edit = self.editor.entry.cget("state") == "normal"
+        can_edit = self.app.view_mode.get() != "Oryginał"  # Edycja możliwa tylko w trybach Napisy/TTS
 
         menu.add_command(label="▶️ Odtwórz audio (Ctrl+Spacja)", command=self.play_selected_audio,
                          state=tk.NORMAL if can_play else tk.DISABLED)

@@ -23,10 +23,7 @@ from app.subtitles import SubtitlePanel
 from ui.menu import AppMenu
 
 # Refaktoryzacja IO -> app.io
-from app.io import (get_edits_file_path, get_tts_edits_file_path,
-                    load_manual_edits, save_manual_edits,
-                    load_tts_edits, save_tts_edits,
-                    load_subtitle_file, save_lines_to_file)
+from app.io import load_subtitle_file, save_lines_to_file
 from app.patterns import gather_active_patterns, get_patterns_signature, apply_patterns as patterns_apply
 
 from audio.audio_renamer import AudioRenameWindow
@@ -179,8 +176,7 @@ class SubtitleStudioApp(ctk.CTk):
             self.after(100, lambda: self.open_project(last_proj))
 
         if hasattr(self, 'subtitle_panel'):
-            # Bindujemy Prawy Przycisk Myszy (Button-3 w Windows/Linux, Button-2 w macOS czasem)
-            self.subtitle_panel.editor.entry.bind("<Button-3>", self._show_editor_context_menu)
+            pass  # No editor binding needed anymore
 
     def open_verification_window(self):
         try:
@@ -313,18 +309,13 @@ class SubtitleStudioApp(ctk.CTk):
         self.subtitle_panel.search_line_nr.delete(0, tk.END)
         self.apply_patterns()  # Odświeża listę dialogów
 
-        # 2. Usuń zaznaczenie i wyczyść edytor
+        # 2. Usuń zaznaczenie
         if self.selected_line_index is not None:
-            # Zapisz, jeśli były jakieś zmiany w edytorze
-            if self.subtitle_panel.editor.last_saved_text:
-                self.subtitle_panel.on_manual_edit_save(self.subtitle_panel.editor.entry.get())
-
             self.selected_line_index = None
             try:
                 self.subtitle_panel.tree.selection_set(())
             except Exception:
                 pass
-            self.subtitle_panel.editor.clear()
             self.set_status("Wyszukiwanie anulowane, linia odznaczona.")
 
         return "break"
@@ -355,16 +346,22 @@ class SubtitleStudioApp(ctk.CTk):
         # Pusta wartość
         empty_val = ""
 
+        # Zaktualizuj bezpośrednio w app.lines
         if mode == "Napisy":
-            self.manual_edits[idx] = empty_val
-            self._save_manual_edits()
+            self.lines[idx].text = empty_val
         elif mode == "TTS":
-            self.tts_edits[idx] = empty_val
-            self._save_tts_edits()
+            self.lines[idx].tts_text = empty_val
+        
+        # Zapisz do CSV
+        try:
+            from app.io import update_line_in_csv
+            if self.loaded_path:
+                update_line_in_csv(str(self.loaded_path), idx, self.lines[idx])
+        except Exception as e:
+            print(f"Błąd zapisu do CSV: {e}")
 
         self.apply_patterns()
-        # Odśwież edytor (pokaże puste pole)
-        self.subtitle_panel._reload_editor_for_selected()
+        self.subtitle_panel.set_preview([str(self.subtitle_panel._get_line_text(i)) for i in range(len(self.lines))])
         self.set_status(f"Wyczyszczono zawartość linii {idx + 1}")
 
     def open_shortcuts_window(self):
@@ -495,10 +492,6 @@ class SubtitleStudioApp(ctk.CTk):
             # load_subtitle_file returns list[Line]
             self.lines = loaded
 
-            # Wczytaj obie warstwy edycji (nadpisują odpowiednio pola 'text' i 'tts_text')
-            self._load_manual_edits()
-            self._load_tts_edits()
-
             self.apply_patterns()
             self.set_status(f"Wczytano {len(self.lines)} linii")
             self.has_unsaved_changes = False
@@ -507,32 +500,6 @@ class SubtitleStudioApp(ctk.CTk):
 
         except Exception as e:
             messagebox.showerror("Błąd", f"Nie udało się wczytać pliku:\n{e}")
-
-    # --- OBSŁUGA PLIKÓW EDYCJI ---
-
-    def _get_edits_file_path(self) -> Path | None:
-        """Ścieżka dla edycji napisów (clean layer)."""
-        return get_edits_file_path(self.loaded_path)
-
-    def _get_tts_edits_file_path(self) -> Path | None:
-        """Ścieżka dla edycji TTS (replace layer)."""
-        return get_tts_edits_file_path(self.loaded_path)
-
-    def _load_manual_edits(self):
-        self.manual_edits = load_manual_edits(self.loaded_path)
-        if self.manual_edits:
-            print(f"Wczytano {len(self.manual_edits)} edycji (Napisy).")
-
-    def _save_manual_edits(self):
-        save_manual_edits(self.loaded_path, self.manual_edits)
-
-    def _load_tts_edits(self):
-        self.tts_edits = load_tts_edits(self.loaded_path)
-        if self.tts_edits:
-            print(f"Wczytano {len(self.tts_edits)} edycji (TTS).")
-
-    def _save_tts_edits(self):
-        save_tts_edits(self.loaded_path, self.tts_edits)
 
     # --- PROCES PRZETWARZANIA ---
 

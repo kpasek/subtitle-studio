@@ -27,16 +27,7 @@ def apply_patterns(app, force_refresh=False):
     apply_remove_patterns(app.lines, app.builtin_remove + app.custom_remove)
     apply_replace_patterns(app.lines, app.builtin_replace + app.custom_replace)
 
-    # Aplikowanie ręcznych edycji (manual_edits)
-    for idx, text in app.manual_edits.items():
-        if idx < len(app.lines):
-            app.lines[idx].text = text
-
-    for idx, text in app.tts_edits.items():
-        if idx < len(app.lines):
-            app.lines[idx].tts_text = text
-
-    # 4. Aktualizacja widoku
+    # Aktualizacja widoku
     app._update_subtitle_panel_content()
     app.set_status("Zaktualizowano podgląd.")
 
@@ -55,14 +46,12 @@ def apply_processing(app):
 
     changes_count = 0
     for i, line in enumerate(app.lines):
-        if i in app.manual_edits:
-            changes_count += 1
-        elif line.original_text != line.text:
+        if line.original_text != line.text:
             changes_count += 1
 
     ProcessingSummaryWindow(
         app, len(app.lines), changes_count,
-        manual_edits_count=len(app.manual_edits),
+        manual_edits_count=changes_count,
         callback=lambda remove_empty, remove_duplicates: _finalize_processing(app, remove_empty, remove_duplicates)
     )
 
@@ -128,7 +117,6 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
     app.original_lines = final_lines
     app.processed_clean = list(final_lines)
 
-    app.manual_edits = {}
     for p in app.custom_remove:
         p.enabled = False
 

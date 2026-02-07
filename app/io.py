@@ -143,3 +143,55 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                 f.write('\n'.join([l.text for l in lines]))
             else:
                 f.write('\n'.join(lines))
+
+
+def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
+    """Aktualizuje pojedynczą linię w pliku CSV (przede wszystkim pola text i tts_text)."""
+    p = Path(csv_path)
+    if not p.exists() or p.suffix.lower() != '.csv':
+        return
+    
+    try:
+        # Odczytaj wszystkie linie
+        all_lines: List[Line] = []
+        with open(p, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    dur = float(row.get('audio_duration') or 0)
+                except Exception:
+                    dur = 0.0
+                l = Line(
+                    original_text=row.get('original_text', '') or '',
+                    text=row.get('text', '') or '',
+                    tts_text=row.get('tts_text', '') or '',
+                    audio_duration=dur,
+                    audio_filename=row.get('audio_filename', '') or '',
+                    audio_similarity=float(row.get('audio_similarity') or 0) if row.get('audio_similarity') else 0.0,
+                    audio_status=row.get('audio_status', '') or '',
+                    audio_format=row.get('audio_format', '') or ''
+                )
+                all_lines.append(l)
+        
+        # Aktualizuj wybraną linię (jeśli indeks istnieje)
+        if 0 <= line_index < len(all_lines):
+            all_lines[line_index] = line
+        
+        # Zapisz całość powrotem
+        with open(p, 'w', encoding='utf-8', newline='') as f:
+            fieldnames = ['original_text', 'text', 'tts_text', 'audio_duration', 'audio_filename', 'audio_similarity', 'audio_status', 'audio_format']
+            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+            writer.writeheader()
+            for item in all_lines:
+                writer.writerow({
+                    'original_text': item.original_text,
+                    'text': item.text,
+                    'tts_text': item.tts_text,
+                    'audio_duration': item.audio_duration,
+                    'audio_filename': item.audio_filename,
+                    'audio_similarity': item.audio_similarity,
+                    'audio_status': item.audio_status,
+                    'audio_format': item.audio_format
+                })
+    except Exception as e:
+        print(f"Błąd aktualizacji linii w CSV: {e}")
