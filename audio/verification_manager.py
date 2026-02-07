@@ -6,9 +6,32 @@ import tempfile
 import uuid
 import json
 import multiprocessing
+import subprocess
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List, Dict, Any
+from collections import Counter
+
+from app.entity import Line
+
+try:
+    from mutagen.mp3 import MP3
+    MUTAGEN_AVAILABLE = True
+except ImportError:
+    MUTAGEN_AVAILABLE = False
+
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+
+try:
+    from rapidfuzz import fuzz
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    RAPIDFUZZ_AVAILABLE = False
 
 
 @dataclass
@@ -45,6 +68,244 @@ class VerificationManager:
     @classmethod
     def get_instance(cls) -> 'VerificationManager':
         return cls()
+
+    @staticmethod
+    def verify_line(line, audio_dir: str, line_id: int, ffprobe_path: Optional[str] = None, ignore_short: bool = False) -> 'dict':
+        """
+        Weryfikuje pojedynczą linię audio.
+        
+        Args:
+            line: Obiekt Line do weryfikacji
+            audio_dir: Ścieżka do katalogu audio
+            line_id: ID linii (numer)
+            ffprobe_path: Ścieżka do ffprobe
+            ignore_short: Czy ignorować krótkie napisy
+            
+        Returns:
+            dict: Słownik z wynikami weryfikacji
+        """
+        from app.entity import Line
+        
+        audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
+        ident_str = str(line_id)
+        
+        # Inicjalizacja wyniku
+        entry = {
+            'id': line_id,
+            'text': line.tts_text.strip() if line.tts_text else '',
+            'duration': 0.0,
+            'cps': 0.0,
+            'raw_status': 'PENDING',
+            'path': None,
+            'ext': '',
+            'display_status': 'PENDING'
+        }
+        
+        text_clean = line.tts_text.strip() if line.tts_text else ''
+        
+        # Jeśli brak tekstu, zwróć pusty wynik
+        if not text_clean:
+            entry['raw_status'] = 'EMPTY'
+            entry['display_status'] = 'EMPTY'
+            return entry
+        
+        # Szukanie pliku audio
+        audio_file = None
+        found_ext = ''
+        candidates = [
+            (audio_dir_p / f"output1 ({ident_str}).wav", 'wav'),
+            (audio_dir_p / f"output1 ({ident_str}).mp3", 'mp3'),
+            (audio_dir_p / 'ready' / f"output1 ({ident_str}).ogg", 'ogg'),
+            (audio_dir_p / 'ready' / f"output1 ({ident_str}).mp3", 'mp3')
+        ]
+        
+        for p, ext in candidates:
+            if p.exists():
+                audio_file = p
+                found_ext = ext
+                break
+        
+        # Jeśli plik nie istnieje
+        if not audio_file:
+            entry['raw_status'] = 'MISSING'
+            entry['display_status'] = 'MISSING'
+            return entry
+        
+        entry['path'] = str(audio_file)
+        entry['ext'] = found_ext
+        
+        # Pobieranie długości audio
+        duration = VerificationManager._get_audio_duration(audio_file, found_ext, ffprobe_path)
+        
+        if duration < 0:
+            entry['duration'] = duration
+            entry['raw_status'] = 'ERROR'
+            entry['display_status'] = 'ERROR'
+            return entry
+        
+        if duration == 0:
+            entry['duration'] = 0.0
+            entry['raw_status'] = 'EMPTY'
+            entry['display_status'] = 'EMPTY'
+            return entry
+        
+        entry['duration'] = duration
+        
+        # Obliczenie CPS
+        stats = Counter(text_clean.strip('.?!'))
+        short = stats[','] + stats['-']
+        long = stats['.'] + stats['!'] + stats['?']
+        pauses = (short * 0.4) + (long * 0.6)
+        
+        try:
+            cps = len(text_clean) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+        except:
+            cps = 0.0
+        
+        entry['cps'] = cps
+        entry['raw_status'] = 'OK'
+        
+        # Określenie status wyświetlania
+        if ignore_short and len(text_clean) < 5:
+            entry['display_status'] = 'SHORT'
+        else:
+            min_cps = 7.0
+            max_cps = 20.0
+            if cps < min_cps:
+                entry['display_status'] = f"ZA WOLNO (<{min_cps:.1f})"
+            elif cps > max_cps:
+                entry['display_status'] = f"ZA SZYBKO (>{max_cps:.1f})"
+            else:
+                entry['display_status'] = 'OK'
+        
+        return entry
+
+    @staticmethod
+    def _get_audio_duration(file_path: Path, ext: str, ffprobe_path: Optional[str] = None) -> float:
+        """
+        Pobiera długość pliku audio.
+        
+        Returns:
+            float: Długość w sekundach, -1.0 jeśli błąd, 0.0 jeśli plik pusty
+        """
+        file_path = str(file_path)
+        
+        # Próba z mutagen dla MP3
+        if ext == 'mp3' and MUTAGEN_AVAILABLE:
+            try:
+                duration = MP3(file_path).info.length
+                return duration
+            except Exception:
+                pass
+        
+        # Próba z ffprobe
+        if ffprobe_path and os.path.exists(ffprobe_path):
+            try:
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+                cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
+                       "-of", "default=noprint_wrappers=1:nokey=1", file_path]
+                
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                    startupinfo=startupinfo, timeout=10)
+                
+                if res.returncode == 0 and res.stdout.strip():
+                    duration = float(res.stdout.strip())
+                    return duration
+                else:
+                    return -1.0
+            except Exception:
+                return -1.0
+        
+        return -1.0
+
+    @staticmethod
+    def verify_similarity(line, audio_path: str) -> dict:
+        """
+        Weryfikuje similarity poprzez speech-to-text.
+        Konwertuje audio do tekstu za pomocą Whisper i porównuje z oryginalnym tekstem.
+        
+        Args:
+            line: Obiekt Line do weryfikacji
+            audio_path: Ścieżka do pliku audio
+            
+        Returns:
+            dict: Słownik z wynikami {'similarity': float, 'transcribed_text': str, 'success': bool}
+        """
+        result = {
+            'similarity': 0.0,
+            'transcribed_text': '',
+            'success': False,
+            'error': None
+        }
+        
+        # Jeśli brak bibliotek
+        if not WHISPER_AVAILABLE or not RAPIDFUZZ_AVAILABLE:
+            error_msg = 'Brak bibliotek do weryfikacji similarity'
+            result['error'] = error_msg
+            return result
+        
+        audio_path = str(audio_path)
+        if not os.path.exists(audio_path):
+            error_msg = f'Plik audio nie istnieje: {audio_path}'
+            result['error'] = error_msg
+            return result
+        
+        # Konwersja audio do tekstu
+        try:
+            model = whisper.load_model("base", device="gpu")
+            transcription_result = model.transcribe(audio_path, language="pl")
+            transcribed_text = transcription_result.get("text", "").strip()
+        except Exception as e:
+            error_msg = f'Błąd transcripcji: {str(e)}'
+            result['error'] = error_msg
+            return result
+        
+        # Porównanie z oryginalnym tekstem
+        try:
+            original_text = line.original_text.strip()
+            tts_text = line.tts_text.strip()
+            
+            # Porównanie z oryginalnym tekstem - token sort ratio jest bardziej tolerancyjny
+            similarity = fuzz.token_sort_ratio(transcribed_text, original_text) / 100.0
+            
+            result['similarity'] = similarity
+            result['transcribed_text'] = transcribed_text
+            result['success'] = True
+            
+        except Exception as e:
+            error_msg = f'Błąd porównania: {str(e)}'
+            result['error'] = error_msg
+            return result
+        
+        return result
+
+    @staticmethod
+    def apply_similarity_to_line(line: Line, audio_path: str) -> Line:
+        """
+        Weryfikuje similarity i aktualizuje obiekt Line.
+        
+        Args:
+            line: Obiekt Line do aktualizacji
+            audio_path: Ścieżka do pliku audio
+            
+        Returns:
+            Line: Zmodyfikowany obiekt Line
+        """
+        try:
+            result = VerificationManager.verify_similarity(line, audio_path)
+            
+            if result.get('success'):
+                line.audio_similarity = result.get('similarity', 0.0)
+            else:
+                line.audio_similarity = 0.0
+            
+            return line
+        except Exception:
+            return line
 
     def add_job(self, job: VerificationJob):
         self.job_queue.put(job)
@@ -145,94 +406,77 @@ class VerificationManager:
             except Exception:
                 pass
 
+    @staticmethod
+    def save_verification_results_to_csv(results: List[dict], csv_path: str) -> bool:
+        """
+        Zapisuje wyniki weryfikacji do pliku CSV.
+        
+        Args:
+            results: Lista słowników z wynikami
+            csv_path: Ścieżka do pliku CSV
+            
+        Returns:
+            bool: True jeśli sukces
+        """
+        try:
+            csv_path = Path(csv_path)
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            if not results:
+                return False
+            
+            fieldnames = ['id', 'text', 'duration', 'cps', 'raw_status', 'path', 'ext', 'display_status', 'similarity']
+            
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for result in results:
+                    row = {field: result.get(field, '') for field in fieldnames}
+                    writer.writerow(row)
+            
+            return True
+        except Exception:
+            return False
 
-# --- worker entry (copied from prior implementation) ---
+
+# --- worker entry (updated to use verify_line static method) ---
 def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1):
+    """
+    Pracownik procesu do weryfikacji audio.
+    Zapisuje wyniki do JSON.
+    """
     import json
-    import subprocess
     from pathlib import Path
-    from collections import Counter
-
-    audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
+    from app.entity import Line
+    
     results = {}
-
+    
     def write_atomic(dct):
         tmp = Path(out_file + '.tmp')
         with open(tmp, 'w', encoding='utf-8') as tf:
             json.dump(dct, tf, ensure_ascii=False)
         tmp.replace(out_file)
-
+    
     for i, text in enumerate(lines_texts):
         if total_workers and (i % total_workers) != worker_idx:
             continue
+        
         ident = str(i + 1)
-        tts = (text or '').strip()
-        entry = {'id': i+1, 'text': tts, 'duration': 0.0, 'cps': 0.0, 'raw_status': 'PENDING', 'path': None, 'ext': '', 'display_status': 'PENDING'}
-        if not tts:
-            results[ident] = entry
-            write_atomic(results)
-            continue
-
-        audio_file = None
-        found_ext = ''
-        candidates = [
-            (audio_dir_p / f"output1 ({ident}).wav", 'wav'),
-            (audio_dir_p / f"output1 ({ident}).mp3", 'mp3'),
-            (audio_dir_p / 'ready' / f"output1 ({ident}).ogg", 'ogg'),
-            (audio_dir_p / 'ready' / f"output1 ({ident}).mp3", 'mp3')
-        ]
-        for p, ext in candidates:
-            if p.exists():
-                audio_file = p
-                found_ext = ext
-                break
-
-        duration = 0.0
-        if audio_file and ffprobe_path:
-            try:
-                res = subprocess.run([ffprobe_path, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(audio_file)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                if res.returncode == 0 and res.stdout.strip():
-                    duration = float(res.stdout.strip())
-                else:
-                    duration = -1.0
-            except Exception:
-                duration = -1.0
-
-        raw_status = 'OK'
-        cps = 0.0
-        if not audio_file:
-            raw_status = 'MISSING'
-        elif duration < 0:
-            raw_status = 'ERROR'
-        elif duration == 0:
-            raw_status = 'EMPTY'
-        else:
-            stats = Counter(tts.strip('.?!'))
-            short = stats[','] + stats['-']
-            long = stats['.'] + stats['!'] + stats['?']
-            pauses = (short * 0.4) + (long * 0.6)
-            try:
-                cps = len(tts) / (duration - pauses)
-            except Exception:
-                cps = 0.0
-
-        entry.update({'duration': duration, 'cps': cps, 'raw_status': raw_status, 'path': str(audio_file) if audio_file else None, 'ext': found_ext})
-
-        if raw_status != 'OK':
-            entry['display_status'] = raw_status
-        else:
-            if ignore_short and len(tts) < 5:
-                entry['display_status'] = 'SHORT'
-            else:
-                min_cps = 7.0
-                max_cps = 20.0
-                if cps < min_cps:
-                    entry['display_status'] = f"ZA WOLNO (<{min_cps:.1f})"
-                elif cps > max_cps:
-                    entry['display_status'] = f"ZA SZYBKO (>{max_cps:.1f})"
-                else:
-                    entry['display_status'] = 'OK'
-
-        results[ident] = entry
+        
+        # Tworzenie obiektu Line
+        line = Line(original_text=text, text=text, tts_text=text.strip())
+        
+        # Weryfikacja linii
+        result = VerificationManager.verify_line(
+            line=line,
+            audio_dir=audio_dir,
+            line_id=i + 1,
+            ffprobe_path=ffprobe_path if ffprobe_path else None,
+            ignore_short=ignore_short
+        )
+        
+        results[ident] = result
         write_atomic(results)
+    
     write_atomic(results)

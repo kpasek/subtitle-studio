@@ -33,7 +33,6 @@ from audio.generation_queue import GenerationQueueWindow
 from ui.game_reader_export import GameReaderExportWindow
 from ui.pattern_io import PatternIOWindow
 from ui.names_manager import NamesManagerWindow
-from ui.audio_verification import AudioVerificationWindow
 
 from importlib import util as _import_util
 
@@ -174,21 +173,6 @@ class SubtitleStudioApp(ctk.CTk):
         if last_proj and os.path.exists(last_proj):
             # Używamy 'after', aby pozwolić GUI na pełną inicjalizację przed wczytaniem ciężkiego projektu
             self.after(100, lambda: self.open_project(last_proj))
-
-        if hasattr(self, 'subtitle_panel'):
-            pass  # No editor binding needed anymore
-
-    def open_verification_window(self):
-        try:
-            from ui.verification_window import VerificationWindow
-        except Exception:
-            return
-        # Show non-modal verification control window
-        try:
-            VerificationWindow(self)
-        except Exception:
-            pass
-
 
     def _bind_shortcuts(self):
         """Rejestruje globalne skróty klawiszowe."""
@@ -832,19 +816,6 @@ class SubtitleStudioApp(ctk.CTk):
     def _add_selected_text_to_names(self):
         from app.ui_helpers import add_selected_text_to_names as _add_selected_text_to_names
         return _add_selected_text_to_names(self)
-
-    def open_audio_verification(self):
-        if not self.audio_dir:
-            messagebox.showwarning("Brak audio", "Najpierw wybierz katalog audio.", parent=self)
-            return
-
-
-        if not self.lines:
-            messagebox.showwarning("Brak tekstu", "Brak napisów do weryfikacji.", parent=self)
-            return
-
-        # Zachowujemy dotychczasową możliwość otwarcia dedykowanego okna
-        AudioVerificationWindow(self, self.audio_dir, self.lines)
 
     # --- Proxy methods for integrated verification menu ---
     def start_verification(self):

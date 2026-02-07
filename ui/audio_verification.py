@@ -1,31 +1,21 @@
-from collections import Counter
+import json
+import os
+import shutil
+import subprocess
+import threading
+from pathlib import Path
+from tkinter import ttk, messagebox
 from typing import List
 
 import customtkinter as ctk
-import os
-import subprocess
-import threading
-import time
-import shutil
-import json
-from pathlib import Path
-from tkinter import ttk, messagebox
 
 from app.entity import Line
+from audio.verification_manager import VerificationManager, MUTAGEN_AVAILABLE
 
-# Próba importu okna do naprawy nazw plików (AudioRenameWindow)
 try:
     from audio.audio_renamer import AudioRenameWindow
 except ImportError:
     AudioRenameWindow = None
-
-# Próba importu mutagen dla MP3
-try:
-    from mutagen.mp3 import MP3
-
-    MUTAGEN_AVAILABLE = True
-except ImportError:
-    MUTAGEN_AVAILABLE = False
 
 
 class AudioVerificationWindow(ctk.CTkToplevel):
@@ -313,11 +303,8 @@ class AudioVerificationWindow(ctk.CTkToplevel):
     def on_close(self):
         self.stop_analysis()
         self.stop_audio()
-        self.destroy()
-
-    # --- Worker Analizy ---
-
-    def _analysis_worker(self, force_refresh, stop_on_error, auto_sync, ignore_short):
+        # self.destroy(resh, stop_on_error, auto_sync, ignore_short):
+        """Worker thread do weryfikacji audio."""
         if force_refresh:
             self.cache_data = {}
 
@@ -328,24 +315,13 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         stopped_on_error_flag = False
 
         if not self.analysis_results:
-            for i, line in enumerate(self.subtitles):
-                self.analysis_results.append({
-                    "id": i + 1,
-                    "text": line.tts_text,
-                    "duration": 0.0,
-                    "cps": 0.0,
-                    "raw_status": "PENDING",
-                    "path": None,
-                    "ext": ""
-                })
+            self.analysis_results = []
 
         new_cache_data = self.cache_data.copy()
 
         for i, line in enumerate(self.subtitles):
             if self.stop_event.is_set():
                 break
-
-            ident_str = str(i + 1)
 
             if (i in self.processed_indices) and not force_refresh:
                 processed_count += 1
@@ -356,72 +332,58 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                 processed_count += 1
                 continue
 
-            # Szukanie plików
-            audio_file = None
-            found_ext = ""
-            paths_to_check = [
-                (self.audio_dir / f"output1 ({ident_str}).wav", "wav"),
-                (self.audio_dir / f"output1 ({ident_str}).mp3", "mp3"),
-                (self.audio_dir / "ready" / f"output1 ({ident_str}).ogg", "ogg"),
-                (self.audio_dir / "ready" / f"output1 ({ident_str}).mp3", "mp3")
-            ]
+            result = VerificationManager.verify_line(
+                line=line,
+                audio_dir=str(self.audio_dir),
+                line_id=i + 1,
+                ffprobe_path=self.ffprobe_path,
+                ignore_short=ignore_short
+            )
 
-            for p, ext in paths_to_check:
-                if p.exists():
-                    audio_file = p
-                    found_ext = ext
-                    break
-
-            duration = 0.0
-            error_msg = None
-            cache_hit = False
-
-            if not force_refresh and ident_str in self.cache_data:
-                entry = self.cache_data[ident_str]
-                if entry.get("text") == text_clean and entry.get("path") and os.path.exists(entry["path"]):
-                    duration = entry["duration"]
-                    error_msg = entry.get("error")
-                    audio_file = Path(entry["path"])
-                    found_ext = entry.get("ext", "")
-                    cache_hit = True
-
-            if not cache_hit and audio_file:
-                duration, error_msg = self.get_audio_duration(audio_file, found_ext)
-                if duration > 0:
-                    new_cache_data[ident_str] = {
-                        "text": text_clean, "duration": duration,
-                        "path": str(audio_file), "ext": found_ext, "error": None
-                    }
-
-            raw_status = "OK"
-            cps = 0.0
-
-            if not audio_file:
-                raw_status = "MISSING"
-            elif duration < 0:
-                raw_status = "ERROR"
-                self.error_details[ident_str] = f"Błąd: {error_msg}"
-            elif duration == 0:
-                raw_status = "EMPTY"
+            if i < len(self.analysis_results):
+                self.analysis_results[i] = result
             else:
-                stats = Counter(text_clean.strip('.?!'))
+                self.analysis_results.append(result)
 
-                short = stats[','] + stats['-']
-                long = stats['.'] + stats['!'] + stats['?']
+            if result.get("raw_status") == "OK" and result.get("duration", 0) > 0:
+                new_cache_data[str(i+1)] = {
+                    "text": result["text"],
+                    "duration": result["duration"],
+                    "path": result["path"],
+                    "ext": result["ext"],
+                    "cps": result["cps"],
+                    "raw_status": result["raw_status"]
+                }
 
-                pauses = (short * 0.4) + (long * 0.6)
+            # similarity
+            if result.get("path") and result.get("raw_status") == "OK":
+                try:
+                    line = VerificationManager.apply_similarity_to_line(line, result.get("path"))
+                    result['similarity'] = getattr(line, 'audio_similarity', 0.0)
+                except Exception:
+                    result['similarity'] = 0.0
 
-                cps = len(text_clean) / (duration - pauses)
+            raw_status = result.get("raw_status", "UNKNOWN")
+            cps = result.get("cps", 0.0)
+
+            if raw_status == "OK" and cps > 0:
                 valid_files_cps_sum += cps
                 valid_files_count += 1
 
-            self.analysis_results[i].update({
-                "duration": duration,
-                "cps": cps,
-                "raw_status": raw_status,
-                "path": audio_file,
-                "ext": found_ext
-            })
+            should_stop = False
+
+            if raw_status in ["ERROR", "EMPTY"]:
+                should_stop = True
+
+            elif raw_status == "OK":
+                is_short_ignored = (ignore_short and len(result["text"]) < 5)
+                if not is_short_ignored:
+                    if cps < self.scan_min_cps or cps > self.scan_max_cps:
+                        should_stop = True
+
+            if stop_on_error and should_stop:
+                stopped_on_error_flag = True
+                break
 
             self.processed_indices.add(i)
             processed_count += 1
@@ -429,29 +391,6 @@ class AudioVerificationWindow(ctk.CTkToplevel):
             if auto_sync and valid_files_count == 20:
                 avg = valid_files_cps_sum / 20
                 self.app.after(0, lambda a=avg: self._auto_adjust_thresholds(a))
-
-            # --- Sprawdzenie warunków zatrzymania (ERROR, EMPTY, CPS Limits) ---
-            should_stop = False
-            stop_reason = ""
-
-            if raw_status in ["ERROR", "EMPTY"]:
-                should_stop = True
-                stop_reason = f"Plik {ident_str}: {raw_status} ({error_msg or 'Pusty'})"
-
-            # Sprawdzenie CPS (tylko jeśli status pliku jest OK)
-            elif raw_status == "OK":
-                is_short_ignored = (ignore_short and len(text_clean) < 5)
-                if not is_short_ignored:
-                    if cps < self.scan_min_cps:
-                        should_stop = True
-                        stop_reason = f"Plik {ident_str}: ZA WOLNO ({cps:.1f} CPS < {self.scan_min_cps:.1f})"
-                    elif cps > self.scan_max_cps:
-                        should_stop = True
-                        stop_reason = f"Plik {ident_str}: ZA SZYBKO ({cps:.1f} CPS > {self.scan_max_cps:.1f})"
-
-            if stop_on_error and should_stop:
-                stopped_on_error_flag = True
-                break
 
             if processed_count % 10 == 0:
                 self.app.after(0, lambda p=processed_count / total_lines: self.progress_bar.set(p))
@@ -462,6 +401,8 @@ class AudioVerificationWindow(ctk.CTkToplevel):
 
         self.cache_data = new_cache_data
         self._save_cache()
+        if self.analysis_results:
+            self._save_verification_results()
         self.app.after(0, lambda: self._finalize_ui(processed_count, stopped_on_error_flag))
 
     def _finalize_ui(self, count, stopped_on_error=False):
@@ -485,37 +426,27 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         self.slider_max_cps.set(new_max)
         self.on_slider_change(None)
 
-    def get_audio_duration(self, file_path, ext):
-        file_path = str(file_path)
-        if ext == 'mp3' and MUTAGEN_AVAILABLE:
-            try:
-                return MP3(file_path).info.length, None
-            except:
-                pass
-
-        if self.ffprobe_path:
-            try:
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                
-                cmd = [self.ffprobe_path, "-v", "error", "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1", file_path]
-                
-                # Parametr startupinfo=None jest ignorowany na Linuxie
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                 startupinfo=startupinfo)
-                if res.returncode == 0 and res.stdout.strip():
-                    return float(res.stdout.strip()), None
-                return -1.0, res.stderr
-            except Exception as e:
-                return -1.0, str(e)
-        return -1.0, "Brak ffprobe"
+    def _save_verification_results(self):
+        """Zapisuje wyniki weryfikacji do CSV."""
+        try:
+            if not self.app.loaded_path:
+                return
+            
+            csv_path = self.app.loaded_path.with_name(
+                self.app.loaded_path.stem + "_verification.csv"
+            )
+            
+            VerificationManager.save_verification_results_to_csv(
+                self.analysis_results, 
+                str(csv_path)
+            )
+        except Exception as e:
+            print(f"Błąd przy zapisywaniu wyniku weryfikacji: {e}")
 
     # --- Lista i Filtrowanie ---
 
     def refresh_list_view(self, *args):
+        """Odświeża widok listy wyników weryfikacji."""
         for item in self.tree.get_children():
             self.tree.delete(item)
 
@@ -529,7 +460,8 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         suspicious_count = 0
 
         for item in self.analysis_results:
-            if item["raw_status"] == "PENDING": continue
+            if item["raw_status"] == "PENDING":
+                continue
 
             if hide_missing and item["raw_status"] == "MISSING":
                 continue

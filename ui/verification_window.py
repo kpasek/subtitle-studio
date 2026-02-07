@@ -3,6 +3,9 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import time
+from pathlib import Path
+
+from audio.verification_manager import VerificationManager
 
 class VerificationWindow(ctk.CTkToplevel):
     """Window with Start / Stop / Ignore cache and progress bar for verification."""
@@ -47,13 +50,57 @@ class VerificationWindow(ctk.CTkToplevel):
     def _on_start(self):
         if not self.subtitle_panel:
             return
-        # start verification in background thread to be safe
-        def run_start():
+        # start verification in background thread (local implementation)
+        def run_verification():
             try:
-                self.subtitle_panel.start_verification(force_refresh=self.force_refresh.get())
+                panel = self.subtitle_panel
+                # initialize state
+                panel.ver_running = True
+                panel.ver_stop_event.clear()
+                force = self.force_refresh.get()
+
+                if force:
+                    panel.ver_analysis_results = []
+                    panel.ver_processed_indices = set()
+                    panel.ver_cache = {}
+
+                lines = getattr(self.master_app, 'lines', [])
+                total = len(lines)
+                panel.ver_analysis_results = [{} for _ in range(total)]
+
+                for i, line in enumerate(lines):
+                    if panel.ver_stop_event.is_set():
+                        break
+
+                    # perform verification
+                    res = VerificationManager.verify_line(
+                        line=line,
+                        audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
+                        line_id=i+1,
+                        ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
+                        ignore_short=False
+                    )
+
+                    # if OK, attempt similarity
+                    if res.get('path') and res.get('raw_status') == 'OK':
+                        try:
+                            line = VerificationManager.apply_similarity_to_line(line, res.get('path'))
+                            res['similarity'] = getattr(line, 'audio_similarity', 0.0)
+                        except Exception:
+                            res['similarity'] = 0.0
+
+                    # store result and mark processed
+                    panel.ver_analysis_results[i] = res
+                    panel.ver_processed_indices.add(i)
+
+                panel.ver_running = False
             except Exception:
-                pass
-        threading.Thread(target=run_start, daemon=True).start()
+                try:
+                    panel.ver_running = False
+                except Exception:
+                    pass
+
+        threading.Thread(target=run_verification, daemon=True).start()
         self._running = True
         self._start_poll()
 
@@ -61,7 +108,8 @@ class VerificationWindow(ctk.CTkToplevel):
         if not self.subtitle_panel:
             return
         try:
-            self.subtitle_panel.stop_verification()
+            self.subtitle_panel.ver_stop_event.set()
+            self.subtitle_panel.ver_running = False
         except Exception:
             pass
         self._running = False
