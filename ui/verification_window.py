@@ -88,6 +88,10 @@ class VerificationWindow(ctk.CTkToplevel):
                 total = len(lines)
                 panel.ver_analysis_results = [{} for _ in range(total)]
 
+                # Counter for UI refresh throttling (update every 20 files)
+                update_counter = 0
+                update_interval = 20
+
                 for i, line in enumerate(lines):
                     if panel.ver_stop_event.is_set():
                         break
@@ -166,6 +170,16 @@ class VerificationWindow(ctk.CTkToplevel):
                     except Exception:
                         pass
 
+                    # Update UI every 20 files to reduce rapid status updates
+                    update_counter += 1
+                    if update_counter >= update_interval:
+                        update_counter = 0
+                        # Force a UI update by calling _poll
+                        try:
+                            self.master_app.after(0, self._poll)
+                        except Exception:
+                            pass
+
                 panel.ver_running = False
 
                 # results persisted per-line into the original CSV during processing
@@ -221,7 +235,8 @@ class VerificationWindow(ctk.CTkToplevel):
             self.status_label.configure(text=st)
         except Exception:
             pass
-        self._poll_job = self.after(500, self._poll)
+        # Update UI every 1 second instead of 500ms to reduce rapid status updates
+        self._poll_job = self.after(1000, self._poll)
 
     def destroy(self):
         self._stop_poll()

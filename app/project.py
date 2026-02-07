@@ -25,8 +25,6 @@ def open_project(app, path: Optional[str] = None):
 
         _update_recent_projects(app, str(app.current_project_path))
 
-        app.names_list = cfg.get("names_list", [])
-
         all_vars = app.builtin_remove_state + app.builtin_replace_state
         traces = {}
         for var in all_vars:
@@ -63,7 +61,8 @@ def open_project(app, path: Optional[str] = None):
                 except Exception:
                     pass
         
-            except Exception:
+            except Exception as e:
+                print(f"Błąd wczytywania napisów z projektu: {e}")
                 app.lines = []
         else:
             app.lines = []
