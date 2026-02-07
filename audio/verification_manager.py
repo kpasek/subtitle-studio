@@ -8,6 +8,7 @@ import json
 import multiprocessing
 import subprocess
 import csv
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List, Dict, Any
@@ -49,6 +50,7 @@ class VerificationJob:
 class VerificationManager:
     _instance = None
     _lock = threading.Lock()
+    _whisper_model = None  # Cache dla modelu Whisper
 
     def __new__(cls):
         if cls._instance is None:
@@ -231,6 +233,63 @@ class VerificationManager:
         return -1.0
 
     @staticmethod
+    def _get_whisper_model():
+        """Załaduj model Whisper z cache'iem - aby nie ładować za każdym razem."""
+        if VerificationManager._whisper_model is None:
+            print(f"[INFO] Ładuję model Whisper (po raz pierwszy)...")
+            try:
+                # Sprawdź czy CUDA jest dostępne
+                import torch
+                if torch.cuda.is_available():
+                    print(f"[INFO] CUDA dostępne, próbuję załadować na GPU...")
+                    try:
+                        VerificationManager._whisper_model = whisper.load_model("base", device="cuda")
+                        print(f"[INFO] Model załadowany na GPU (CUDA)")
+                    except Exception as cuda_err:
+                        print(f"[WARNING] Błąd ładowania na CUDA: {cuda_err}")
+                        print(f"[INFO] Załaduję na CPU zamiast...")
+                        VerificationManager._whisper_model = whisper.load_model("base", device="cpu")
+                        print(f"[INFO] Model załadowany na CPU")
+                else:
+                    print(f"[INFO] CUDA niedostępne, załaduję na CPU...")
+                    VerificationManager._whisper_model = whisper.load_model("base", device="cpu")
+                    print(f"[INFO] Model załadowany na CPU")
+            except Exception as e:
+                print(f"[ERROR] Nie mogę załadować modelu Whisper: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+        return VerificationManager._whisper_model
+
+    @staticmethod
+    def _clean_non_latin_chars(text: str) -> str:
+        """
+        Usuwa znaki spoza alfabetu łacińskiego i polskiego.
+        Zachowuje: litery (A-Z, a-z), znaki polskie (ąćęłńóśźż), spacje i znaki interpunkcyjne.
+        Usuwa: znaki chińskie, cyrylice, hieroglify, itp.
+        """
+        import re
+        # Zachowaj tylko znaki łacińskie (ASCII), polskie i spacje
+        # \w w unicode daje literki ale też cyfry i _
+        # Będziemy bardziej selektywni: ASCII (a-z, A-Z, 0-9) + znaki polskie + spacje + znaki interpunkcyjne
+        
+        # Znaki polskie: ąćęłńóśźż (małe) i ĄĆĘŁŃÓŚŹŻ (duże)
+        allowed_pattern = r"[a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s.,!?\-;:\'\"]"
+        
+        # Zachowaj tylko znaki z allowed_pattern
+        cleaned = ''.join(char for char in text if re.match(allowed_pattern, char, re.UNICODE))
+        
+        # Usuń wielokrotne spacje
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        if cleaned != text:
+            print(f"[INFO] Oczyszczenie tekstu z obcych znaków:")
+            print(f"  Przed: {repr(text)}")
+            print(f"  Po:    {repr(cleaned)}")
+        
+        return cleaned
+
+    @staticmethod
     def verify_similarity(line, audio_path: str) -> dict:
         """
         Weryfikuje similarity poprzez speech-to-text.
@@ -260,16 +319,66 @@ class VerificationManager:
         if not os.path.exists(audio_path):
             error_msg = f'Plik audio nie istnieje: {audio_path}'
             result['error'] = error_msg
+            print(f"[ERROR] {error_msg}")
+            return result
+        
+        # Sprawdzenie rozmiaru pliku
+        file_size = os.path.getsize(audio_path)
+        print(f"[DEBUG] Plik audio: {audio_path}, rozmiar={file_size} bajtów")
+        
+        if file_size < 1000:
+            error_msg = f'Plik audio zbyt mały: {file_size} bajtów'
+            result['error'] = error_msg
+            print(f"[WARNING] {error_msg}")
             return result
         
         # Konwersja audio do tekstu
         try:
-            model = whisper.load_model("base", device="gpu")
-            transcription_result = model.transcribe(audio_path, language="pl")
-            transcribed_text = transcription_result.get("text", "").strip()
+            model = VerificationManager._get_whisper_model()
+            
+            print(f"[INFO] Transkrybuję: {audio_path}")
+            
+            # Sprawdzenie czy model jest na CPU, jeśli tak wyłącz FP16
+            import torch
+            fp16 = True
+            try:
+                if next(model.parameters()).device.type == 'cpu':
+                    fp16 = False
+                    print(f"[INFO] Model na CPU - wyłączam FP16")
+            except:
+                pass
+            
+            # Wyłącz warningi z Whisper'a dla CPU
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*Performing inference on CPU.*")
+                warnings.filterwarnings("ignore", message=".*FP16 is not supported on CPU.*")
+                
+                transcription_result = model.transcribe(audio_path, language="pl", fp16=fp16)
+                transcribed_text = transcription_result.get("text", "").strip()
+            
+            # Usuń znaki spoza alfabetu łacińskiego i polskiego
+            transcribed_text = VerificationManager._clean_non_latin_chars(transcribed_text)
+            print(f"[DEBUG] Pełny wynik Whisper: {transcription_result}")
+            print(f"[DEBUG] Transkrybowany tekst (PL): {repr(transcribed_text)}")
+            
+            # Fallback jeśli brak tekstu z language="pl"
+            if not transcribed_text:
+                print(f"[WARNING] Transkrypcja z language='pl' zwróciła pusty tekst, próbuję bez language...")
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message=".*Performing inference on CPU.*")
+                    warnings.filterwarnings("ignore", message=".*FP16 is not supported on CPU.*")
+                    
+                    transcription_result = model.transcribe(audio_path, fp16=fp16)
+                    transcribed_text = transcription_result.get("text", "").strip()
+                    transcribed_text = VerificationManager._clean_non_latin_chars(transcribed_text)
+                
+                print(f"[DEBUG] Transkrybowany tekst (AUTO): {repr(transcribed_text)}")
         except Exception as e:
             error_msg = f'Błąd transcripcji: {str(e)}'
             result['error'] = error_msg
+            print(f"[ERROR] {error_msg}")
+            import traceback
+            traceback.print_exc()
             return result
         
         # Porównanie z oryginalnym tekstem
@@ -277,14 +386,30 @@ class VerificationManager:
             original_text = line.original_text.strip()
             tts_text = line.tts_text.strip()
             
+            # Oczyszczenie tekstów - usunięcie znaków specjalnych, średniki, etc.
+            import re
+            def clean_text(text):
+                # Usunięcie znaków specjalnych oprócz spacji, zachowanie tylko liter, cyfr i spacji
+                text = re.sub(r'[^\w\s]', ' ', text, flags=re.UNICODE)
+                # Zamiana wielkich spacji na pojedynczą
+                text = re.sub(r'\s+', ' ', text)
+                return text.strip()
+            
+            cleaned_transcribed = clean_text(transcribed_text)
+            cleaned_tts = clean_text(tts_text)
+            
             # Porównanie z tekstem do TTS - token sort ratio jest bardziej tolerancyjny
-            # Porównujemy transcribed_text z tts_text (to co powinno być wypowiadane)
-            similarity = fuzz.token_sort_ratio(transcribed_text, tts_text) / 100.0
+            # Porównujemy oczyszczone teksty (tylko słowa, bez znaków specjalnych)
+            similarity = fuzz.token_sort_ratio(cleaned_transcribed, cleaned_tts) / 100.0
             
             result['similarity'] = similarity
             result['transcribed_text'] = transcribed_text
             result['success'] = True
-            print(f"[DEBUG] verify_similarity: transcribed_text = {repr(transcribed_text)}, similarity = {similarity:.2%}")
+            print(f"[DEBUG] verify_similarity:")
+            print(f"  Oryginalny transkrybowany: {repr(transcribed_text)}")
+            print(f"  Oczyszczony transkrybowany: {repr(cleaned_transcribed)}")
+            print(f"  Oczyszczony TTS: {repr(cleaned_tts)}")
+            print(f"  Similarity: {similarity:.2%}")
             
         except Exception as e:
             error_msg = f'Błąd porównania: {str(e)}'

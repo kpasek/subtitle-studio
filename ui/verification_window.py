@@ -100,43 +100,40 @@ class VerificationWindow(ctk.CTkToplevel):
                     force = self.force_refresh.get()
                     has_audio_filename = getattr(line, 'audio_filename', '')
                     has_transcribed_text = getattr(line, 'audio_transcribed_text', '')
-                    should_skip = not force and (has_audio_filename or has_transcribed_text)
                     
-                    if should_skip:
-                        print(f"[SKIP] Linia {i+1}: audio_filename={repr(has_audio_filename)}, audio_transcribed_text={repr(has_transcribed_text)}")
+                    # Jeśli już ma transkrybowany tekst, całkowite pominięcie
+                    if not force and has_transcribed_text:
+                        print(f"[SKIP_FULL] Linia {i+1}: już zweryfikowana (audio_transcribed_text={repr(has_transcribed_text[:50])})")
+                        # Szybkie pominięcie - tylko skopiuj dane z Line
+                        res = {
+                            'id': i + 1,
+                            'text': line.tts_text or '',
+                            'duration': float(getattr(line, 'audio_duration', 0) or 0.0),
+                            'raw_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
+                            'path': str(Path(getattr(self.master_app, 'audio_dir', Path('.'))) / has_audio_filename) if has_audio_filename else None,
+                            'ext': getattr(line, 'audio_format', '') or (Path(has_audio_filename).suffix.lstrip('.') if has_audio_filename else ''),
+                            'display_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
+                            'similarity': getattr(line, 'audio_similarity', 0.0),
+                            'transcribed_text': has_transcribed_text
+                        }
+                    # Jeśli ma audio_filename ale brak transkrypcji, i similarity jest włączony - pominąć verify_line, ale zweryfikować similarity
+                    elif not force and has_audio_filename and self.verify_similarity_var.get():
+                        print(f"[SKIP_VERIFY_LINE] Linia {i+1}: ma audio, weryfikuję tylko similarity")
+                        # Pominąć verify_line ale bezpośrednio przejść do apply_similarity_to_line
+                        res = {
+                            'id': i + 1,
+                            'text': line.tts_text or '',
+                            'duration': float(getattr(line, 'audio_duration', 0) or 0.0),
+                            'raw_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
+                            'path': str(Path(getattr(self.master_app, 'audio_dir', Path('.'))) / has_audio_filename),
+                            'ext': getattr(line, 'audio_format', '') or Path(has_audio_filename).suffix.lstrip('.'),
+                            'display_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
+                            'similarity': 0.0,
+                            'transcribed_text': ''
+                        }
+                    # Pełna weryfikacja
                     else:
-                        print(f"[VERIFY] Linia {i+1}: potrzebuje weryfikacji (audio_filename={repr(has_audio_filename)}, audio_transcribed_text={repr(has_transcribed_text)})")
-                    
-                    if should_skip:
-                        # build result entry from existing Line data
-                        entry = {}
-                        entry['id'] = i + 1
-                        entry['text'] = line.tts_text or ''
-                        entry['duration'] = float(getattr(line, 'audio_duration', 0) or 0.0)
-                        # compute simple CPS if possible
-                        try:
-                            from collections import Counter
-                            txt = (line.tts_text or '').strip('.?!')
-                            stats = Counter(txt)
-                            short = stats[','] + stats['-']
-                            long = stats['.'] + stats['!'] + stats['?']
-                            pauses = (short * 0.4) + (long * 0.6)
-                            duration = entry['duration']
-                            cps = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
-                        except Exception:
-                            cps = 0.0
-                        entry['cps'] = cps
-                        entry['raw_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
-                        if getattr(line, 'audio_filename', ''):
-                            entry['path'] = str(Path(getattr(self.master_app, 'audio_dir', Path('.'))) / line.audio_filename)
-                        else:
-                            entry['path'] = None
-                        entry['ext'] = getattr(line, 'audio_format', '') or (Path(entry['path']).suffix.lstrip('.') if entry['path'] else '')
-                        entry['display_status'] = 'OK' if entry['duration'] > 0 else 'MISSING'
-                        entry['similarity'] = getattr(line, 'audio_similarity', 0.0)
-                        entry['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
-                        res = entry
-                    else:
+                        print(f"[VERIFY] Linia {i+1}: weryfikuję verify_line")
                         # perform verification (respect verify duration option)
                         res = VerificationManager.verify_line(
                             line=line,
