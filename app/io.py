@@ -89,10 +89,6 @@ def load_subtitle_file(path: str) -> List[Line]:
                 reader = csv.DictReader(f)
                 # Sprawdzenie jakie kolumny są w CSV
                 fieldnames = reader.fieldnames or []
-                print(f"[LOAD_CSV] Wczytywanie CSV: {path}")
-                print(f"[LOAD_CSV] Kolumny: {fieldnames}")
-                has_transcribed_col = 'audio_transcribed_text' in fieldnames
-                print(f"[LOAD_CSV] Ma kolumnę audio_transcribed_text: {has_transcribed_col}")
                 
                 row_count = 0
                 for row in reader:
@@ -115,12 +111,8 @@ def load_subtitle_file(path: str) -> List[Line]:
                         audio_transcribed_text=transcribed
                     )
                     out.append(l)
-                    
-                    # Log pierwszych 3 wierszy
-                    if row_count <= 3:
-                        print(f"[LOAD_CSV] Linia {row_count}: audio_transcribed_text={repr(transcribed[:30] if transcribed else '')}, audio_filename={repr(l.audio_filename)}")
                 
-                print(f"[LOAD_CSV] Wczytanych linii: {row_count}")
+                print(f"[LOAD_CSV] Wczytano {row_count} linii z CSV")
                 return out
         except UnicodeDecodeError:
             # fallback: read as latin-1 then return (we don't auto-rewrite here)
@@ -149,9 +141,6 @@ def load_subtitle_file(path: str) -> List[Line]:
                         audio_transcribed_text=transcribed
                     )
                     out.append(l)
-                    
-                    if row_count <= 3:
-                        print(f"[LOAD_CSV] Linia {row_count} (latin-1): audio_transcribed_text={repr(transcribed[:30] if transcribed else '')}")
                 
                 print(f"[LOAD_CSV] Wczytanych linii (latin-1): {row_count}")
             return out
@@ -167,15 +156,18 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
     - jeżeli dostaniesz listę str lub .txt -> zapis jako zwykły plik tekstowy (stare zachowanie)
     """
     p = Path(path)
+    
     if isinstance(lines, list) and lines and isinstance(lines[0], Line) or p.suffix.lower() == '.csv':
         # Zapis CSV
         with open(p, 'w', encoding='utf-8', newline='') as f:
             fieldnames = ['original_text', 'text', 'tts_text', 'audio_duration', 'audio_filename', 'audio_similarity', 'audio_format', 'audio_transcribed_text']
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
             writer.writeheader()
-            for item in lines:
+            
+            saved_count = 0
+            for idx, item in enumerate(lines):
                 if isinstance(item, Line):
-                    writer.writerow({
+                    row_dict = {
                         'original_text': item.original_text,
                         'text': item.text,
                         'tts_text': item.tts_text,
@@ -184,9 +176,13 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                         'audio_similarity': item.audio_similarity,
                         'audio_format': item.audio_format,
                         'audio_transcribed_text': getattr(item, 'audio_transcribed_text', '')
-                    })
+                    }
+                    writer.writerow(row_dict)
+                    saved_count += 1
                 else:
                     writer.writerow({'original_text': item, 'text': item, 'tts_text': item})
+            
+            print(f"[SAVE_CSV] Zapisano {saved_count} linii")
     else:
         # plain text save
         with open(p, 'w', encoding='utf-8') as f:

@@ -196,7 +196,8 @@ class SubtitleStudioApp(ctk.CTk):
 
         # Kontekstowe (Linia) - bindujemy do root, ale sprawdzamy kontekst w metodach
         self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())
-        self.bind("<Control-g>", lambda e: self.enqueue_generate_single())
+        self.bind("<Control-g>", lambda e: self.subtitle_panel.generate_selected_dialogs())
+        self.bind("<Control-v>", lambda e: self.subtitle_panel.verify_selected_dialogs())
 
         # Ctrl+X (Usuń audio) - uwaga na konflikt z wycinaniem tekstu
         self.bind("<Control-x>", self._on_ctrl_x)
@@ -281,7 +282,7 @@ class SubtitleStudioApp(ctk.CTk):
             return  # Nie blokuj zdarzenia, niech system zrobi "Cut"
 
         # W przeciwnym razie usuń audio
-        self.subtitle_panel.delete_all_selected_audio()
+        self.subtitle_panel.delete_selected_dialogs()
 
     def _on_escape_key(self, event=None):
         """

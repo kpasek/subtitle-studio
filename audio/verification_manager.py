@@ -188,6 +188,18 @@ class VerificationManager:
             else:
                 entry['display_status'] = 'OK'
         
+        # Weryfikacja similarity i transkrypcji via Whisper
+        entry['similarity'] = 0.0
+        entry['transcribed_text'] = ''
+        
+        try:
+            sim_result = VerificationManager.verify_similarity(line, audio_file)
+            if sim_result.get('success'):
+                entry['similarity'] = sim_result.get('similarity', 0.0)
+                entry['transcribed_text'] = sim_result.get('transcribed_text', '')
+        except Exception as e:
+            pass
+        
         return entry
 
     @staticmethod
@@ -311,32 +323,24 @@ class VerificationManager:
         
         # Jeśli brak bibliotek
         if not WHISPER_AVAILABLE or not RAPIDFUZZ_AVAILABLE:
-            error_msg = 'Brak bibliotek do weryfikacji similarity'
+            error_msg = 'Brak bibliotek (Whisper lub RapidFuzz)'
             result['error'] = error_msg
             return result
         
         audio_path = str(audio_path)
         if not os.path.exists(audio_path):
-            error_msg = f'Plik audio nie istnieje: {audio_path}'
-            result['error'] = error_msg
-            print(f"[ERROR] {error_msg}")
+            result['error'] = f'Plik audio nie istnieje'
             return result
         
         # Sprawdzenie rozmiaru pliku
         file_size = os.path.getsize(audio_path)
-        print(f"[DEBUG] Plik audio: {audio_path}, rozmiar={file_size} bajtów")
-        
         if file_size < 1000:
-            error_msg = f'Plik audio zbyt mały: {file_size} bajtów'
-            result['error'] = error_msg
-            print(f"[WARNING] {error_msg}")
+            result['error'] = f'Plik audio zbyt mały'
             return result
         
         # Konwersja audio do tekstu
         try:
             model = VerificationManager._get_whisper_model()
-            
-            print(f"[INFO] Transkrybuję: {audio_path}")
             
             # Sprawdzenie czy model jest na CPU, jeśli tak wyłącz FP16
             import torch
@@ -344,7 +348,6 @@ class VerificationManager:
             try:
                 if next(model.parameters()).device.type == 'cpu':
                     fp16 = False
-                    print(f"[INFO] Model na CPU - wyłączam FP16")
             except:
                 pass
             
@@ -358,12 +361,9 @@ class VerificationManager:
             
             # Usuń znaki spoza alfabetu łacińskiego i polskiego
             transcribed_text = VerificationManager._clean_non_latin_chars(transcribed_text)
-            print(f"[DEBUG] Pełny wynik Whisper: {transcription_result}")
-            print(f"[DEBUG] Transkrybowany tekst (PL): {repr(transcribed_text)}")
             
             # Fallback jeśli brak tekstu z language="pl"
             if not transcribed_text:
-                print(f"[WARNING] Transkrypcja z language='pl' zwróciła pusty tekst, próbuję bez language...")
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message=".*Performing inference on CPU.*")
                     warnings.filterwarnings("ignore", message=".*FP16 is not supported on CPU.*")
@@ -371,14 +371,8 @@ class VerificationManager:
                     transcription_result = model.transcribe(audio_path, fp16=fp16)
                     transcribed_text = transcription_result.get("text", "").strip()
                     transcribed_text = VerificationManager._clean_non_latin_chars(transcribed_text)
-                
-                print(f"[DEBUG] Transkrybowany tekst (AUTO): {repr(transcribed_text)}")
         except Exception as e:
-            error_msg = f'Błąd transcripcji: {str(e)}'
-            result['error'] = error_msg
-            print(f"[ERROR] {error_msg}")
-            import traceback
-            traceback.print_exc()
+            result['error'] = f'Błąd transkrypcji: {str(e)}'
             return result
         
         # Porównanie z oryginalnym tekstem
@@ -405,15 +399,9 @@ class VerificationManager:
             result['similarity'] = similarity
             result['transcribed_text'] = transcribed_text
             result['success'] = True
-            print(f"[DEBUG] verify_similarity:")
-            print(f"  Oryginalny transkrybowany: {repr(transcribed_text)}")
-            print(f"  Oczyszczony transkrybowany: {repr(cleaned_transcribed)}")
-            print(f"  Oczyszczony TTS: {repr(cleaned_tts)}")
-            print(f"  Similarity: {similarity:.2%}")
             
         except Exception as e:
-            error_msg = f'Błąd porównania: {str(e)}'
-            result['error'] = error_msg
+            result['error'] = f'Błąd porównania: {str(e)}'
             return result
         
         return result
