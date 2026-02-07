@@ -5,7 +5,7 @@ from tkinter import ttk
 import subprocess
 import os
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 from app.entity import Line
 from tkinter import messagebox
 import threading
@@ -37,16 +37,15 @@ class SubtitlePanel(ctk.CTkFrame):
         self.current_audio_process: Optional[subprocess.Popen] = None
         self._search_job = None
         self.selected_line_indices = []  # Lista zaznaczonych indeksów wierszy
+        self.item_line_map: Dict[str, Line] = {}
 
         # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
         self.columns_config = [
-            {"id": "line_nr", "text": "Nr", "width": 40, "anchor": "center"},
             {"id": "content", "text": "Tekst", "width": 500, "anchor": "w"},
-            {"id": "duration", "text": "Czas [s]", "width": 80, "anchor": "center"},
-            {"id": "cps", "text": "CPS", "width": 60, "anchor": "center"},
-            {"id": "similarity", "text": "Podobieństwo", "width": 120, "anchor": "center"},
-            {"id": "format", "text": "Format", "width": 60, "anchor": "center"},
-            {"id": "audio_file", "text": "Plik audio", "width": 200, "anchor": "w"},
+            {"id": "duration", "text": "Czas [s]", "width": 20, "anchor": "center"},
+            {"id": "cps", "text": "CPS", "width": 20, "anchor": "center"},
+            {"id": "similarity", "text": "Podobieństwo", "width": 40, "anchor": "center"},
+            {"id": "audio_file", "text": "Plik audio", "width": 100, "anchor": "w"},
         ]
 
         self.grid_rowconfigure(2, weight=1)
@@ -98,7 +97,7 @@ class SubtitlePanel(ctk.CTkFrame):
         audio_btn_frame = ctk.CTkFrame(self)
         audio_btn_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
 
-        audio_btn_frame.grid_columnconfigure(5, weight=1)
+        audio_btn_frame.grid_columnconfigure(4, weight=1)
 
         self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
                                              command=self.generate_selected_dialogs, state="disabled",
@@ -118,22 +117,16 @@ class SubtitlePanel(ctk.CTkFrame):
         # --- Pasek Wyszukiwania ---
         ctk.CTkLabel(audio_btn_frame, text="Szukaj").grid(row=0, column=3, padx=(15, 5))
 
-        self.search_line_nr = ctk.CTkEntry(audio_btn_frame, placeholder_text="Nr linii", width=80)
-        self.search_line_nr.grid(row=0, column=4, padx=(0, 5))
-
-        self.search_line_nr.bind("<KeyRelease>", self._schedule_jump_to_line)
-        self.search_line_nr.bind("<Return>", self._jump_to_line)
-
         # Pole do wyszukiwania tekstu
         self.search_entry = ctk.CTkEntry(audio_btn_frame, placeholder_text="Tekst")
-        self.search_entry.grid(row=0, column=5, sticky="ew")
+        self.search_entry.grid(row=0, column=4, sticky="ew")
         self.search_entry.bind("<Return>", lambda event: self.app.apply_patterns())
         self.search_entry.bind("<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
 
         self.search_button = ctk.CTkButton(audio_btn_frame, text="Szukaj", command=self.app.apply_patterns, width=60)
-        self.search_button.grid(row=0, column=6, padx=(6, 0))
+        self.search_button.grid(row=0, column=5, padx=(6, 0))
         self.filter_button = ctk.CTkButton(audio_btn_frame, text="Filtruj", command=self.open_filter_window, width=80)
-        self.filter_button.grid(row=0, column=7, padx=(6, 0))
+        self.filter_button.grid(row=0, column=6, padx=(6, 0))
 
         # --- Preview Table (Lista napisów jako Tabela) - Row 2 ---
         # Kontener dla tabeli i paska przewijania
@@ -197,43 +190,6 @@ class SubtitlePanel(ctk.CTkFrame):
         self.set_preview(self.app.lines)
         self.app.save_app_setting('last_view_mode', value)
 
-    def _schedule_jump_to_line(self, event=None):
-        """Opóźnia wywołanie skoku do linii (debounce), aby uniknąć migania."""
-        if self._search_job:
-            self.after_cancel(self._search_job)
-        self._search_job = self.after(200, self._jump_to_line)
-
-    def _jump_to_line(self, event=None):
-        """Przewija widok do wpisanego numeru linii i zaznacza ją w tabeli."""
-        val = self.search_line_nr.get().strip()
-        if not val.isdigit():
-            return
-
-        target_nr = int(val)
-
-        # Przeszukujemy elementy drzewa, aby znaleźć odpowiednią linię
-        found_item = None
-        for item_id in self.tree.get_children():
-            item_vals = self.tree.item(item_id, "values")
-            # Zakładamy, że kolumna z numerem linii jest pierwsza ("line_nr")
-            # item_vals[0] zawiera numer linii jako string
-            try:
-                if int(item_vals[0]) == target_nr:
-                    found_item = item_id
-                    break
-            except (ValueError, IndexError):
-                continue
-
-        if found_item:
-            self.tree.selection_set(found_item)
-            self.tree.see(found_item)
-            self.tree.focus(found_item)  # Ustaw focus, aby klawiatura działała od razu tutaj
-
-            # Stan zaktualizuje się automatycznie przez callback on_tree_select
-        else:
-            # Nie znaleziono
-            pass
-
 
 
     def _sort_by_column(self, col_id: str):
@@ -247,10 +203,9 @@ class SubtitlePanel(ctk.CTkFrame):
         def key_fn(idx_line):
             i, ln = idx_line
             try:
-                if col_id == 'line_nr':
-                    return (0, i)  # (nie-None, wartość)
                 if col_id == 'content':
-                    return (0, (ln.text or '').lower())
+                    text_value = ln.get_text() if hasattr(ln, 'get_text') else (ln.text or '')
+                    return (0, (text_value or '').lower())
                 if col_id == 'duration':
                     return (0, float(getattr(ln, 'audio_duration', 0.0) or 0.0))
                 if col_id == 'similarity':
@@ -352,12 +307,10 @@ class SubtitlePanel(ctk.CTkFrame):
         Wypełnia tabelę danymi.
         Argument lines_to_show to lista obiektów `Line`.
         """
-        print(f"[SET_PREVIEW] START: {len(lines_to_show) if lines_to_show else 0} linii")
-        preserved_index = self.app.selected_line_index
-
         # Wyczyść tabelę
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self.item_line_map.clear()
 
         search_term = self.search_entry.get().lower()
 
@@ -365,27 +318,31 @@ class SubtitlePanel(ctk.CTkFrame):
         # Jeśli w przyszłości lines_to_show będzie listą słowników/obiektów,
         # tutaj trzeba będzie dostosować mapowanie na kolumny.
 
-        item_to_select = None
-
         for i, item in enumerate(lines_to_show):
-            # item is expected to be a Line object; fall back to string if necessary
             if isinstance(item, str):
                 line_text = item
                 line_obj = None
             else:
                 line_obj = item
-                line_text = (line_obj.text or '') if line_obj is not None else ''
+                line_text = line_obj.get_text() if hasattr(line_obj, 'get_text') else (line_obj.text or '')
 
-            # derive content text based on view mode
+            line_tts_display = ''
+            if line_obj is not None:
+                if hasattr(line_obj, 'get_tts_text'):
+                    line_tts_display = line_obj.get_tts_text() or ''
+                else:
+                    line_tts_display = getattr(line_obj, 'tts_text', '') or ''
+
             try:
                 mode = self.app.view_mode.get()
                 if line_obj is not None:
+                    base_text = line_obj.get_text() if hasattr(line_obj, 'get_text') else (line_obj.text or '')
                     if mode == 'Napisy':
-                        content_text = (line_obj.text or '').lower()
+                        content_text = (base_text or '').lower()
                     elif mode == 'TTS':
-                        content_text = (line_obj.tts_text or '').lower()
+                        content_text = (line_tts_display or '').lower()
                     else:
-                        content_text = (line_obj.text or '').lower()
+                        content_text = (base_text or '').lower()
                 else:
                     content_text = (line_text or '').lower()
             except Exception:
@@ -401,6 +358,8 @@ class SubtitlePanel(ctk.CTkFrame):
                 ar = self.ver_analysis_results[i] if i < len(getattr(self, 'ver_analysis_results', [])) else None
             except Exception:
                 ar = None
+            min_sim_filter = self._normalize_similarity_filter_value(f.get('min_sim'))
+            max_sim_filter = self._normalize_similarity_filter_value(f.get('max_sim'))
             # text length
             try:
                 if f.get('min_len') and len(content_text) < int(f.get('min_len')):
@@ -417,7 +376,7 @@ class SubtitlePanel(ctk.CTkFrame):
                     cps_val = float(ar.get('cps') or 0) if ar else 0.0
                 else:
                     try:
-                        txt = (line_obj.tts_text or '').strip('.?!')
+                        txt = (line_tts_display or '').strip('.?!')
                         from collections import Counter
                         stats = Counter(txt)
                         short = stats[','] + stats['-']
@@ -434,6 +393,7 @@ class SubtitlePanel(ctk.CTkFrame):
             except Exception:
                 pass
             # similarity
+            sim_val = 0.0
             try:
                 # Jeśli filtr similarity jest ustawiony, pominąć linie bez weryfikacji
                 if (f.get('min_sim') is not None and f.get('min_sim') != '') or (f.get('max_sim') is not None and f.get('max_sim') != ''):
@@ -441,12 +401,13 @@ class SubtitlePanel(ctk.CTkFrame):
                     if line_obj is None and (not ar or ar.get('path') is None):
                         continue
                 sim_val = float(getattr(line_obj, 'audio_similarity', 0.0) or 0.0) if line_obj else float(ar.get('similarity') or 0.0 if ar else 0.0)
-                if f.get('min_sim') is not None and f.get('min_sim') != '' and sim_val < float(f.get('min_sim')):
+                sim_val = max(0.0, min(sim_val, 1.0))
+                if min_sim_filter is not None and sim_val < min_sim_filter:
                     continue
-                if f.get('max_sim') is not None and f.get('max_sim') != '' and sim_val > float(f.get('max_sim')):
+                if max_sim_filter is not None and sim_val > max_sim_filter:
                     continue
             except Exception:
-                pass
+                sim_val = 0.0
             # show option
             try:
                 show = f.get('show')
@@ -462,20 +423,17 @@ class SubtitlePanel(ctk.CTkFrame):
             except Exception:
                 pass
 
-            line_nr = i + 1
-
             # Budowanie wartości dla wiersza zgodnie z self.columns_config
             row_values = []
             for col in self.columns_config:
                 col_id = col["id"]
-                if col_id == "line_nr":
-                    row_values.append(f"{line_nr:06d}")
-                elif col_id == "content":
+                if col_id == "content":
                     if line_obj is not None:
                         if self.app.view_mode.get() == 'TTS':
-                            row_values.append(line_obj.tts_text or '')
+                            row_values.append(line_tts_display)
                         else:
-                            row_values.append(line_obj.text or '')
+                            line_content = line_obj.get_text() if hasattr(line_obj, 'get_text') else (line_obj.text or '')
+                            row_values.append(line_content)
                     else:
                         row_values.append(line_text)
                 else:
@@ -487,13 +445,11 @@ class SubtitlePanel(ctk.CTkFrame):
                 if 'duration' in col_pos:
                     duration_val = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0) if line_obj else (self.ver_analysis_results[i].get('duration', 0) if i < len(self.ver_analysis_results) else 0)
                     row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
-                    if i in [85, 86, 87, 88, 89]:  # Log critical rows
-                        print(f"[SET_PREVIEW] L{i+1}: duration={row_values[col_pos['duration']]}, line_obj.audio_duration={getattr(line_obj, 'audio_duration', 'BRAK') if line_obj else 'NO_OBJ'}")
                 if 'cps' in col_pos:
                     try:
                         cps_val = 0.0
                         if line_obj is not None:
-                            txt = (line_obj.tts_text or '').strip('.?!')
+                            txt = (line_tts_display or '').strip('.?!')
                             from collections import Counter
                             stats = Counter(txt)
                             short = stats[','] + stats['-']
@@ -507,8 +463,8 @@ class SubtitlePanel(ctk.CTkFrame):
                         cps_val = 0.0
                     row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
                 if 'similarity' in col_pos:
-                    similarity_val = float(getattr(line_obj, 'audio_similarity', 0.0) or 0.0) if line_obj else (float(self.ver_analysis_results[i].get('similarity', 0.0) or 0.0) if i < len(self.ver_analysis_results) else 0.0)
-                    row_values[col_pos['similarity']] = f"{similarity_val:.0%}" if similarity_val > 0 else '-'
+                    sim_display = self._format_similarity_percent(sim_val)
+                    row_values[col_pos['similarity']] = sim_display if sim_display else '-'
                 if 'format' in col_pos:
                     fmt = (getattr(line_obj, 'audio_format', '') or '')
                     if not fmt and i < len(self.ver_analysis_results):
@@ -526,45 +482,58 @@ class SubtitlePanel(ctk.CTkFrame):
 
             # Wstawienie wiersza
             item_id = self.tree.insert("", "end", values=tuple(row_values))
+            if line_obj is not None:
+                self.item_line_map[item_id] = line_obj
 
-            # Sprawdzenie czy ten wiersz ma być zaznaczony (przy odświeżaniu widoku)
-            if preserved_index is not None and line_nr == preserved_index + 1:
-                item_to_select = item_id
-
-        # Przywrócenie zaznaczenia
-        if item_to_select:
-            self.tree.selection_set(item_to_select)
-            self.tree.see(item_to_select)
-        
         # NOWE: Jeśli użytkownik miał zaznaczenie (selected_line_indices jest nie puste),
         # przywracamy je w nowej tabeli JEŚLI wiersze są dostępne
         if self.selected_line_indices:
-            print(f"[SET_PREVIEW] Przywracam zaznaczenie: {self.selected_line_indices}")
             items_to_select = []
-            for item_id in self.tree.get_children():
-                try:
-                    item_vals = self.tree.item(item_id, "values")
-                    line_nr = int(item_vals[0])
-                    if line_nr - 1 in self.selected_line_indices:
-                        items_to_select.append(item_id)
-                except (ValueError, IndexError):
-                    pass
+            # Używamy UID jako klucza, bo klasa Line nie jest hashable (dataclass)
+            uid_to_item = {getattr(obj, 'uid', id(obj)): iid for iid, obj in self.item_line_map.items()}
+            for idx in self.selected_line_indices:
+                if 0 <= idx < len(self.app.lines):
+                    line_obj = self.app.lines[idx]
+                    l_uid = getattr(line_obj, 'uid', id(line_obj))
+                    if l_uid in uid_to_item:
+                        items_to_select.append(uid_to_item[l_uid])
             
             if items_to_select:
-                print(f"[SET_PREVIEW] Znaleziono {len(items_to_select)} rów do zaznaczenia")
                 self.tree.selection_set(*items_to_select)
                 self.tree.see(items_to_select[0])
             else:
-                print(f"[SET_PREVIEW] Nie znaleziono wierszy do zaznaczenia")
                 self.app.selected_line_index = None
         else:
             self.app.selected_line_index = None
             self.update_audio_buttons_state()
 
+    @staticmethod
+    def _format_similarity_percent(value: float | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        numeric = max(0.0, min(numeric, 1.0))
+        return f"{numeric * 100:.0f}%"
+
+    @staticmethod
+    def _normalize_similarity_filter_value(value: float | str | None) -> float | None:
+        if value is None or value == '':
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if numeric > 1:
+            numeric = numeric / 100.0
+        numeric = max(0.0, min(numeric, 1.0))
+        return numeric
+
     def on_tree_select(self, event):
         """Obsługa wyboru wiersza w tabeli - aktualizuje selected_line_indices."""
         selected_items = self.tree.selection()
-        print(f"[TREE_SELECT] selected_items={len(selected_items) if selected_items else 0}")
         
         if not selected_items:
             self.app.selected_line_index = None
@@ -575,19 +544,18 @@ class SubtitlePanel(ctk.CTkFrame):
         # Pobierz wszystkie zaznaczone elementy
         selected_indices = []
         for item_id in selected_items:
-            item_values = self.tree.item(item_id, "values")
-            try:
-                line_nr_str = item_values[0]
-                line_nr = int(line_nr_str)
-                selected_indices.append(line_nr - 1)
-            except (ValueError, IndexError):
-                continue
+            line_obj = self.item_line_map.get(item_id)
+            if line_obj:
+                try:
+                    idx = self.app.lines.index(line_obj)
+                    selected_indices.append(idx)
+                except ValueError:
+                    continue
 
         # Ustaw first selected jako primary
         if selected_indices:
             self.app.selected_line_index = selected_indices[0]
             self.selected_line_indices = selected_indices
-            print(f"[TREE_SELECT] Aktualizuję zaznaczenie na {len(selected_indices)} wierszy")
         else:
             self.app.selected_line_index = None
             self.selected_line_indices = []
@@ -622,17 +590,20 @@ class SubtitlePanel(ctk.CTkFrame):
         if col_id != "content":
             return
         
-        # Pobierz numer linii
-        try:
-            item_values = self.tree.item(item, "values")
-            line_nr_str = item_values[0]
-            line_idx = int(line_nr_str) - 1
-        except (ValueError, IndexError):
+        # Pobierz obiekt linii i jej indeks
+        line_obj = self.item_line_map.get(item)
+        if not line_obj:
             return
-        
-        # Pobierz aktualny tekst
+            
         try:
-            current_text = item_values[1] or ""
+            line_idx = self.app.lines.index(line_obj)
+        except ValueError:
+            return
+            
+        # Pobierz aktualny tekst z konfiguracji kolumn
+        item_values = self.tree.item(item, "values")
+        try:
+            current_text = item_values[col_idx] or ""
         except IndexError:
             current_text = ""
         
@@ -749,14 +720,6 @@ class SubtitlePanel(ctk.CTkFrame):
         # Obliczamy ID. current_line_index jest liczony od 0, a pliki od 1.
         current_id = self.app.selected_line_index + 1
 
-        prev_id = current_id - 1
-        if prev_id < 1: prev_id = 1  # Zabezpieczenie, żeby nie poszło na 0
-
-        menu.add_command(
-            label=f"Dopasuj audio",
-            command=lambda: self.app.open_audio_rename_window(target_id=current_id, source_id=prev_id)
-        )
-
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -784,11 +747,16 @@ class SubtitlePanel(ctk.CTkFrame):
             self.ver_cache = {}
 
         # Ensure results list has entries for each line
+        def _line_verification_text(line_obj):
+            getter = getattr(line_obj, 'get_tts_text', None)
+            candidate = getter() if callable(getter) else getattr(line_obj, 'tts_text', '')
+            return (candidate or '').strip()
+
         if not self.ver_analysis_results:
             for i, line in enumerate(self.app.lines):
                 self.ver_analysis_results.append({
                     'id': i + 1,
-                    'text': line.tts_text,
+                    'text': _line_verification_text(line),
                     'duration': 0.0,
                     'cps': 0.0,
                     'raw_status': 'PENDING',
@@ -807,7 +775,8 @@ class SubtitlePanel(ctk.CTkFrame):
             workers_cfg = max(1, cpu_count // 2)
         workers = max(1, min(workers_cfg, cpu_count * 2))
 
-        lines_texts = [l.tts_text for l in self.app.lines]
+        lines_texts = [_line_verification_text(line) for line in self.app.lines]
+        line_uids = [getattr(l, 'uid', f"output1 ({i + 1})") for i, l in enumerate(self.app.lines)]
         audio_dir = str(self.app.audio_dir)
         ffprobe = shutil.which('ffprobe')
 
@@ -829,6 +798,7 @@ class SubtitlePanel(ctk.CTkFrame):
             project_path=str(getattr(self.app, 'current_project_path', '')),
             audio_dir=audio_dir,
             lines_texts=lines_texts,
+            line_uids=line_uids,
             force_refresh=force_refresh,
             ignore_short=ignore_short,
             ffprobe=ffprobe,
@@ -863,96 +833,81 @@ class SubtitlePanel(ctk.CTkFrame):
 
     def _refresh_verification_view(self):
         # Odśwież TYLKO zweryfikowane wiersze zamiast całej tabeli
-        print(f"[REFRESH_VIEW] Aktualizuję {len(self.selected_line_indices)} wierszy")
-        # Mapowanie line_nr -> item_id w tabeli
-        line_nr_to_item = {}
-        for item_id in self.tree.get_children():
-            item_vals = self.tree.item(item_id, "values")
-            try:
-                line_nr = int(item_vals[0])
-                line_nr_to_item[line_nr] = item_id
-            except (ValueError, IndexError):
-                pass
+        # Mapowanie UID -> item_id w tabeli dla szybkiego dostępu
+        uid_to_item = {getattr(ln, 'uid', id(ln)): iid for iid, ln in self.item_line_map.items()}
         
-        # Aktualizuj wartości dla każdego zweryfikowanego wiersza
+        # Aktualizuj wartości dla każdego zaznaczonego wiersza (lub tych które mogły ulec zmianie)
         col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
         
         updated_count = 0
         for line_idx in self.selected_line_indices:
-            if line_idx < 0 or line_idx >= len(self.app.lines):
-                continue
-            
-            line_nr = line_idx + 1
-            item_id = line_nr_to_item.get(line_nr)
-            if not item_id:
-                continue
-            
-            line_obj = self.app.lines[line_idx]
-            row_values = list(self.tree.item(item_id, "values"))
-            
-            try:
-                # Update duration
-                if 'duration' in col_pos:
-                    duration_val = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0)
-                    row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+            if 0 <= line_idx < len(self.app.lines):
+                line_obj = self.app.lines[line_idx]
+                item_id = uid_to_item.get(getattr(line_obj, 'uid', id(line_obj)))
+                if not item_id:
+                    continue
                 
-                # Update CPS
-                if 'cps' in col_pos:
-                    try:
-                        txt = (line_obj.tts_text or '').strip('.?!')
-                        from collections import Counter
-                        stats = Counter(txt)
-                        short = stats[','] + stats['-']
-                        long = stats['.'] + stats['!'] + stats['?']
-                        pauses = (short * 0.4) + (long * 0.6)
-                        duration = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0)
-                        cps_val = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
-                    except Exception:
-                        cps_val = 0.0
-                    row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
+                row_values = list(self.tree.item(item_id, "values"))
                 
-                # Update similarity
-                if 'similarity' in col_pos:
-                    similarity_val = float(getattr(line_obj, 'audio_similarity', 0.0) or 0.0)
-                    row_values[col_pos['similarity']] = f"{similarity_val:.0%}" if similarity_val > 0 else '-'
-                
-                # Update format
-                if 'format' in col_pos:
-                    fmt = (getattr(line_obj, 'audio_format', '') or '')
-                    row_values[col_pos['format']] = (fmt or '').upper()
-                
-                # Update audio file
-                if 'audio_file' in col_pos:
-                    path = None
-                    if getattr(line_obj, 'audio_filename', ''):
-                        path = str(Path(getattr(self, 'app').audio_dir or Path('.')) / line_obj.audio_filename)
-                    row_values[col_pos['audio_file']] = Path(path).name if path else ''
-                
-                # Zaktualizuj wiersz w tabeli
-                self.tree.item(item_id, values=tuple(row_values))
-                updated_count += 1
-                
-            except Exception as e:
-                pass
-        
-        print(f"[REFRESH_VIEW] Zaktualizowano {updated_count} wierszy")
+                try:
+                    # Update duration
+                    if 'duration' in col_pos:
+                        duration_val = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0)
+                        row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+                    
+                    # Update CPS
+                    if 'cps' in col_pos:
+                        try:
+                            if hasattr(line_obj, 'get_tts_text'):
+                                txt_source = line_obj.get_tts_text()
+                            else:
+                                txt_source = getattr(line_obj, 'tts_text', '')
+                            txt = (txt_source or '').strip('.?!')
+                            from collections import Counter
+                            stats = Counter(txt)
+                            short = stats[','] + stats['-']
+                            long = stats['.'] + stats['!'] + stats['?']
+                            pauses = (short * 0.4) + (long * 0.6)
+                            duration = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0)
+                            cps_val = len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+                        except Exception:
+                            cps_val = 0.0
+                        row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
+                    
+                    # Update similarity
+                    if 'similarity' in col_pos:
+                        similarity_val = float(getattr(line_obj, 'audio_similarity', 0.0) or 0.0)
+                        sim_display = self._format_similarity_percent(similarity_val)
+                        row_values[col_pos['similarity']] = sim_display if sim_display else '-'
+                    
+                    # Update format
+                    if 'format' in col_pos:
+                        fmt = (getattr(line_obj, 'audio_format', '') or '')
+                        row_values[col_pos['format']] = (fmt or '').upper()
+                    
+                    # Update audio file
+                    if 'audio_file' in col_pos:
+                        path = None
+                        if getattr(line_obj, 'audio_filename', ''):
+                            path = str(Path(getattr(self, 'app').audio_dir or Path('.')) / line_obj.audio_filename)
+                        row_values[col_pos['audio_file']] = Path(path).name if path else ''
+                    
+                    # Zaktualizuj wiersz w tabeli
+                    self.tree.item(item_id, values=tuple(row_values))
+                    updated_count += 1
+                    
+                except Exception:
+                    pass
         
         # Przywróć zaznaczenie
         try:
-            items_to_select = []
-            for item_id in self.tree.get_children():
-                item_vals = self.tree.item(item_id, "values")
-                try:
-                    line_nr = int(item_vals[0])
-                    if line_nr - 1 in self.selected_line_indices:
-                        items_to_select.append(item_id)
-                except (ValueError, IndexError):
-                    pass
+            items_to_select = [line_to_item[self.app.lines[idx]] for idx in self.selected_line_indices 
+                               if 0 <= idx < len(self.app.lines) and self.app.lines[idx] in line_to_item]
             
             if items_to_select:
                 self.tree.selection_set(*items_to_select)
                 self.tree.see(items_to_select[0])
-        except Exception as e:
+        except Exception:
             pass
 
     def _apply_verification_results(self, data: dict):
@@ -1003,6 +958,10 @@ class SubtitlePanel(ctk.CTkFrame):
                 except Exception:
                     line.audio_similarity = 0.0
                 line.audio_transcribed_text = v.get('transcribed_text', '') or v.get('transcribed_text', '')
+                duration_value = float(v.get('duration') or 0)
+                cps_value = float(v.get('cps') or 0)
+                similarity_value = line.audio_similarity
+                print(f"[VERIFY_SUMMARY] line {idx + 1}: duration={duration_value:.2f}s cps={cps_value:.1f} similarity={similarity_value:.3f}")
 
                 # update ver_analysis_results
                 if idx < len(self.ver_analysis_results):
@@ -1022,15 +981,15 @@ class SubtitlePanel(ctk.CTkFrame):
 
                 # persist to cache dict
                 try:
-                        self.ver_cache[str(idx+1)] = {
-                            'text': v.get('text', ''),
-                            'duration': float(v.get('duration') or 0),
-                            'path': v.get('path'),
-                            'ext': v.get('ext') or '',
-                            'similarity': float(v.get('similarity') or 0.0),
-                            'transcribed_text': v.get('transcribed_text', ''),
-                            'error': None
-                        }
+                    self.ver_cache[str(idx + 1)] = {
+                        'text': v.get('text', ''),
+                        'duration': float(v.get('duration') or 0),
+                        'path': v.get('path'),
+                        'ext': v.get('ext') or '',
+                        'similarity': float(v.get('similarity') or 0.0),
+                        'transcribed_text': v.get('transcribed_text', ''),
+                        'error': None
+                    }
                 except Exception:
                     pass
 
@@ -1281,12 +1240,14 @@ class SubtitlePanel(ctk.CTkFrame):
     def _get_line_text(self, idx):
         try:
             mode = self.app.view_mode.get()
+            line = self.app.lines[idx]
+            line_text = line.get_text() if hasattr(line, 'get_text') else (line.text or '')
             if mode == 'Napisy':
-                return self.app.lines[idx].text
+                return line_text
             elif mode == 'TTS':
-                return self.app.lines[idx].tts_text
+                return line.tts_text or ''
             else:
-                return self.app.lines[idx].text or ''
+                return line_text
         except Exception:
             return ''
 
@@ -1301,62 +1262,56 @@ class SubtitlePanel(ctk.CTkFrame):
         # store filters and refresh view
         self.filter_spec = filters or {}
         try:
-            self._refresh_verification_view()
+            self.set_preview(self.app.lines)
         except Exception:
             pass
+
+    def _normalize_uid(self, uid: str) -> str:
+        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
+        if uid.startswith("output1 ("):
+            return uid
+        return f"output1 ({uid})"
 
     def _find_audio_files(self, identifier: str) -> List[Tuple[Path, bool]]:
         if not self.app.audio_dir:
             return []
+        base = self._normalize_uid(identifier)
         candidates = [
-            (self.app.audio_dir / f"output1 ({identifier}).wav", False),
-            (self.app.audio_dir / f"output1 ({identifier}).mp3", False),
-            (self.app.audio_dir / f"output1 ({identifier}).ogg", False),
+            (self.app.audio_dir / f"{base}.wav", False),
+            (self.app.audio_dir / f"{base}.mp3", False),
+            (self.app.audio_dir / f"{base}.ogg", False),
         ]
         return [(f, ready) for f, ready in candidates if f.exists()]
 
     def update_audio_buttons_state(self):
-        """
-        Sprawdza obecny stan przycisków dla wielu zaznaczonych wierszy.
-        """
+        """Aktualizuje stan przycisków w oparciu o zaznaczenie."""
         has_selection = len(self.selected_line_indices) > 0
-        audio_dir_set = self.app.audio_dir is not None and self.app.audio_dir.is_dir()
-        project_loaded = self.app.current_project_path is not None
-        lines_processed = bool(self.app.lines)
+        state = "normal" if has_selection else "disabled"
+        
+        self.generate_button.configure(state=state)
+        self.verify_button.configure(state=state)
+        self.delete_all_button.configure(state=state)
 
-        files_exist = False
         status_msg = "Audio: ---"
+        if has_selection and self.app.audio_dir and self.app.audio_dir.is_dir():
+            # Sprawdz pierwszy zaznaczony
+            try:
+                selected_line = self.app.lines[self.app.selected_line_index]
+                identifier = getattr(selected_line, 'uid', f"output1 ({self.app.selected_line_index + 1})")
+                found_files = self._find_audio_files(identifier)
 
-        if has_selection and audio_dir_set:
-            # Sprawdź pierwszy zaznaczony
-            identifier = str(self.app.selected_line_index + 1)
-            found_files = self._find_audio_files(identifier)
-            files_exist = bool(found_files)
-
-            if found_files:
-                status_msg = f"Audio: znaleziono {len(found_files)}"
-                self.first_found_audio = found_files[0][0]
-            else:
-                status_msg = "Audio: brak"
+                if found_files:
+                    status_msg = f"Audio: znaleziono {len(found_files)}"
+                    self.first_found_audio = found_files[0][0]
+                else:
+                    status_msg = "Audio: brak"
+                    self.first_found_audio = None
+            except (IndexError, TypeError):
                 self.first_found_audio = None
 
         # Aktualizacja statusu
         if hasattr(self.app, 'set_audio_status'):
             self.app.set_audio_status(status_msg)
-
-        gen_state = "normal" if has_selection and audio_dir_set and project_loaded and lines_processed else "disabled"
-        verify_state = "normal" if has_selection and audio_dir_set and project_loaded else "disabled"
-        del_state = "normal" if has_selection and audio_dir_set and files_exist else "disabled"
-
-        # Aktualizuj buttony (tylko jeśli stan się zmienił)
-        if self.generate_button.cget("state") != gen_state:
-            self.generate_button.configure(state=gen_state)
-
-        if self.verify_button.cget("state") != verify_state:
-            self.verify_button.configure(state=verify_state)
-
-        if self.delete_all_button.cget("state") != del_state:
-            self.delete_all_button.configure(state=del_state)
 
     def stop_audio(self):
         if self.current_audio_process:
@@ -1367,32 +1322,62 @@ class SubtitlePanel(ctk.CTkFrame):
                 self.current_audio_process = None
 
     def play_selected_audio(self, event=None):
-        if not FFPLAY_AVAILABLE or self.app.selected_line_index is None or not self.app.audio_dir:
+        if not FFPLAY_AVAILABLE or not self.app.audio_dir:
             return
 
-        identifier = str(self.app.selected_line_index + 1)
-        files = self._find_audio_files(identifier)
-        if files:
-            file_to_play = files[0][0]
-            self.stop_audio()
+        item_id = None
+        if event is not None:
             try:
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                item_id = self.tree.identify_row(event.y)
+            except Exception:
+                item_id = None
 
-                cmd = ["ffplay", "-nodisp", "-autoexit", str(file_to_play)]
-                self.current_audio_process = subprocess.Popen(
-                    cmd,
-                    startupinfo=startupinfo,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-            except Exception as e:
-                self.current_audio_process = None
-                messagebox.showerror("Błąd", f"Nie udało się uruchomić ffplay:\n{e}", parent=self)
-        else:
-            pass
+        if not item_id:
+            selected_items = self.tree.selection()
+            if selected_items:
+                item_id = selected_items[0]
+
+        if not item_id:
+            return
+
+        line_obj = self.item_line_map.get(item_id)
+        if line_obj is None and self.app.selected_line_index is not None:
+            try:
+                line_obj = self.app.lines[self.app.selected_line_index]
+            except Exception:
+                line_obj = None
+
+        if not line_obj:
+            return
+
+        identifier = getattr(line_obj, 'uid', None)
+        if not identifier and self.app.selected_line_index is not None:
+            identifier = f"output1 ({self.app.selected_line_index + 1})"
+        if not identifier:
+            return
+
+        files = self._find_audio_files(identifier)
+        if not files:
+            return
+
+        file_to_play = files[0][0]
+        self.stop_audio()
+        try:
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            cmd = ["ffplay", "-nodisp", "-autoexit", str(file_to_play)]
+            self.current_audio_process = subprocess.Popen(
+                cmd,
+                startupinfo=startupinfo,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except Exception as e:
+            self.current_audio_process = None
+            messagebox.showerror("Błąd", f"Nie udało się uruchomić ffplay:\n{e}", parent=self)
 
     def generate_selected_dialogs(self):
         """Generuje audio dla wszystkich zaznaczonych wierszy."""
@@ -1403,8 +1388,14 @@ class SubtitlePanel(ctk.CTkFrame):
         for idx in self.selected_line_indices:
             try:
                 line_no = idx + 1
-                text = self.app.lines[idx].tts_text
-                lines_to_gen.append((str(line_no), text))
+                line_obj = self.app.lines[idx]
+                getter = getattr(line_obj, 'get_tts_text', None)
+                candidate = getter() if callable(getter) else getattr(line_obj, 'tts_text', '')
+                text = (candidate or '').strip()
+                if not text:
+                    continue
+                uid = getattr(line_obj, 'uid', f"output1 ({line_no})")
+                lines_to_gen.append((uid, text))
             except (IndexError, ValueError):
                 continue
 
@@ -1427,10 +1418,14 @@ class SubtitlePanel(ctk.CTkFrame):
             converter_config=self.app._gather_converter_config()
         )
 
+        uid_to_idx = {getattr(self.app.lines[i], 'uid', ''): i for i in range(len(self.app.lines))}
+
         def _on_generate(identifier: str, path: str):
             try:
-                idx = int(identifier) - 1
-                if 0 <= idx < len(self.app.lines):
+                idx = uid_to_idx.get(identifier)
+                if idx is None:
+                    idx = next((i for i, l in enumerate(self.app.lines) if getattr(l, 'uid', '') == identifier), None)
+                if idx is not None and 0 <= idx < len(self.app.lines):
                     self.app.lines[idx].audio_filename = Path(path).name
                     self.app.lines[idx].audio_status = 'OK'
                     try:
@@ -1448,9 +1443,7 @@ class SubtitlePanel(ctk.CTkFrame):
 
     def verify_selected_dialogs(self):
         """Weryfikuje audio dla wszystkich zaznaczonych wierszy w osobnym wątku."""
-        print(f"[VERIFY_SEL] START: selected_indices={self.selected_line_indices}, audio_dir={self.app.audio_dir}")
         if not self.selected_line_indices or not self.app.audio_dir:
-            print(f"[VERIFY_SEL] Błąd: selected_indices={bool(self.selected_line_indices)}, audio_dir={bool(self.app.audio_dir)}")
             return
 
         if self.ver_running:
@@ -1464,12 +1457,17 @@ class SubtitlePanel(ctk.CTkFrame):
         self.ver_running = True
         
         # Inicjalizuj ver_analysis_results z całą listą linii
+        def _resolve_verification_text(line_obj):
+            getter = getattr(line_obj, 'get_tts_text', None)
+            candidate = getter() if callable(getter) else getattr(line_obj, 'tts_text', '')
+            return (candidate or '').strip()
+
         if not self.ver_analysis_results or len(self.ver_analysis_results) < len(self.app.lines):
             self.ver_analysis_results = []
             for i, line in enumerate(self.app.lines):
                 self.ver_analysis_results.append({
                     'id': i + 1,
-                    'text': line.tts_text if line.tts_text else '',
+                    'text': _resolve_verification_text(line),
                     'duration': 0.0,
                     'cps': 0.0,
                     'raw_status': 'PENDING',
@@ -1479,7 +1477,6 @@ class SubtitlePanel(ctk.CTkFrame):
                 })
         
         self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
-        print(f"[VERIFY_SEL] Uruchamianie wątku dla indeksów: {self.selected_line_indices}")
 
         # Uruchom weryfikację w osobnym wątku aby nie blokować UI
         thread = threading.Thread(
@@ -1495,6 +1492,10 @@ class SubtitlePanel(ctk.CTkFrame):
             ffprobe = shutil.which('ffprobe')
             audio_dir = str(self.app.audio_dir)
             results = {}
+            def _thread_line_text(line_obj, idx):
+                getter = getattr(line_obj, 'get_tts_text', None)
+                candidate = getter() if callable(getter) else getattr(line_obj, 'tts_text', '')
+                return (candidate or '').strip()
 
             for line_idx in selected_indices:
                 if line_idx < 0 or line_idx >= len(self.app.lines):
@@ -1503,12 +1504,26 @@ class SubtitlePanel(ctk.CTkFrame):
                 try:
                     line = self.app.lines[line_idx]
                     line_id = line_idx + 1  # 1-based ID
-                    
+                    line_uid = getattr(line, 'uid', str(line_id))
+                    if not self._find_audio_files(line_uid):
+                        results[str(line_id)] = {
+                            'id': line_id,
+                            'text': _thread_line_text(line, line_idx),
+                            'duration': 0.0,
+                            'cps': 0.0,
+                            'raw_status': 'MISSING',
+                            'path': None,
+                            'ext': '',
+                            'display_status': 'MISSING'
+                        }
+                        continue
+
                     # Weryfikuj pojedynczą linię
                     result = VerificationManager.verify_line(
                         line=line,
                         audio_dir=audio_dir,
                         line_id=line_id,
+                        line_uid=line_uid,
                         ffprobe_path=ffprobe,
                         ignore_short=True,
                         verify_duration=True
@@ -1517,7 +1532,7 @@ class SubtitlePanel(ctk.CTkFrame):
                 except Exception as e:
                     results[str(line_idx + 1)] = {
                         'id': line_idx + 1,
-                        'text': self.app.lines[line_idx].tts_text if line_idx < len(self.app.lines) else '',
+                        'text': _thread_line_text(self.app.lines[line_idx], line_idx) if line_idx < len(self.app.lines) else '',
                         'duration': 0.0,
                         'cps': 0.0,
                         'raw_status': 'ERROR',
@@ -1549,35 +1564,32 @@ class SubtitlePanel(ctk.CTkFrame):
 
         # Zbierz wszystkie pliki do usunięcia
         files_to_delete = []
-        line_nums = []
         for idx in self.selected_line_indices:
             line_num = idx + 1
-            identifier = str(line_num)
+            line_obj = self.app.lines[idx]
+            identifier = getattr(line_obj, 'uid', f"output1 ({line_num})")
             found_files = self._find_audio_files(identifier)
             if found_files:
                 files_to_delete.extend(found_files)
-                line_nums.append(line_num)
 
         if not files_to_delete:
-            messagebox.showinfo("Info", "Nie znaleziono plików audio do usunięcia.", parent=self)
-            return
-
-        if not messagebox.askyesno("Potwierdź",
-                                   f"Czy na pewno usunąć WSZYSTKIE ({len(files_to_delete)}) pliki dla {len(line_nums)} zaznaczonych linii?",
-                                   parent=self):
             return
 
         self.stop_audio()
+        deleted = 0
         for file_path, _ in files_to_delete:
             try:
                 os.remove(file_path)
+                deleted += 1
             except Exception:
                 pass
         self.update_audio_buttons_state()
+        if deleted and hasattr(self.app, 'set_status'):
+            self.app.set_status(f"Usunięto {deleted} plików audio.")
 
 
 # --- Process entry function (runs in separate process) ---
-def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1):
+def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1, line_uids: Optional[list] = None):
     import json
     import subprocess
     from pathlib import Path
@@ -1592,11 +1604,20 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str
             json.dump(dct, tf, ensure_ascii=False)
         tmp.replace(out_file)
 
+    def _normalize_uid(uid: str) -> str:
+        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
+        if uid.startswith("output1 ("):
+            return uid
+        return f"output1 ({uid})"
+
     for i, text in enumerate(lines_texts):
         # distribute work among workers: only process indices matching this worker
         if total_workers and (i % total_workers) != worker_idx:
             continue
         ident = str(i + 1)
+        uid = None
+        if line_uids and i < len(line_uids):
+            uid = line_uids[i]
         tts = (text or '').strip()
         entry = {'id': i+1, 'text': tts, 'duration': 0.0, 'cps': 0.0, 'raw_status': 'PENDING', 'path': None, 'ext': '', 'display_status': 'PENDING'}
         if not tts:
@@ -1607,17 +1628,22 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str
         # find file
         audio_file = None
         found_ext = ''
+        if uid:
+            base = _normalize_uid(uid)
+        else:
+            base = f"output1 ({ident})"
         candidates = [
-            (audio_dir_p / f"output1 ({ident}).wav", 'wav'),
-            (audio_dir_p / f"output1 ({ident}).mp3", 'mp3'),
-            (audio_dir_p / 'ready' / f"output1 ({ident}).ogg", 'ogg'),
-            (audio_dir_p / 'ready' / f"output1 ({ident}).mp3", 'mp3')
+            (audio_dir_p / f"{base}.wav", 'wav'),
+            (audio_dir_p / f"{base}.mp3", 'mp3'),
+            (audio_dir_p / 'ready' / f"{base}.ogg", 'ogg'),
+            (audio_dir_p / 'ready' / f"{base}.mp3", 'mp3')
         ]
         for p, ext in candidates:
             if p.exists():
                 audio_file = p
                 found_ext = ext
                 break
+
 
         duration = 0.0
         if audio_file and ffprobe_path:

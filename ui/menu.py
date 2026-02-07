@@ -25,20 +25,15 @@ class AppMenu:
 
         # --- Dialogi ---
         gen_menu = tk.Menu(menubar, tearoff=0)
-        # gen_menu.add_command(label="Wczytaj napisy", command=self.app.load_file)
-        gen_menu.add_command(label="Wybierz katalog audio", command=self.app.choose_audio_dir)
         gen_menu.add_command(label="Dodaj nowe napisy", command=self.app.add_new_subtitles)
-        gen_menu.add_command(label="Zmień plik CSV", command=self.app.change_subtitle_file)
+        gen_menu.add_command(label="Zmień plik z danymi", command=self.app.change_subtitle_file)
         gen_menu.add_separator()
         gen_menu.add_command(label="Pokaż kolejkę zadań", command=self.app.show_generation_queue, accelerator="Ctrl+Q")
         gen_menu.add_command(label="Generuj dialogi", command=self.app.enqueue_generate_all, accelerator="Ctrl+Shift+G")
         gen_menu.add_command(label="Konwertuj audio", command=self.app.enqueue_convert_all, accelerator="Ctrl+Shift+R")
-        gen_menu.add_command(label="Weryfikacja", command=self.open_verification_window)
+        gen_menu.add_command(label="Weryfikacja", command=self.app.open_verification_window, accelerator="Ctrl+Shift+Y")
         gen_menu.add_separator()
-        gen_menu.add_command(label="Dopasuj identyfikatory audio", command=self.app.open_audio_rename_window)
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=self.app.delete_all_converted_audio)
-        gen_menu.add_separator()
-        gen_menu.add_command(label="Imiona", command=self.app.open_names_manager, accelerator="Ctrl+Shift+N")
         gen_menu.add_separator()
         gen_menu.add_command(label="Pobierz napisy", command=self.app.download_clean)
         gen_menu.add_command(label="Pobierz napisy TTS", command=self.app.download_replace)
@@ -72,13 +67,4 @@ class AppMenu:
         self.app.config(menu=menubar)
         
     
-    def open_verification_window(self):
-        try:
-            from ui.verification_window import VerificationWindow
-        except Exception:
-            return
-        # Show non-modal verification control window
-        try:
-            VerificationWindow(self.app)
-        except Exception:
-            pass
+    # def open_verification_window(self):  <-- Usunięte, teraz jest w studio.py

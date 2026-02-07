@@ -53,7 +53,7 @@ def convert_file(input_file: Path, output_dir: Path, filters: dict, out_format: 
 
 def convert_directory(dir_path: Path, workers: int, filters: dict, out_format: str):
     """Konwertuje wszystkie pliki WAV/MP3 w katalogu."""
-    ready_dir = dir_path / "ready"
+    ready_dir = dir_path.parent / "ready"
     ready_dir.mkdir(exist_ok=True)
 
     # Pobierz pliki źródłowe

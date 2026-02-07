@@ -157,10 +157,12 @@ class VerificationWindow(ctk.CTkToplevel):
                     else:
                         print(f"[VERIFY] Linia {i+1}: weryfikuję verify_line")
                         # perform verification (respect verify duration option)
+                        line_uid = getattr(line, 'uid', str(i + 1))
                         res = VerificationManager.verify_line(
                             line=line,
                             audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
                             line_id=i+1,
+                            line_uid=line_uid,
                             ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
                             ignore_short=False,
                             verify_duration=self.verify_duration_var.get()

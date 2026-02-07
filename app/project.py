@@ -2,7 +2,9 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, TclError
+
+from app.utils import ensure_project_dirs, project_generated_dir
 
 
 def open_project(app, path: Optional[str] = None):
@@ -21,17 +23,19 @@ def open_project(app, path: Optional[str] = None):
         with open(path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         app.current_project_path = Path(path)
+        _set_project_audio_state(app)
         app.project_config = cfg
 
         _update_recent_projects(app, str(app.current_project_path))
 
         all_vars = app.builtin_remove_state + app.builtin_replace_state
-        traces = {}
         for var in all_vars:
-            if var.trace_info():
-                trace_id = var.trace_info()[0][1]
-                traces[var._name] = (var, trace_id)
-                var.trace_remove("write", trace_id)
+            for mode_info, trace_id in var.trace_info():
+                if "write" in mode_info:
+                    try:
+                        var.trace_remove("write", trace_id)
+                    except TclError:
+                        pass
 
         for i, val in enumerate(cfg.get("builtin_remove_state", [])):
             if i < len(app.builtin_remove_state):
@@ -40,21 +44,36 @@ def open_project(app, path: Optional[str] = None):
             if i < len(app.builtin_replace_state):
                 app.builtin_replace_state[i].set(bool(val))
 
-        for name, (var, trace_id) in traces.items():
+        for var in all_vars:
             var.trace_add("write", app.mark_as_unsaved)
 
         app.custom_remove = [type(app.custom_remove[0]).from_json(x) if app.custom_remove else __import__('app').entity.PatternItem.from_json(x) for x in cfg.get("custom_remove", [])]
         app.custom_replace = [type(app.custom_replace[0]).from_json(x) if app.custom_replace else __import__('app').entity.PatternItem.from_json(x) for x in cfg.get("custom_replace", [])]
         app._refresh_custom_lists()
 
+        # Wczytaj audio_path PIERWSZY - potrzebny dla kompatybilności wstecznej txt
+        audio_path_str = cfg.get("audio_path")
         subtitle_path = cfg.get("subtitle_path")
         if subtitle_path and Path(subtitle_path).exists():
             # Load subtitles via central IO helper to ensure audio metadata is populated
             try:
-                from app.io import load_subtitle_file
-                loaded = load_subtitle_file(subtitle_path)
-                app.loaded_path = Path(subtitle_path)
+                from app.io import load_subtitle_file, save_lines_to_file
+                subtitle_path_obj = Path(subtitle_path)
+                # Jeśli to txt, przesłaj audio_dir dla kompatybilności wstecznej
+                audio_dir_for_compat = app.audio_dir if subtitle_path_obj.suffix.lower() == '.txt' else None
+                loaded = load_subtitle_file(subtitle_path, audio_dir=audio_dir_for_compat)
                 app.lines = loaded
+                app.loaded_path = subtitle_path_obj
+                if subtitle_path_obj.suffix.lower() == '.txt':
+                    csv_candidate = subtitle_path_obj.with_suffix('.csv')
+                    if not csv_candidate.exists():
+                        try:
+                            save_lines_to_file(str(csv_candidate), loaded)
+                        except Exception as write_err:
+                            print(f"Błąd zapisu CSV po imporcie TXT: {write_err}")
+                    if csv_candidate.exists():
+                        app.loaded_path = csv_candidate
+
                 # apply patterns and initialize subtitle panel state
                 try:
                     app.apply_patterns()
@@ -69,9 +88,6 @@ def open_project(app, path: Optional[str] = None):
             app.apply_patterns()
             if app.lbl_filename:
                 app.lbl_filename.configure(text="Brak wczytanego pliku")
-
-        audio_path_str = cfg.get("audio_path")
-        app.audio_dir = Path(audio_path_str) if audio_path_str else None
 
         app.set_status(f"Wczytano projekt: {app.current_project_path.name}")
         app.save_app_setting('last_project', path)
@@ -122,6 +138,7 @@ def save_project_as(app):
     if not path:
         return
     app.current_project_path = Path(path)
+    _set_project_audio_state(app)
     save_project(app)
 
 
@@ -143,8 +160,7 @@ def _gather_project_config(app) -> dict:
         "custom_remove": [p.to_json() for p in app.custom_remove],
         "custom_replace": [p.to_json() for p in app.custom_replace],
         "subtitle_path": str(app.loaded_path) if app.loaded_path else None,
-        "audio_path": str(app.audio_dir.absolute()) if app.audio_dir else None,
-        "names_list": app.names_list,
+        "audio_path": str(project_generated_dir(app.current_project_path).absolute()) if app.current_project_path else None,
         "active_tts_model": app.project_config.get('active_tts_model', 'XTTS'),
         "base_audio_speed": app.project_config.get('base_audio_speed', 1.1)
     })
@@ -195,6 +211,17 @@ def _check_unsaved_changes(app) -> bool:
         elif result is None:
             return False
     return True
+
+
+def _set_project_audio_state(app):
+    if not app.current_project_path:
+        app.audio_dir = None
+        return
+    ensure_project_dirs(app.current_project_path)
+    app.audio_dir = project_generated_dir(app.current_project_path)
+    panel = getattr(app, 'subtitle_panel', None)
+    if panel:
+        panel.update_audio_buttons_state()
 
 
 def _update_recent_projects(app, path: str):

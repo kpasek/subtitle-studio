@@ -28,6 +28,10 @@ class ShortcutsWindow(ctk.CTkToplevel):
                 ("Ctrl + K", "Zatwierdź zmiany"),
                 ("Ctrl + R", "Menedżer wzorców"),
             ]),
+            ("Audio (Weryfikacja)", [
+                ("Ctrl + Y", "Weryfikuj ZAZNACZONE audio"),
+                ("Ctrl + Shift + Y", "Otwórz okno weryfikacji"),
+            ]),
             ("Audio (Globalne)", [
                 ("Ctrl + Shift + G", "Generuj wszystkie audio"),
                 ("Ctrl + Shift + R", "Konwersja plików audio"),

@@ -40,6 +40,7 @@ class VerificationJob:
     project_path: str
     audio_dir: str
     lines_texts: List[str]
+    line_uids: List[str]
     force_refresh: bool
     ignore_short: bool
     ffprobe: Optional[str]
@@ -72,16 +73,17 @@ class VerificationManager:
         return cls()
 
     @staticmethod
-    def verify_line(line, audio_dir: str, line_id: int, ffprobe_path: Optional[str] = None, ignore_short: bool = False, verify_duration: bool = True) -> 'dict':
+    def verify_line(line, audio_dir: str, line_id: int, line_uid: Optional[str] = None, ffprobe_path: Optional[str] = None, ignore_short: bool = False, verify_duration: bool = True) -> 'dict':
         """
         Weryfikuje pojedynczą linię audio.
         
         Args:
             line: Obiekt Line do weryfikacji
-            audio_dir: Ścieżka do katalogu audio
-            line_id: ID linii (numer)
-            ffprobe_path: Ścieżka do ffprobe
-            ignore_short: Czy ignorować krótkie napisy
+            audio_dir: Sciezka do katalogu audio
+            line_id: ID linii (numer) do raportowania
+            line_uid: UID powiazany z nazwa pliku audio
+            ffprobe_path: Sciezka do ffprobe
+            ignore_short: Czy ignorowac krotkie napisy
             
         Returns:
             dict: Słownik z wynikami weryfikacji
@@ -90,11 +92,15 @@ class VerificationManager:
         
         audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
         ident_str = str(line_id)
+        uid = line_uid or ''
         
         # Inicjalizacja wyniku
+        getter = getattr(line, 'get_tts_text', None)
+        resolved_text = getter() if callable(getter) else getattr(line, 'tts_text', '')
+        resolved_text = (resolved_text or '').strip()
         entry = {
             'id': line_id,
-            'text': line.tts_text.strip() if line.tts_text else '',
+            'text': resolved_text,
             'duration': 0.0,
             'cps': 0.0,
             'raw_status': 'PENDING',
@@ -103,22 +109,28 @@ class VerificationManager:
             'display_status': 'PENDING'
         }
         
-        text_clean = line.tts_text.strip() if line.tts_text else ''
+        text_clean = (resolved_text or '').strip()
         
         # Jeśli brak tekstu, zwróć pusty wynik
+        print(f"[VERIFY_LINE] id={line_id} uid={uid} text_len={len(text_clean)} audio_dir={audio_dir_p}")
         if not text_clean:
             entry['raw_status'] = 'EMPTY'
             entry['display_status'] = 'EMPTY'
+            print(f"[VERIFY_LINE EMPTY] id={line_id} uid={uid}")
             return entry
         
         # Szukanie pliku audio
         audio_file = None
         found_ext = ''
+        if uid:
+            base = uid if uid.startswith("output1 (") else f"output1 ({uid})"
+        else:
+            base = f"output1 ({ident_str})"
         candidates = [
-            (audio_dir_p / f"output1 ({ident_str}).wav", 'wav'),
-            (audio_dir_p / f"output1 ({ident_str}).mp3", 'mp3'),
-            (audio_dir_p / 'ready' / f"output1 ({ident_str}).ogg", 'ogg'),
-            (audio_dir_p / 'ready' / f"output1 ({ident_str}).mp3", 'mp3')
+            (audio_dir_p / f"{base}.wav", 'wav'),
+            (audio_dir_p / f"{base}.mp3", 'mp3'),
+            (audio_dir_p / 'ready' / f"{base}.ogg", 'ogg'),
+            (audio_dir_p / 'ready' / f"{base}.mp3", 'mp3')
         ]
         
         for p, ext in candidates:
@@ -131,6 +143,7 @@ class VerificationManager:
         if not audio_file:
             entry['raw_status'] = 'MISSING'
             entry['display_status'] = 'MISSING'
+            print(f"[VERIFY_LINE MISSING] id={line_id} uid={uid} base={base} candidates={[str(p) for p,_ in candidates]}" )
             return entry
         
         entry['path'] = str(audio_file)
@@ -320,6 +333,10 @@ class VerificationManager:
             'success': False,
             'error': None
         }
+
+        if not RAPIDFUZZ_AVAILABLE:
+            result['error'] = 'rapidfuzz library not available'
+            return result
         
         # Jeśli brak bibliotek
         if not WHISPER_AVAILABLE or not RAPIDFUZZ_AVAILABLE:
@@ -377,8 +394,8 @@ class VerificationManager:
         
         # Porównanie z oryginalnym tekstem
         try:
-            original_text = line.original_text.strip()
-            tts_text = line.tts_text.strip()
+            original_text = line.get_text().strip()
+            tts_text = line.get_tts_text().strip()
             
             # Oczyszczenie tekstów - usunięcie znaków specjalnych, średniki, etc.
             import re
@@ -467,7 +484,7 @@ class VerificationManager:
             out_path = str(Path(tmpdir) / f"cps_worker_{uid}.{wi}.json")
             p = multiprocessing.Process(
                 target=_verification_process_entry,
-                args=(job.audio_dir, job.lines_texts, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers)
+                args=(job.audio_dir, job.lines_texts, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers)
             )
             p.start()
             procs.append(p)
@@ -568,7 +585,7 @@ class VerificationManager:
 
 
 # --- worker entry (updated to use verify_line static method) ---
-def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1):
+def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1):
     """
     Pracownik procesu do weryfikacji audio.
     Zapisuje wyniki do JSON.
@@ -585,11 +602,18 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str
             json.dump(dct, tf, ensure_ascii=False)
         tmp.replace(out_file)
     
+    def _normalize_uid(uid: str) -> str:
+        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
+        if uid.startswith("output1 ("):
+            return uid
+        return f"output1 ({uid})"
+
     for i, text in enumerate(lines_texts):
         if total_workers and (i % total_workers) != worker_idx:
             continue
         
         ident = str(i + 1)
+        uid = line_uids[i] if line_uids and i < len(line_uids) else ''
         
         # Tworzenie obiektu Line
         line = Line(original_text=text, text=text, tts_text=text.strip())
@@ -599,6 +623,7 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str
             line=line,
             audio_dir=audio_dir,
             line_id=i + 1,
+            line_uid=uid,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
             ignore_short=ignore_short
         )

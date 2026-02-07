@@ -7,6 +7,33 @@ import datetime
 import re
 
 
+BUILTIN_REMOVE = [
+    (PatternItem(r"^\[[^\]]*\]+$", "", False), "Usuń całe linie [.*]"),
+    (PatternItem(r"^\<[^>]*>+$", "", False), "Usuń całe linie <.*>"),
+    (PatternItem(r"^\{[^\}]*\}+$", "", False), "Usuń całe linie {.*}"),
+    (PatternItem(r"^\([^\)]*\)+$", "", False), "Usuń całe linie (.*)"),
+    (PatternItem(r"^[A-Z\?\!\.]{,4}$", "", True), None),
+    (PatternItem(r" ", "", False), "Usuń niektóre niewidoczne znaki"),
+]
+BUILTIN_REPLACE = [
+    (PatternItem(r"\[[^\]]*\]+", " ", False), "Usuń treść [.*]"),
+    (PatternItem(r"\<[^>]*>+", " ", False), "Usuń treść <.*>"),
+    (PatternItem(r"\{[^\}]*\}+", " ", False), "Usuń treść {.*}"),
+    (PatternItem(r"\([^\)]*\)+", " ", False), "Usuń treść (.*)"),
+    (PatternItem(r"…", "...", False), "Popraw trójkropek"),
+    (PatternItem(r"\.{2,}", ".", False), "Trójkropek > kropka"),
+    (PatternItem(r"\?!", "?", False), "?! -> ?"),
+    (PatternItem(r"\?{2,}", "?", False), "?(?)+ -> ?"),
+    (PatternItem(r"[@#$^&*\(\)\{\}]+", " ", False), "Usuń znaki specjalne jak @#$"),
+    (PatternItem(r"\s{2,}", " ", False), "Zamień białe znaki na spacje"),
+    (PatternItem(r"^[-.\"\']", "", False), "Usuń wiodące znaki specjalne (-.\"')"),
+    (PatternItem(r"[-\"\']$", "", False), "Usuń kończące znaki specjalne (-\"')"),
+]
+
+
+LineList = List[Line]
+
+
 def gather_active_patterns(custom_remove: List[PatternItem], custom_replace: List[PatternItem]):
     """Zbiera wszystkie aktywne wzorce (tylko custom, builtin są już przekazane przez caller)."""
     remove_patterns = [p for p in custom_remove if p.enabled]
@@ -21,11 +48,12 @@ def get_patterns_signature(patterns: List[PatternItem]):
 
 def apply_patterns(app, force_refresh=False):
     """Aplikuje wzorce usuwania i zamiany na liniach aplikacji."""
-    if not app.lines:
+    lines: LineList = app.lines
+    if not lines:
         return
 
-    apply_remove_patterns(app.lines, app.builtin_remove + app.custom_remove)
-    apply_replace_patterns(app.lines, app.builtin_replace + app.custom_replace)
+    apply_remove_patterns(lines, app.builtin_remove + app.custom_remove)
+    apply_replace_patterns(lines, app.builtin_replace + app.custom_replace)
 
     # Aktualizacja widoku
     app._update_subtitle_panel_content()
@@ -36,21 +64,22 @@ def apply_patterns(app, force_refresh=False):
 
 def apply_processing(app):
     """Zatwierdzenie zmian (okno podsumowania)."""
-    if not app.lines:
+    lines: LineList = app.lines
+    if not lines:
         messagebox.showwarning('Brak pliku', 'Najpierw wczytaj plik z napisami.')
         return
 
     rem_patterns, _ = gather_active_patterns(app.custom_remove, app.custom_replace)
 
-    apply_remove_patterns(app.lines, rem_patterns)
+    apply_remove_patterns(lines, rem_patterns)
 
     changes_count = 0
-    for i, line in enumerate(app.lines):
+    for i, line in enumerate(lines):
         if line.original_text != line.text:
             changes_count += 1
 
     ProcessingSummaryWindow(
-        app, len(app.lines), changes_count,
+        app, len(lines), changes_count,
         manual_edits_count=changes_count,
         callback=lambda remove_empty, remove_duplicates: _finalize_processing(app, remove_empty, remove_duplicates)
     )
@@ -69,7 +98,8 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
     rem_patterns, _ = gather_active_patterns(app.custom_remove, app.custom_replace)
 
     # 2. Aplikuj wzorce usuwające na ORYGINALNYCH liniach
-    working_lines = list(app.original_lines) if hasattr(app, 'original_lines') else [l.original_text for l in app.lines]
+    lines: LineList = app.lines
+    working_lines = list(app.original_lines) if hasattr(app, 'original_lines') else [l.original_text for l in lines]
 
     # wrapped apply_remove_patterns for strings: create temporary Line objects
     temp_lines = [Line(original_text=s, text=s, tts_text=s) for s in working_lines]

@@ -8,7 +8,7 @@ import os
 
 from app.entity import Line, PatternItem
 from app.tooltip import CreateToolTip
-from app.utils import compile_pattern
+from app.utils import compile_pattern, ready_dir_from_audio_dir
 
 
 class AudioDeleterWindow(ctk.CTkToplevel):
@@ -108,6 +108,12 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         self.ent_remove_pattern.delete(0, "end")
         self.recalculate_stats()
 
+    def _normalize_uid(self, uid: str) -> str:
+        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
+        if uid.startswith("output1 ("):
+            return uid
+        return f"output1 ({uid})"
+
     def add_row(self, frame, pattern_item: PatternItem, target_list: List[PatternItem]):
         """
         Adds a UI row for a pattern to the scrollable frame.
@@ -140,18 +146,19 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         Finds all audio files associated with a given dialog identifier.
 
         Args:
-            identifier: The dialog line number (e.g., "123").
+            identifier: UID linii (np. "output1 (123)" albo "output1 (abc123)").
 
         Returns:
             A list of tuples, each containing a Path object and a boolean (True if in /ready/).
         """
+        base = self._normalize_uid(identifier)
+        ready_folder = ready_dir_from_audio_dir(self.audio_dir)
         candidates = [
-            (self.audio_dir / f"output1 ({identifier}).wav", False),
-            (self.audio_dir / f"output1 ({identifier}).ogg", False),
-            # Dodano mp3 na wszelki wypadek
-            (self.audio_dir / f"output1 ({identifier}).mp3", False),
-            (self.audio_dir / "ready" / f"output1 ({identifier}).ogg", True),
-            (self.audio_dir / "ready" / f"output2 ({identifier}).ogg", True)
+            (self.audio_dir / f"{base}.wav", False),
+            (self.audio_dir / f"{base}.ogg", False),
+            (self.audio_dir / f"{base}.mp3", False),
+            (ready_folder / f"{base}.ogg", True),
+            (ready_folder / f"{base}.mp3", True)
         ]
         return [(f, ready) for f, ready in candidates if f.exists()]
 
@@ -178,7 +185,7 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         files_set = set()
 
         for i, line in enumerate(self.dialogs):
-            identifier = str(i + 1)
+            identifier = getattr(line, 'uid', str(i + 1))
             is_match = False
             for pat in compiled_patterns:
                 if pat.search(line.text):

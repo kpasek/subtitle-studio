@@ -5,10 +5,15 @@ import threading
 import shutil
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
+from app.utils import ready_dir_from_audio_dir
+from app.entity import Line
 
 if TYPE_CHECKING:
     from studio import SubtitleStudioApp
+
+
+LineList = List[Line]
 
 
 class GameReaderExportWindow(ctk.CTkToplevel):
@@ -98,15 +103,22 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         # Inicjalizacja stanu
         self._check_files_status()
 
-    def _get_target_file_info(self, ident: str, ready_dir: Path) -> Tuple[Optional[Path], Optional[str]]:
-        """Zwraca ścieżkę do przekonwertowanego pliku (preferuje OGG, potem MP3) i jego rozszerzenie."""
-        # 1. Sprawdź OGG
-        ogg_path = ready_dir / f"output1 ({ident}).ogg"
+    def _normalize_uid(self, uid: str) -> str:
+        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
+        if uid.startswith("output1 ("):
+            return uid
+        return f"output1 ({uid})"
+
+    def _get_target_file_info(self, uid: str, ready_dir: Path) -> Tuple[Optional[Path], Optional[str]]:
+        """Zwraca sciezke do przekonwertowanego pliku po uid (preferuje OGG, potem MP3) i jego rozszerzenie."""
+        base = self._normalize_uid(uid)
+        # 1. Sprawdz OGG
+        ogg_path = ready_dir / f"{base}.ogg"
         if ogg_path.exists():
             return ogg_path, ".ogg"
 
-        # 2. Sprawdź MP3
-        mp3_path = ready_dir / f"output1 ({ident}).mp3"
+        # 2. Sprawdz MP3
+        mp3_path = ready_dir / f"{base}.mp3"
         if mp3_path.exists():
             return mp3_path, ".mp3"
 
@@ -119,14 +131,16 @@ class GameReaderExportWindow(ctk.CTkToplevel):
             self.lbl_conv_status.configure(text="---")
             return
 
-        expected_count = len(self.app.lines)
+        lines: LineList = self.app.lines
+        expected_count = len(lines)
 
         # 1. Sprawdź generowanie (WAV/MP3)
         generated_count = 0
-        for i in range(expected_count):
-            ident = str(i + 1)
-            if (self.app.audio_dir / f"output1 ({ident}).wav").exists() or \
-                    (self.app.audio_dir / f"output1 ({ident}).mp3").exists():
+        for i, line in enumerate(lines):
+            uid = line.uid
+            base = self._normalize_uid(uid)
+            if (self.app.audio_dir / f"{base}.wav").exists() or \
+                    (self.app.audio_dir / f"{base}.mp3").exists():
                 generated_count += 1
 
         is_gen_ok = generated_count >= expected_count and expected_count > 0
@@ -137,13 +151,14 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         self.btn_generate.configure(state="disabled" if is_gen_ok else "normal")
 
         # 2. Sprawdź konwersję (OGG/MP3 w ready)
-        ready_dir = self.app.audio_dir / "ready"
+        ready_dir = ready_dir_from_audio_dir(self.app.audio_dir)
         converted_count = 0
         if ready_dir.exists():
-            for i in range(expected_count):
-                ident = str(i + 1)
-                ogg_path = ready_dir / f"output1 ({ident}).ogg"
-                mp3_path = ready_dir / f"output1 ({ident}).mp3"
+            for i, line in enumerate(lines):
+                uid = line.uid
+                base = self._normalize_uid(uid)
+                ogg_path = ready_dir / f"{base}.ogg"
+                mp3_path = ready_dir / f"{base}.mp3"
                 if ogg_path.exists() or mp3_path.exists():
                     converted_count += 1
 
@@ -194,25 +209,18 @@ class GameReaderExportWindow(ctk.CTkToplevel):
 
     def _export_task(self, dest_dir: Path, copy_files: bool):
         try:
+            lines: LineList = self.app.lines
             # 1. Zapisz napisy (processed_clean) do subtitlesPL.txt
-            clean_lines = [self.app.lines[i].text for i in range(len(self.app.lines))]
-            subtitles_file = dest_dir / "subtitlesPL.txt"
+            clean_lines = [line.get_text() for line in lines]
+            subtitles_file = dest_dir / "subtitles.txt"
 
             with open(subtitles_file, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(clean_lines))
 
-            self._update_status_safe("Zapisano subtitlesPL.txt", "blue")
-
-            if self.app.names_list:
-                names_file = dest_dir / "names.txt"
-                with open(names_file, 'w', encoding='utf-8') as f:
-                    # Zapisujemy każde imię w nowej linii
-                    f.write('\n'.join(self.app.names_list))
-
-                self._update_status_safe("Zapisano names.txt", "blue")
+            self._update_status_safe("Zapisano subtitles.txt", "blue")
 
             # 2. Kopiowanie plików audio do podkatalogu 'audio'
-            ready_dir = self.app.audio_dir / "ready"
+            ready_dir = ready_dir_from_audio_dir(self.app.audio_dir)
             target_audio_dir = dest_dir / "audio"
 
             if copy_files:
@@ -224,12 +232,13 @@ class GameReaderExportWindow(ctk.CTkToplevel):
 
                 # Lista plików do skopiowania
                 files_to_copy = []
-                # Szukamy plików odpowiadających ilości linii w projekcie
-                for i in range(len(self.app.lines)):
-                    ident = str(i + 1)
-                    src_file, _ = self._get_target_file_info(ident, ready_dir)
-                    if src_file:
-                        files_to_copy.append(src_file)
+                # Szukamy plikow po uid, zapisujemy jako output1 (i).ext
+                for i, line in enumerate(lines):
+                    uid = line.uid
+                    src_file, ext = self._get_target_file_info(uid, ready_dir)
+                    if src_file and ext:
+                        dst_name = f"output1 ({i + 1}){ext}"
+                        files_to_copy.append((src_file, dst_name))
 
                 total_files = len(files_to_copy)
 
@@ -241,8 +250,8 @@ class GameReaderExportWindow(ctk.CTkToplevel):
                     update_step = max(10, int(total_files / 100))
 
                     copied_count = 0
-                    for src in files_to_copy:
-                        dst = target_audio_dir / src.name
+                    for src, dst_name in files_to_copy:
+                        dst = target_audio_dir / dst_name
                         shutil.copy2(src, dst)
                         copied_count += 1
 
@@ -285,7 +294,6 @@ class GameReaderExportWindow(ctk.CTkToplevel):
                 "USE_CENTER_LINE_3": False,
                 "audio_dir": "audio",
                 "text_file_path": "subtitlesPL.txt",
-                "names_file_path": "names.txt" if self.app.names_list else "",
                 "screenshot_dir": "",
                 "key_bindings": {
                     "toggle_on": "home",

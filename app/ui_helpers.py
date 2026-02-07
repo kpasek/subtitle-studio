@@ -27,25 +27,4 @@ def show_editor_context_menu(app, event):
     menu.add_command(label="Wytnij", command=lambda: app.subtitle_panel.editor.entry.event_generate("<<Cut>>"))
     menu.add_command(label="Kopiuj", command=lambda: app.subtitle_panel.editor.entry.event_generate("<<Copy>>"))
     menu.add_command(label="Wklej", command=lambda: app.subtitle_panel.editor.entry.event_generate("<<Paste>>"))
-    menu.add_separator()
-    menu.add_command(label="Dodaj do imion", command=lambda: add_selected_text_to_names(app))
     menu.tk_popup(event.x_root, event.y_root)
-
-
-def add_selected_text_to_names(app):
-    try:
-        selected_text = app.subtitle_panel.editor.entry.selection_get()
-        selected_text = selected_text.strip()
-
-        if not selected_text:
-            return
-
-        if selected_text in app.names_list:
-            app.set_status(f"Ignoruję: Imię '{selected_text}' już jest na liście.")
-        else:
-            app.names_list.append(selected_text)
-            app.mark_as_unsaved()
-            app.set_status(f"Dodano '{selected_text}' do listy imion.")
-    except Exception:
-        # Broader except to swallow selection errors
-        pass

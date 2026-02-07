@@ -17,22 +17,20 @@ from tkinter import filedialog, messagebox
 # --- Importy z modułów aplikacji ---
 from app.pattern_manager import PatternManagerWindow
 from app.settings import SettingsWindow
-from app.utils import resource_path, is_installed
+from app.utils import resource_path, is_installed, ready_dir_from_audio_dir
 from app.entity import Line, PatternItem
 from app.subtitles import SubtitlePanel
 from ui.menu import AppMenu
 
 # Refaktoryzacja IO -> app.io
 from app.io import load_subtitle_file, save_lines_to_file
-from app.patterns import apply_patterns as patterns_apply
+from app.patterns import apply_patterns as patterns_apply, BUILTIN_REMOVE, BUILTIN_REPLACE
 
-from audio.audio_renamer import AudioRenameWindow
 from audio.pattern_editor import PatternEditorWindow
 from audio.deleter import AudioDeleterWindow
 from audio.generation_queue import GenerationQueueWindow
 from ui.game_reader_export import GameReaderExportWindow
 from ui.pattern_io import PatternIOWindow
-from ui.names_manager import NamesManagerWindow
 
 from importlib import util as _import_util
 
@@ -50,29 +48,6 @@ APP_CONFIG = os.path.join(application_path, "subtitle-studio.json")
 
 APP_TITLE = "Subtitle Studio"
 
-BUILTIN_REMOVE = [
-    (PatternItem(r"^\[[^\]]*\]+$", "", False), "Usuń całe linie [.*]"),
-    (PatternItem(r"^\<[^\>]*\>+$", "", False), "Usuń całe linie <.*>"),
-    (PatternItem(r"^\{[^\}]*\}+$", "", False), "Usuń całe linie {.*}"),
-    (PatternItem(r"^\([^\)]*\)+$", "", False), "Usuń całe linie (.*)"),
-    (PatternItem(r"^[A-Z\?\!\.]{,4}$", "", True), None),
-    (PatternItem(r" ", "", False), "Usuń niektóre niewidoczne znaki"),
-]
-BUILTIN_REPLACE = [
-    (PatternItem(r"\[[^\]]*\]+", " ", False), "Usuń treść [.*]"),
-    (PatternItem(r"\<[^\>]*\>+", " ", False), "Usuń treść <.*>"),
-    (PatternItem(r"\{[^\}]*\}+", " ", False), "Usuń treść {.*}"),
-    (PatternItem(r"\([^\)]*\)+", " ", False), "Usuń treść (.*)"),
-    (PatternItem(r"…", "...", False), "Popraw trójkropek"),
-    (PatternItem(r"\.{2,}", ".", False), "Trójkropek > kropka"),
-    (PatternItem(r"\?!", "?", False), "?! -> ?"),
-    (PatternItem(r"\?{2,}", "?", False), "?(?)+ -> ?"),
-    (PatternItem(r"[@#$^&*\(\)\{\}]+", " ", False), "Usuń znaki specjalne jak @#$"),
-    (PatternItem(r"\s{2,}", " ", False), "Zamień białe znaki na spacje"),
-    (PatternItem(r"^[-.\"\']", "", False), "Usuń wiodące znaki specjalne (-.\"')"),
-    (PatternItem(r"[-\"\']$", "", False), "Usuń kończące znaki specjalne (-\"')"),
-]
-
 FFPLAY_AVAILABLE = shutil.which("ffplay") is not None
 if not FFPLAY_AVAILABLE:
     print("Ostrzeżenie: Nie znaleziono 'ffplay' w zmiennych środowiskowych (PATH).")
@@ -87,9 +62,12 @@ if os.name == "nt":
             pass
 
 
+LineList = List[Line]
+
+
 class SubtitleStudioApp(ctk.CTk):
     """Główna klasa aplikacji Subtitle Studio."""
-    APP_VERSION = "0.13.0"
+    APP_VERSION = "0.14.0"
 
     def __init__(self):
         super().__init__(className="SubtitleStudio")
@@ -109,9 +87,7 @@ class SubtitleStudioApp(ctk.CTk):
 
         self.loaded_path: Optional[Path] = None
 
-        self.lines: List[Line] = []
-
-        self.names_list: List[str] = []
+        self.lines: LineList = []
 
         # Zmienne GUI i Cache (inicjalizacja)
         self.lbl_filename: Optional[ctk.CTkLabel] = None
@@ -182,13 +158,12 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-s>", lambda e: self.save_project())
         self.bind("<Control-f>", lambda e: self.subtitle_panel.search_entry.focus_set())
         self.bind("<Control-q>", lambda e: self.show_generation_queue())
-        self.bind("<Control-n>", lambda e: self._add_selected_text_to_names())
-        self.bind("<Control-N>", lambda e: self.open_names_manager())
-
         self.bind("<Tab>", self._cycle_view_mode)
         self.bind("<Escape>", self._on_escape_key)
 
         # Audio i Wzorce
+        self.bind("<Control-Y>", lambda e: self.open_verification_window()) # Shift+Ctrl+y
+        self.bind("<Control-y>", lambda e: self.subtitle_panel.verify_selected_dialogs())
         self.bind("<Control-R>",
                   lambda e: self.enqueue_convert_all())  # Shift+Ctrl+r (Tkinter widzi Shift jako wielką literę)
         self.bind("<Control-r>", lambda e: self.open_pattern_manager())
@@ -197,7 +172,6 @@ class SubtitleStudioApp(ctk.CTk):
         # Kontekstowe (Linia) - bindujemy do root, ale sprawdzamy kontekst w metodach
         self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())
         self.bind("<Control-g>", lambda e: self.subtitle_panel.generate_selected_dialogs())
-        self.bind("<Control-v>", lambda e: self.subtitle_panel.verify_selected_dialogs())
 
         # Ctrl+X (Usuń audio) - uwaga na konflikt z wycinaniem tekstu
         self.bind("<Control-x>", self._on_ctrl_x)
@@ -252,13 +226,13 @@ class SubtitleStudioApp(ctk.CTk):
         if self.selected_line_index is None:
             return
 
+        lines: LineList = self.lines
         idx = self.selected_line_index
         mode = self.view_mode.get()
         text_to_copy = ""
 
         try:
-            # --- ZMIANA: Użycie self.lines zamiast osobnych list ---
-            line = self.lines[idx]
+            line: Line = lines[idx]
             if mode == "Oryginał":
                 text_to_copy = line.original_text
             elif mode == "Napisy":
@@ -290,9 +264,8 @@ class SubtitleStudioApp(ctk.CTk):
         1. Czyści wyszukiwarkę i odświeża listę.
         2. Usuwa zaznaczenie linii (jeśli istnieje) i czyści edytor.
         """
-        # 1. Czyść wyszukiwarkę i nr linii
+        # 1. Czyść wyszukiwarkę
         self.subtitle_panel.search_entry.delete(0, tk.END)
-        self.subtitle_panel.search_line_nr.delete(0, tk.END)
         self.apply_patterns()  # Odświeża listę dialogów
 
         # 2. Usuń zaznaczenie
@@ -321,8 +294,10 @@ class SubtitleStudioApp(ctk.CTk):
         if self.selected_line_index is None:
             return
 
+        lines: LineList = self.lines
         mode = self.view_mode.get()
         idx = self.selected_line_index
+        line: Line = lines[idx]
 
         # Nie pozwalamy edytować oryginału
         if mode == "Oryginał":
@@ -334,20 +309,20 @@ class SubtitleStudioApp(ctk.CTk):
 
         # Zaktualizuj bezpośrednio w app.lines
         if mode == "Napisy":
-            self.lines[idx].text = empty_val
+            line.text = empty_val
         elif mode == "TTS":
-            self.lines[idx].tts_text = empty_val
+            line.tts_text = empty_val
         
         # Zapisz do CSV
         try:
             from app.io import update_line_in_csv
             if self.loaded_path:
-                update_line_in_csv(str(self.loaded_path), idx, self.lines[idx])
+                update_line_in_csv(str(self.loaded_path), idx, lines[idx])
         except Exception as e:
             print(f"Błąd zapisu do CSV: {e}")
 
         self.apply_patterns()
-        self.subtitle_panel.set_preview(self.lines)
+        self.subtitle_panel.set_preview(lines)
         self.set_status(f"Wyczyszczono zawartość linii {idx + 1}")
 
     def mark_as_unsaved(self, *args):
@@ -473,24 +448,25 @@ class SubtitleStudioApp(ctk.CTk):
     def _update_subtitle_panel_content(self):
         """Pomocnicza metoda do odświeżania panelu w zależności od trybu."""
         mode = self.view_mode.get()
-        display_list = []
-        
+        lines: LineList = self.lines
+        display_list: List[str] = []
+
         if mode == "Oryginał":
-            display_list = [l.original_text for l in self.lines]
+            display_list = [line.original_text for line in lines]
         elif mode == "Napisy":
-            display_list = [l.text for l in self.lines]
+            display_list = [line.text for line in lines]
         elif mode == "TTS":
-            display_list = [l.tts_text for l in self.lines]
+            display_list = [line.tts_text for line in lines]
 
         # Statystyki
         total_words = sum(len(line.split()) for line in display_list)
         total_chars = sum(len(line) for line in display_list)
 
-        self.lbl_count_after.configure(text=f'Linie po: {len(self.lines):,}'.replace(",", " "))
+        self.lbl_count_after.configure(text=f'Linie po: {len(lines):,}'.replace(",", " "))
         self.lbl_count_words.configure(text=f'Słowa: {total_words:,}'.replace(",", " "))
         self.lbl_count_chars.configure(text=f'Znaki: {total_chars:,}'.replace(",", " "))
         # pass Line objects instead of strings
-        self.subtitle_panel.set_preview(self.lines)
+        self.subtitle_panel.set_preview(lines)
         self.subtitle_panel.update_audio_buttons_state()
 
 
@@ -504,10 +480,6 @@ class SubtitleStudioApp(ctk.CTk):
 
 
     # --- GENEROWANIE ---
-
-    def enqueue_generate_single(self, line_no = None):
-        from app.generation import enqueue_generate_single as _enqueue_generate_single
-        return _enqueue_generate_single(self, line_no)
 
     def enqueue_generate_all(self):
         from app.generation import enqueue_generate_all as _enqueue_generate_all
@@ -624,9 +596,12 @@ class SubtitleStudioApp(ctk.CTk):
 
     def add_remove_pattern_from_selection(self, event=None):
         """Dodaje wzorzec wycinający (wywołane z panelu)."""
-        if self.selected_line_index is None: return
+        if self.selected_line_index is None:
+            return
+        lines: LineList = self.lines
         try:
-            text = self.lines[self.selected_line_index].tts_text
+            line: Line = lines[self.selected_line_index]
+            text = line.tts_text
             escaped = re.escape(text)
             if any(p.pattern == escaped for p in self.custom_remove): return
             self.custom_remove.append(PatternItem(escaped, "", True))
@@ -637,9 +612,12 @@ class SubtitleStudioApp(ctk.CTk):
             pass
 
     def add_replace_pattern_from_selection(self, event=None, from_menu=False):
-        if self.selected_line_index is None: return
+        if self.selected_line_index is None:
+            return
+        lines: LineList = self.lines
         try:
-            text = self.lines[self.selected_line_index].tts_text.strip()
+            line: Line = lines[self.selected_line_index]
+            text = line.tts_text.strip()
             if not text: return
             win = PatternEditorWindow(self, 'replace', self.handle_pattern_update, None)
             win.ent_pattern.insert(0, text)
@@ -668,10 +646,12 @@ class SubtitleStudioApp(ctk.CTk):
 
     # Proxy dla metod z menu
     def open_audio_deleter(self):
-        if not self.lines: return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self)
+        lines: LineList = self.lines
+        if not lines:
+            return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self)
         if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self)
 
-        win = AudioDeleterWindow(self, self.lines, str(self.audio_dir))
+        win = AudioDeleterWindow(self, lines, str(self.audio_dir))
         win.wait_visibility()
         win.grab_set()
 
@@ -686,25 +666,9 @@ class SubtitleStudioApp(ctk.CTk):
         win.wait_visibility()
         win.grab_set()
 
-    def choose_audio_dir(self):
-        init_dir = self.global_config.get('start_directory') or (str(self.audio_dir) if self.audio_dir else None)
-        path = filedialog.askdirectory(title="Wybierz katalog audio", initialdir=init_dir, parent=self)
-        if path:
-            self.audio_dir = Path(path)
-            if self.current_project_path: self.set_project_config('audio_path', str(self.audio_dir.absolute()))
-            self.subtitle_panel.update_audio_buttons_state()
-
-    def open_audio_rename_window(self, target_id=None, source_id=None):
-        """Otwiera okno ręcznego dopasowywania/przesuwania plików audio."""
-        if not self.audio_dir:
-            messagebox.showwarning("Brak audio", "Nie wybrano katalogu audio.")
-            return
-            # Przekazujemy parametry do okna
-        AudioRenameWindow(self, self.audio_dir, initial_target=target_id, initial_source=source_id)
-
     def delete_all_converted_audio(self):
         if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Wybierz katalog audio.", parent=self)
-        ready_dir = self.audio_dir / "ready"
+        ready_dir = ready_dir_from_audio_dir(self.audio_dir)
         if not ready_dir.is_dir() or not messagebox.askyesno("Potwierdź", f"Usunąć wszystko z {ready_dir}?"): return
 
         # POPRAWKA: Uwzględnienie zarówno plików .ogg jak i .mp3
@@ -718,23 +682,27 @@ class SubtitleStudioApp(ctk.CTk):
         self.subtitle_panel.update_audio_buttons_state()
 
     def download_clean(self):
-        if not self.lines: return
+        lines: LineList = self.lines
+        if not lines:
+            return
         path = filedialog.asksaveasfilename(defaultextension='.txt', filetypes=[('CSV', '*.csv'), ('Text files', '*.txt')])
         if path:
             if Path(path).suffix.lower() == '.csv':
-                save_lines_to_file(path, self.lines)
+                save_lines_to_file(path, lines)
             else:
-                save_lines_to_file(path, [l.text for l in self.lines])
+                save_lines_to_file(path, [l.text for l in lines])
             messagebox.showinfo('Gotowe', f'Zapisano: {path}')
 
     def download_replace(self):
-        if not self.lines: return
+        lines: LineList = self.lines
+        if not lines:
+            return
         path = filedialog.asksaveasfilename(defaultextension='.txt', filetypes=[('CSV', '*.csv'), ('Text files', '*.txt')])
         if path:
             if Path(path).suffix.lower() == '.csv':
-                save_lines_to_file(path, self.lines)
+                save_lines_to_file(path, lines)
             else:
-                save_lines_to_file(path, [l.tts_text for l in self.lines])
+                save_lines_to_file(path, [l.tts_text for l in lines])
             messagebox.showinfo('Gotowe', f'Zapisano: {path}')
 
     def add_new_subtitles(self):
@@ -772,6 +740,7 @@ class SubtitleStudioApp(ctk.CTk):
         if num_rows is None or num_rows <= 0:
             return
         
+        lines: LineList = self.lines
         # Dodaj nowe wiersze do self.lines
         try:
             for _ in range(num_rows):
@@ -786,10 +755,10 @@ class SubtitleStudioApp(ctk.CTk):
                     audio_status="",
                     audio_format=""
                 )
-                self.lines.append(new_line)
+                lines.append(new_line)
             
             # Zapisz do CSV
-            save_lines_to_file(str(self.loaded_path), self.lines)
+            save_lines_to_file(str(self.loaded_path), lines)
             
             # Odświeź UI
             self.apply_patterns()
@@ -819,8 +788,9 @@ class SubtitleStudioApp(ctk.CTk):
             return
         
         try:
-            # Wczytaj nowy plik
-            self.lines = load_subtitle_file(str(csv_path))
+            # Wczytaj nowy plik (uwzglednij kompatybilnosc dla txt)
+            audio_dir_for_compat = self.audio_dir if csv_path.suffix.lower() == '.txt' else None
+            self.lines = load_subtitle_file(str(csv_path), audio_dir=audio_dir_for_compat)
             self.loaded_path = csv_path
             
             # Zaktualizuj etykietę z nazwą pliku
@@ -837,7 +807,8 @@ class SubtitleStudioApp(ctk.CTk):
 
     def generate_game_reader_preset(self):
         """Otwiera okno konfiguracji eksportu do Game Readera."""
-        if not self.lines:
+        lines: LineList = self.lines
+        if not lines:
             messagebox.showwarning('Brak danych', 'Brak przetworzonych napisów do wyeksportowania.', parent=self)
             return
 
@@ -859,7 +830,7 @@ class SubtitleStudioApp(ctk.CTk):
             parent=self
         )
         
-        new_lines_to_add = []
+        new_lines_to_add: LineList = []
         
         if choice:
             # Użytkownik wybrał załadowanie z pliku
@@ -870,43 +841,38 @@ class SubtitleStudioApp(ctk.CTk):
                 initialdir=init_dir,
                 parent=self
             )
-            
+
             if not file_path:
                 return
-            
+
             file_path = Path(file_path)
-            
-            # Wczytaj plik w zależności od rozszerzenia
+
+            # Wczytaj plik za pośrednictwem load_subtitle_file
             try:
-                if file_path.suffix.lower() == '.csv':
-                    # Załaduj CSV
-                    from app.io import load_subtitle_file
-                    new_lines_to_add = load_subtitle_file(str(file_path))
-                else:
-                    # Załaduj TXT - każda linia jako original_text
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        lines_text = f.readlines()
-                    
-                    for line_text in lines_text:
-                        line_text = line_text.rstrip('\n\r')
-                        if line_text:  # Pomijaj puste linie
-                            new_line = Line(
-                                original_text=line_text,
-                                text="",
-                                tts_text="",
-                                audio_duration=0.0,
-                                audio_filename="",
-                                audio_similarity=0.0,
-                                audio_transcribed_text="",
-                                audio_status="",
-                                audio_format=""
-                            )
-                            new_lines_to_add.append(new_line)
-                
+                # Jeśli to TXT, przesłaj audio_dir dla kompatybilności wstecznej
+                audio_dir_for_compat = self.audio_dir if file_path.suffix.lower() == '.txt' else None
+                new_lines_to_add = load_subtitle_file(str(file_path), audio_dir=audio_dir_for_compat)
+
                 if not new_lines_to_add:
                     messagebox.showwarning('Brak danych', 'Plik nie zawiera żadnych danych.', parent=self)
                     return
-                
+
+                target_csv = file_path
+                if file_path.suffix.lower() == '.txt':
+                    csv_candidate = file_path.with_suffix('.csv')
+                    if not csv_candidate.exists():
+                        try:
+                            save_lines_to_file(str(csv_candidate), new_lines_to_add)
+                        except Exception as write_err:
+                            messagebox.showerror('Błąd', f'Nie udało się utworzyć pliku CSV: {write_err}', parent=self)
+                            return
+                    target_csv = csv_candidate
+
+                if target_csv.exists() and not self.loaded_path:
+                    self.loaded_path = target_csv
+                    if self.lbl_filename:
+                        self.lbl_filename.configure(text=f"Plik: {self.loaded_path.name}")
+
             except Exception as e:
                 messagebox.showerror('Błąd', f'Nie udało się wczytać pliku: {str(e)}', parent=self)
                 return
@@ -965,10 +931,11 @@ class SubtitleStudioApp(ctk.CTk):
         
         # Dodaj nowe wiersze do self.lines i zapisz
         try:
-            self.lines.extend(new_lines_to_add)
+            lines: LineList = self.lines
+            lines.extend(new_lines_to_add)
             
             # Zapisz do CSV
-            save_lines_to_file(str(self.loaded_path), self.lines)
+            save_lines_to_file(str(self.loaded_path), lines)
             
             # Odświeź UI
             self.apply_patterns()
@@ -1000,7 +967,8 @@ class SubtitleStudioApp(ctk.CTk):
         
         try:
             # Wczytaj nowy plik
-            self.lines = load_subtitle_file(str(csv_path))
+            audio_dir_for_compat = self.audio_dir if csv_path.suffix.lower() == '.txt' else None
+            self.lines = load_subtitle_file(str(csv_path), audio_dir=audio_dir_for_compat)
             self.loaded_path = csv_path
             
             # Zaktualizuj etykietę z nazwą pliku
@@ -1041,21 +1009,21 @@ class SubtitleStudioApp(ctk.CTk):
         from app.project import _remove_recent_project as _remove_recent_project_impl
         return _remove_recent_project_impl(self, path)
 
+    def open_verification_window(self):
+        """Otwiera okno weryfikacji wszystkich plików."""
+        try:
+            from ui.verification_window import VerificationWindow
+            VerificationWindow(self)
+        except Exception as e:
+            print(f"[ERROR] Could not open VerificationWindow: {e}")
+
     def _clear_recent_projects(self):
         from app.project import _clear_recent_projects as _clear_recent_projects_impl
         return _clear_recent_projects_impl(self)
 
-    def open_names_manager(self):
-        """Otwiera okno zarządzania imionami."""
-        NamesManagerWindow(self)
-
     def _show_editor_context_menu(self, event):
         from app.ui_helpers import show_editor_context_menu as _show_editor_context_menu
         return _show_editor_context_menu(self, event)
-
-    def _add_selected_text_to_names(self):
-        from app.ui_helpers import add_selected_text_to_names as _add_selected_text_to_names
-        return _add_selected_text_to_names(self)
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
