@@ -30,6 +30,8 @@ class AppMenu:
         gen_menu = tk.Menu(menubar, tearoff=0)
         # gen_menu.add_command(label="Wczytaj napisy", command=self.app.load_file)
         gen_menu.add_command(label="Wybierz katalog audio", command=self.app.choose_audio_dir)
+        gen_menu.add_command(label="Dodaj nowe napisy", command=self.app.add_new_subtitles)
+        gen_menu.add_command(label="Zmień plik CSV", command=self.app.change_subtitle_file)
         gen_menu.add_separator()
         gen_menu.add_command(label="Pokaż kolejkę zadań", command=self.app.show_generation_queue, accelerator="Ctrl+Q")
         gen_menu.add_command(label="Generuj dialogi", command=self.app.enqueue_generate_all, accelerator="Ctrl+Shift+G")
@@ -41,12 +43,13 @@ class AppMenu:
         # gen_menu.add_command(label="Weryfikacja audio (CPS)", command=self.open_audio_verification)
         gen_menu.add_separator()
         gen_menu.add_command(label="Imiona", command=self.app.open_names_manager, accelerator="Ctrl+Shift+N")
-        
-        # --- Weryfikacja: otwiera dedykowane okno sterujące weryfikacją ---
-        menubar.add_cascade(label="Dialogi", menu=gen_menu)
+        gen_menu.add_separator()
         gen_menu.add_command(label="Pobierz napisy", command=self.app.download_clean)
         gen_menu.add_command(label="Pobierz napisy TTS", command=self.app.download_replace)
         gen_menu.add_command(label="Generuj preset", command=self.app.generate_game_reader_preset)
+        
+        # --- Weryfikacja: otwiera dedykowane okno sterujące weryfikacją ---
+        menubar.add_cascade(label="Dialogi", menu=gen_menu)
 
 
         # --- Wzorce ---

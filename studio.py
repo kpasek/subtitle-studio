@@ -748,6 +748,89 @@ class SubtitleStudioApp(ctk.CTk):
         # Otwórz nowe okno konfiguracji
         GameReaderExportWindow(self)
 
+    def add_new_subtitles(self):
+        """Dodaje nowe wiersze do aktualnego pliku CSV z napisami."""
+        if not self.loaded_path:
+            messagebox.showwarning('Brak pliku', 'Najpierw załaduj lub utwórz plik CSV z napisami.', parent=self)
+            return
+        
+        # Dialog z pytaniem ile wierszy dodać
+        from tkinter import simpledialog
+        num_rows = simpledialog.askinteger(
+            "Dodaj napisy",
+            "Ile nowych wierszy dodać?",
+            parent=self,
+            minvalue=1,
+            maxvalue=1000,
+            initialvalue=10
+        )
+        
+        if num_rows is None or num_rows <= 0:
+            return
+        
+        # Dodaj nowe wiersze do self.lines
+        try:
+            for _ in range(num_rows):
+                new_line = Line(
+                    original_text="",
+                    text="",
+                    tts_text="",
+                    audio_duration=0.0,
+                    audio_filename="",
+                    audio_similarity=0.0,
+                    audio_transcribed_text="",
+                    audio_status="",
+                    audio_format=""
+                )
+                self.lines.append(new_line)
+            
+            # Zapisz do CSV
+            save_lines_to_file(str(self.loaded_path), self.lines)
+            
+            # Odświeź UI
+            self.apply_patterns()
+            
+            self.set_status(f"Dodano {num_rows} nowych wierszy do {self.loaded_path.name}")
+            messagebox.showinfo('Gotowe', f'Dodano {num_rows} nowych wierszy do pliku CSV.')
+        except Exception as e:
+            messagebox.showerror('Błąd', f'Nie udało się dodać wierszy: {str(e)}', parent=self)
+
+    def change_subtitle_file(self):
+        """Zmienia plik CSV z napisami na inny."""
+        init_dir = self.global_config.get('start_directory')
+        path = filedialog.askopenfilename(
+            title="Wybierz plik CSV z napisami",
+            filetypes=[('CSV', '*.csv'), ('Wszystkie pliki', '*.*')],
+            initialdir=init_dir,
+            parent=self
+        )
+        
+        if not path:
+            return
+        
+        # Sprawdzenie czy plik istnieje
+        csv_path = Path(path)
+        if not csv_path.exists():
+            messagebox.showerror('Błąd', 'Wybrany plik nie istnieje.', parent=self)
+            return
+        
+        try:
+            # Wczytaj nowy plik
+            self.lines = load_subtitle_file(str(csv_path))
+            self.loaded_path = csv_path
+            
+            # Zaktualizuj etykietę z nazwą pliku
+            if self.lbl_filename:
+                self.lbl_filename.configure(text=f"Plik: {csv_path.name}")
+            
+            # Odśwież UI
+            self.apply_patterns()
+            
+            self.set_status(f"Wczytano: {csv_path.name}")
+            messagebox.showinfo('Gotowe', f'Wczytano plik: {csv_path.name}')
+        except Exception as e:
+            messagebox.showerror('Błąd', f'Nie udało się wczytać pliku: {str(e)}', parent=self)
+
     def import_patterns_from_csv(self):
         """Otwiera okno IO wzorców na zakładce Import."""
         win = PatternIOWindow(self)
