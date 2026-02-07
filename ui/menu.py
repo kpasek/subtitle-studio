@@ -37,6 +37,9 @@ class AppMenu:
         gen_menu.add_command(label="Weryfikacja audio (CPS)", command=self.app.open_audio_verification)
         gen_menu.add_separator()
         gen_menu.add_command(label="Imiona", command=self.app.open_names_manager, accelerator="Ctrl+Shift+N")
+        
+        # --- Weryfikacja: otwiera dedykowane okno sterujące weryfikacją ---
+        menubar.add_command(label="Weryfikacja", command=self.app.open_verification_window)
         gen_menu.add_command(label="Pobierz napisy", command=self.app.download_clean)
         gen_menu.add_command(label="Pobierz napisy TTS", command=self.app.download_replace)
         gen_menu.add_command(label="Generuj preset", command=self.app.generate_game_reader_preset)

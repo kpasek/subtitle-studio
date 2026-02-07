@@ -6,7 +6,7 @@ import tkinter as tk
 import re
 import os
 
-from app.entity import PatternItem
+from app.entity import Line, PatternItem
 from app.tooltip import CreateToolTip
 from app.utils import compile_pattern
 
@@ -17,7 +17,7 @@ class AudioDeleterWindow(ctk.CTkToplevel):
     matched against dialog lines.
     """
 
-    def __init__(self, master, dialogs: List[str], audio_path: str):
+    def __init__(self, master, dialogs: List[Line], audio_path: str):
         """
         Initializes the AudioDeleterWindow.
 
@@ -181,7 +181,7 @@ class AudioDeleterWindow(ctk.CTkToplevel):
             identifier = str(i + 1)
             is_match = False
             for pat in compiled_patterns:
-                if pat.search(line):  # Any match in the line
+                if pat.search(line.text):
                     is_match = True
                     break
 

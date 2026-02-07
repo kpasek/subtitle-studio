@@ -5,8 +5,12 @@ from tkinter import ttk
 import subprocess
 import os
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional
 from tkinter import messagebox
+import threading
+import time
+import json
+import shutil
 
 from app.editor import LineEditor
 
@@ -27,16 +31,33 @@ class SubtitlePanel(ctk.CTkFrame):
 
         # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
         self.columns_config = [
-            {"id": "line_nr", "text": "Nr", "width": 25, "anchor": "center"},
-            {"id": "content", "text": "Tekst", "width": 600, "anchor": "w"},
+            {"id": "line_nr", "text": "Nr", "width": 40, "anchor": "center"},
+            {"id": "content", "text": "Tekst", "width": 500, "anchor": "w"},
+            {"id": "duration", "text": "Czas [s]", "width": 80, "anchor": "center"},
+            {"id": "cps", "text": "CPS", "width": 60, "anchor": "center"},
+            {"id": "status", "text": "Status", "width": 150, "anchor": "center"},
+            {"id": "format", "text": "Format", "width": 60, "anchor": "center"},
+            {"id": "audio_file", "text": "Plik audio", "width": 200, "anchor": "w"},
         ]
 
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
+        # --- Weryfikacja audio ---
+        self.ver_running = False
+        self.ver_stop_event = threading.Event()
+        self.ver_analysis_results = []  # list of dicts per line
+        self.ver_processed_indices = set()
+        self.ver_cache = {}
+        self.ver_cache_file = None
+        if hasattr(self.app, 'loaded_path') and self.app.loaded_path:
+            self.ver_cache_file = self.app.loaded_path.with_suffix('.cps_cache.json')
+        self.ver_ffprobe_path = shutil.which('ffprobe')
+
         self._create_widgets()
 
     def _create_widgets(self):
+
         # --- Górny pasek stats_frame - Row 0 ---
         stats_frame = ctk.CTkFrame(self)
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
@@ -104,6 +125,8 @@ class SubtitlePanel(ctk.CTkFrame):
 
         self.search_button = ctk.CTkButton(audio_btn_frame, text="Szukaj", command=self.app.apply_patterns, width=60)
         self.search_button.grid(row=0, column=6, padx=(6, 0))
+        self.filter_button = ctk.CTkButton(audio_btn_frame, text="Filtruj", command=self.open_filter_window, width=80)
+        self.filter_button.grid(row=0, column=7, padx=(6, 0))
 
         # --- Preview Table (Lista napisów jako Tabela) - Row 2 ---
         # Kontener dla tabeli i paska przewijania
@@ -140,7 +163,8 @@ class SubtitlePanel(ctk.CTkFrame):
 
         # Konfiguracja nagłówków i kolumn na podstawie self.columns_config
         for col_conf in self.columns_config:
-            self.tree.heading(col_conf["id"], text=col_conf["text"])
+            # add click-to-sort handler
+            self.tree.heading(col_conf["id"], text=col_conf["text"], command=lambda c=col_conf["id"]: self._sort_by_column(c))
             self.tree.column(col_conf["id"], width=col_conf["width"], anchor=col_conf["anchor"])
 
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -219,14 +243,69 @@ class SubtitlePanel(ctk.CTkFrame):
             try:
                 idx = self.app.selected_line_index
                 if mode == "Napisy":
-                    text_to_edit = self.app.processed_clean[idx]
+                    text_to_edit = self.app.lines[idx].text
                 elif mode == "TTS":
-                    text_to_edit = self.app.processed_replace[idx]
+                    text_to_edit = self.app.lines[idx].tts_text
             except IndexError:
                 pass
 
         self.editor.set_content(text_to_edit, read_only=read_only)
         self.update_audio_buttons_state()
+
+    def _sort_by_column(self, col_id: str):
+        """Sortuje `self.app.lines` i `ver_analysis_results` według kolumny, toggle asc/desc."""
+        # Initialize sort state dict
+        if not hasattr(self, '_sort_state'):
+            self._sort_state = {}
+        asc = not self._sort_state.get(col_id, True)
+        self._sort_state[col_id] = asc
+
+        def key_fn(idx_line):
+            i, ln = idx_line
+            try:
+                if col_id == 'line_nr':
+                    return i
+                if col_id == 'content':
+                    return (ln.text or '').lower()
+                if col_id == 'duration':
+                    return float(getattr(ln, 'audio_duration', 0.0) or 0.0)
+                if col_id == 'cps':
+                    # try ver_analysis_results
+                    if i < len(self.ver_analysis_results):
+                        return float(self.ver_analysis_results[i].get('cps') or 0.0)
+                    return 0.0
+                if col_id == 'status':
+                    if i < len(self.ver_analysis_results):
+                        return self.ver_analysis_results[i].get('display_status') or ''
+                    return ''
+                if col_id == 'format':
+                    if i < len(self.ver_analysis_results):
+                        return (self.ver_analysis_results[i].get('ext') or '').lower()
+                    return ''
+                if col_id == 'audio_file':
+                    if i < len(self.ver_analysis_results):
+                        p = self.ver_analysis_results[i].get('path')
+                        return (str(p) if p else '')
+                    return ''
+            except Exception:
+                return ''
+
+        indexed = list(enumerate(self.app.lines))
+        indexed.sort(key=key_fn, reverse=not asc)
+        # reorder app.lines accordingly
+        self.app.lines = [ln for _, ln in indexed]
+        # reorder ver_analysis_results if present
+        try:
+            self.ver_analysis_results = [self.ver_analysis_results[i] for i, _ in indexed if i < len(self.ver_analysis_results)]
+        except Exception:
+            pass
+        # refresh UI
+        try:
+            self._refresh_verification_view()
+        except Exception:
+            pass
+
+    
 
     def set_preview(self, lines_to_show: list[str]):
         """
@@ -252,6 +331,60 @@ class SubtitlePanel(ctk.CTkFrame):
             if search_term and search_term not in line_text.lower():
                 continue
 
+            # Apply user filters if any
+            f = getattr(self, 'filter_spec', {}) or {}
+            try:
+                ar = self.ver_analysis_results[i] if i < len(getattr(self, 'ver_analysis_results', [])) else None
+            except Exception:
+                ar = None
+            # text length
+            try:
+                if f.get('min_len') and len(line_text) < int(f.get('min_len')):
+                    continue
+                if f.get('max_len') and len(line_text) > int(f.get('max_len')):
+                    continue
+            except Exception:
+                pass
+            # cps
+            try:
+                # Jeśli filtr CPS jest ustawiony, pominąć linie bez weryfikacji
+                if (f.get('min_cps') is not None and f.get('min_cps') != '') or (f.get('max_cps') is not None and f.get('max_cps') != ''):
+                    if not ar or ar.get('cps') is None:
+                        continue
+                cps_val = float(ar.get('cps') or 0) if ar else 0.0
+                if f.get('min_cps') is not None and f.get('min_cps') != '' and cps_val < float(f.get('min_cps')):
+                    continue
+                if f.get('max_cps') is not None and f.get('max_cps') != '' and cps_val > float(f.get('max_cps')):
+                    continue
+            except Exception:
+                pass
+            # similarity
+            try:
+                # Jeśli filtr similarity jest ustawiony, pominąć linie bez weryfikacji
+                if (f.get('min_sim') is not None and f.get('min_sim') != '') or (f.get('max_sim') is not None and f.get('max_sim') != ''):
+                    if not ar or ar.get('path') is None:
+                        continue
+                sim_val = float(self.app.lines[i].audio_similarity or 0.0)
+                if f.get('min_sim') is not None and f.get('min_sim') != '' and sim_val < float(f.get('min_sim')):
+                    continue
+                if f.get('max_sim') is not None and f.get('max_sim') != '' and sim_val > float(f.get('max_sim')):
+                    continue
+            except Exception:
+                pass
+            # show option
+            try:
+                show = f.get('show')
+                if show == 'Wygenerowane':
+                    # Pokaż tylko linie które mają audio
+                    if not (ar and ar.get('path')):
+                        continue
+                elif show == 'Niewygenerowane':
+                    # Pokaż tylko linie które nie mają audio
+                    if ar and ar.get('path'):
+                        continue
+            except Exception:
+                pass
+
             line_nr = i + 1
 
             # Budowanie wartości dla wiersza zgodnie z self.columns_config
@@ -267,6 +400,28 @@ class SubtitlePanel(ctk.CTkFrame):
                 else:
                     # Placeholder dla przyszłych kolumn
                     row_values.append("")
+
+            # Jeśli mamy wyniki weryfikacji, wstaw odpowiednie wartości
+            if i < len(getattr(self, 'ver_analysis_results', [])):
+                ar = self.ver_analysis_results[i]
+                # Replace values for duration, cps, status, format, audio_file in row_values by finding indexes
+                # We know column order from self.columns_config
+                # Build a mapping of col_id -> position
+                col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+                try:
+                    if 'duration' in col_pos:
+                        row_values[col_pos['duration']] = f"{ar.get('duration', 0):.2f}" if ar.get('duration', 0) > 0 else '-'
+                    if 'cps' in col_pos:
+                        row_values[col_pos['cps']] = f"{ar.get('cps', 0):.1f}" if ar.get('duration', 0) > 0 else '-'
+                    if 'status' in col_pos:
+                        row_values[col_pos['status']] = ar.get('display_status', ar.get('raw_status', ''))
+                    if 'format' in col_pos:
+                        row_values[col_pos['format']] = (ar.get('ext') or '').upper()
+                    if 'audio_file' in col_pos:
+                        path = ar.get('path')
+                        row_values[col_pos['audio_file']] = Path(path).name if path else ''
+                except Exception:
+                    pass
 
             # Wstawienie wiersza
             item_id = self.tree.insert("", "end", values=tuple(row_values))
@@ -381,6 +536,432 @@ class SubtitlePanel(ctk.CTkFrame):
         finally:
             menu.grab_release()
 
+    # --- Weryfikacja audio (zintegrowana) ---
+    def start_verification(self, force_refresh=False, stop_on_error=False, auto_sync=False, ignore_short=True):
+        if not self.app.audio_dir:
+            messagebox.showwarning("Brak audio", "Najpierw wybierz katalog audio.", parent=self)
+            return
+        if not self.app.lines:
+            messagebox.showwarning("Brak tekstu", "Brak napisów do weryfikacji.", parent=self)
+            return
+
+        # Use VerificationManager (non-blocking) if available
+        if self.ver_running:
+            return
+
+        self.ver_running = True
+        self.ver_stop_event.clear()
+
+        if force_refresh:
+            self.ver_analysis_results = []
+            self.ver_processed_indices.clear()
+            self.ver_cache = {}
+
+        # Ensure results list has entries for each line
+        if not self.ver_analysis_results:
+            for i, line in enumerate(self.app.lines):
+                self.ver_analysis_results.append({
+                    'id': i + 1,
+                    'text': line.tts_text,
+                    'duration': 0.0,
+                    'cps': 0.0,
+                    'raw_status': 'PENDING',
+                    'path': None,
+                    'ext': '',
+                    'display_status': 'PENDING'
+                })
+
+        try:
+            cpu_count = os.cpu_count() or 4
+        except Exception:
+            cpu_count = 4
+        try:
+            workers_cfg = int(self.app.global_config.get('verification_workers', self.app.global_config.get('conversion_workers', max(1, cpu_count // 2))))
+        except Exception:
+            workers_cfg = max(1, cpu_count // 2)
+        workers = max(1, min(workers_cfg, cpu_count * 2))
+
+        lines_texts = [l.tts_text for l in self.app.lines]
+        audio_dir = str(self.app.audio_dir)
+        ffprobe = shutil.which('ffprobe')
+
+        if VerificationManager is None:
+            # fallback to previous behavior (best-effort)
+            from audio.verification_manager import VerificationManager, VerificationJob
+
+        manager = VerificationManager.get_instance()
+
+        def apply_cb(results: dict):
+            # this is called in manager thread; schedule work on main thread
+            try:
+                self.after(0, lambda r=results: self._apply_verification_results(r))
+            except Exception:
+                pass
+
+        job = VerificationJob(
+            project_path=str(getattr(self.app, 'current_project_path', '')),
+            audio_dir=audio_dir,
+            lines_texts=lines_texts,
+            force_refresh=force_refresh,
+            ignore_short=ignore_short,
+            ffprobe=ffprobe,
+            workers=workers,
+            apply_callback=apply_cb
+        )
+
+        manager.add_job(job)
+        try:
+            self.after(0, lambda: self.app.set_status("Weryfikacja uruchomiona"))
+        except Exception:
+            pass
+        return
+    def _get_audio_duration(self, file_path, ext):
+        file_path = str(file_path)
+        # Try ffprobe
+        if self.ver_ffprobe_path:
+            try:
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                cmd = [self.ver_ffprobe_path, "-v", "error", "-show_entries", "format=duration",
+                       "-of", "default=noprint_wrappers=1:nokey=1", file_path]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, startupinfo=startupinfo)
+                if res.returncode == 0 and res.stdout.strip():
+                    return float(res.stdout.strip()), None
+                return -1.0, res.stderr
+            except Exception as e:
+                return -1.0, str(e)
+        return -1.0, 'Brak ffprobe'
+
+    def _refresh_verification_view(self):
+        # Triggers UI refresh (re-populate table which reads ver_analysis_results)
+        preserved = self.app.selected_line_index
+        try:
+            self.set_preview([str(self._get_line_text(i)) for i in range(len(self.app.lines))])
+        except Exception:
+            pass
+        if preserved is not None and preserved < len(self.tree.get_children()):
+            node = self.tree.get_children()[preserved]
+            try:
+                self.tree.selection_set(node)
+            except Exception:
+                pass
+
+    def _apply_verification_results(self, data: dict):
+        """
+        Apply merged verification results (called on main thread).
+        `data` is a dict mapping string id -> entry dict produced by worker.
+        """
+        updates_since_save = 0
+        any_changes = False
+        for k, v in data.items():
+            try:
+                idx = int(k) - 1
+                if idx < 0 or idx >= len(self.app.lines):
+                    continue
+                line = self.app.lines[idx]
+                # update Line fields
+                try:
+                    line.audio_duration = float(v.get('duration') or 0)
+                except Exception:
+                    line.audio_duration = 0.0
+                path = v.get('path')
+                if path:
+                    try:
+                        line.audio_filename = Path(path).name
+                    except Exception:
+                        line.audio_filename = str(path)
+                line.audio_status = v.get('display_status') or v.get('raw_status') or ''
+                line.audio_format = (v.get('ext') or '').upper()
+
+                # update ver_analysis_results
+                if idx < len(self.ver_analysis_results):
+                    try:
+                        self.ver_analysis_results[idx].update({
+                            'duration': float(v.get('duration') or 0),
+                            'cps': float(v.get('cps') or 0),
+                            'raw_status': v.get('raw_status'),
+                            'path': Path(v['path']) if v.get('path') else None,
+                            'ext': v.get('ext') or '',
+                            'display_status': v.get('display_status')
+                        })
+                    except Exception:
+                        pass
+
+                # persist to cache dict
+                try:
+                    self.ver_cache[str(idx+1)] = {
+                        'text': v.get('text', ''),
+                        'duration': float(v.get('duration') or 0),
+                        'path': v.get('path'),
+                        'ext': v.get('ext') or '',
+                        'error': None
+                    }
+                except Exception:
+                    pass
+
+                updates_since_save += 1
+                any_changes = True
+                # mark processed
+                try:
+                    self.ver_processed_indices.add(idx)
+                except Exception:
+                    pass
+            except Exception:
+                continue
+
+        # handle special flags
+        if '__done' in data or data.get('__done') is True:
+            # finalization
+            self.ver_running = False
+            try:
+                self.after(0, lambda: self.app.set_status('Weryfikacja zakończona'))
+            except Exception:
+                pass
+
+        if any_changes:
+            # save cache file
+            try:
+                if self.ver_cache_file:
+                    with open(self.ver_cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(self.ver_cache, f, ensure_ascii=False)
+            except Exception:
+                pass
+
+            # refresh UI
+            try:
+                self._refresh_verification_view()
+            except Exception:
+                pass
+
+            # autosave lines to CSV; perform best-effort
+            try:
+                if getattr(self.app, 'loaded_path', None):
+                    from app.io import save_lines_to_file
+                    save_lines_to_file(str(self.app.loaded_path), self.app.lines)
+            except Exception:
+                pass
+
+    def stop_verification(self):
+        """Stop currently running verification via manager"""
+        try:
+            from audio.verification_manager import VerificationManager
+            VerificationManager.get_instance().cancel_current()
+        except Exception:
+            pass
+        self.ver_running = False
+        self.ver_stop_event.set()
+
+    def _verification_watcher(self):
+        """Thread in main process: monitors all worker out-files and applies results to Line objects.
+        Also performs autosave every 100 updates or every 10 seconds.
+        """
+        out_files = getattr(self, '_ver_out_files', None)
+        if not out_files:
+            return
+        last_mtimes = {str(p): 0 for p in out_files}
+        updates_since_save = 0
+        last_save_time = time.time()
+
+        while self.ver_running and not self.ver_stop_event.is_set():
+            try:
+                any_changes = False
+                for outp in list(out_files):
+                    p = Path(outp)
+                    if not p.exists():
+                        continue
+                    m = p.stat().st_mtime
+                    key = str(p)
+                    if m == last_mtimes.get(key):
+                        continue
+                    last_mtimes[key] = m
+                    try:
+                        with open(p, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                    except Exception:
+                        continue
+
+                    applied = 0
+                    for k, v in data.items():
+                        try:
+                            idx = int(k) - 1
+                            if idx < 0 or idx >= len(self.app.lines):
+                                continue
+                            line = self.app.lines[idx]
+                            line.audio_duration = float(v.get('duration') or 0)
+                            path = v.get('path')
+                            if path:
+                                line.audio_filename = Path(path).name
+                            line.audio_status = v.get('display_status') or v.get('raw_status') or ''
+                            line.audio_format = (v.get('ext') or '').upper()
+
+                            if idx < len(self.ver_analysis_results):
+                                try:
+                                    self.ver_analysis_results[idx].update({
+                                        'duration': float(v.get('duration') or 0),
+                                        'cps': float(v.get('cps') or 0),
+                                        'raw_status': v.get('raw_status'),
+                                        'path': Path(v['path']) if v.get('path') else None,
+                                        'ext': v.get('ext') or '',
+                                        'display_status': v.get('display_status')
+                                    })
+                                except Exception:
+                                    pass
+
+                            # persist to cache dict
+                            try:
+                                self.ver_cache[str(idx+1)] = {
+                                    'text': v.get('text', ''),
+                                    'duration': float(v.get('duration') or 0),
+                                    'path': v.get('path'),
+                                    'ext': v.get('ext') or '',
+                                    'error': None
+                                }
+                            except Exception:
+                                pass
+
+                            applied += 1
+                        except Exception:
+                            continue
+
+                    if applied:
+                        updates_since_save += applied
+                        any_changes = True
+
+                if any_changes:
+                    # save cache
+                    try:
+                        if self.ver_cache_file:
+                            with open(self.ver_cache_file, 'w', encoding='utf-8') as f:
+                                json.dump(self.ver_cache, f, ensure_ascii=False)
+                    except Exception:
+                        pass
+                    # refresh UI
+                    try:
+                        self.after(0, self._refresh_verification_view)
+                    except Exception:
+                        pass
+
+                # autosave lines to CSV every 100 updates or every 10 seconds
+                try:
+                    if (updates_since_save >= 100) or (time.time() - last_save_time >= 10):
+                        if getattr(self.app, 'loaded_path', None):
+                            try:
+                                from app.io import save_lines_to_file
+                                save_lines_to_file(str(self.app.loaded_path), self.app.lines)
+                                last_save_time = time.time()
+                                updates_since_save = 0
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                time.sleep(0.5)
+            except Exception:
+                time.sleep(0.5)
+
+        # finalize status and cleanup out files
+        try:
+            self.after(0, lambda: self.app.set_status('Weryfikacja zakończona'))
+        except Exception:
+            pass
+        for outp in getattr(self, '_ver_out_files', []):
+            try:
+                p = Path(outp)
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+    
+    
+    def delete_all_bad_audio_verification(self):
+        # Collect bad items (based on display_status)
+        to_del = []
+        for item in self.ver_analysis_results:
+            if not item.get('path'):
+                continue
+            status = item.get('display_status', 'OK')
+            if status not in ['OK', 'SHORT', 'MISSING', 'PENDING']:
+                to_del.append(item)
+
+        if not to_del:
+            messagebox.showinfo("Info", "Brak błędnych plików do usunięcia (w aktualnym widoku).", parent=self)
+            return
+
+        if not messagebox.askyesno("Potwierdź", f"Usunąć {len(to_del)} błędnych plików?", parent=self):
+            return
+
+        count = 0
+        errors = []
+        for item in to_del:
+            try:
+                path_to_remove = Path(item['path'])
+                if path_to_remove.exists():
+                    os.remove(path_to_remove)
+                idx = item['id'] - 1
+                self.ver_analysis_results[idx]['raw_status'] = 'MISSING'
+                self.ver_analysis_results[idx]['path'] = None
+                self.ver_analysis_results[idx]['duration'] = 0
+                self.ver_analysis_results[idx]['display_status'] = 'MISSING'
+                if str(item['id']) in self.ver_cache:
+                    del self.ver_cache[str(item['id'])]
+                count += 1
+            except Exception as e:
+                errors.append(f"ID {item['id']}: {str(e)}")
+
+        self._refresh_verification_view()
+        if errors:
+            messagebox.showwarning("Wynik", f"Usunięto {count} plików. Błędy:\n" + "\n".join(errors[:10]), parent=self)
+        else:
+            messagebox.showinfo("Zakończono", f"Pomyślnie usunięto {count} plików.", parent=self)
+
+    def open_verification_folder(self):
+        # Open folder for selected item or audio_dir
+        sel = self.tree.selection()
+        item = None
+        if sel:
+            vals = self.tree.item(sel[0], 'values')
+            try:
+                idx = int(vals[0]) - 1
+                item = self.ver_analysis_results[idx] if idx < len(self.ver_analysis_results) else None
+            except Exception:
+                item = None
+
+        p = item.get('path') if item and item.get('path') else self.app.audio_dir
+        path = Path(p).parent if p else self.app.audio_dir
+        if os.name == 'nt':
+            os.startfile(path)
+        else:
+            subprocess.call(['xdg-open', path])
+
+    def _get_line_text(self, idx):
+        try:
+            mode = self.app.view_mode.get()
+            if mode == 'Napisy':
+                return self.app.lines[idx].text
+            elif mode == 'TTS':
+                return self.app.lines[idx].tts_text
+            else:
+                return self.app.lines[idx].text or ''
+        except Exception:
+            return ''
+
+    def open_filter_window(self):
+        try:
+            from ui.filter_window import FilterWindow
+        except Exception:
+            return
+        FilterWindow(self, current_filters=getattr(self, 'filter_spec', {}), apply_callback=self._on_filter_apply)
+
+    def _on_filter_apply(self, filters: dict):
+        # store filters and refresh view
+        self.filter_spec = filters or {}
+        try:
+            self._refresh_verification_view()
+        except Exception:
+            pass
+
     def _find_audio_files(self, identifier: str) -> List[Tuple[Path, bool]]:
         if not self.app.audio_dir:
             return []
@@ -399,7 +980,7 @@ class SubtitlePanel(ctk.CTkFrame):
         line_selected = self.app.selected_line_index is not None
         audio_dir_set = self.app.audio_dir is not None and self.app.audio_dir.is_dir()
         project_loaded = self.app.current_project_path is not None
-        lines_processed = bool(self.app.processed_replace)
+        lines_processed = bool(self.app.lines)
 
         files_exist = False
         status_msg = "Audio: ---"
@@ -496,3 +1077,99 @@ class SubtitlePanel(ctk.CTkFrame):
             except Exception:
                 pass
         self.update_audio_buttons_state()
+
+
+# --- Process entry function (runs in separate process) ---
+def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1):
+    import json
+    import subprocess
+    from pathlib import Path
+    from collections import Counter
+
+    audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
+    results = {}
+
+    def write_atomic(dct):
+        tmp = Path(out_file + '.tmp')
+        with open(tmp, 'w', encoding='utf-8') as tf:
+            json.dump(dct, tf, ensure_ascii=False)
+        tmp.replace(out_file)
+
+    for i, text in enumerate(lines_texts):
+        # distribute work among workers: only process indices matching this worker
+        if total_workers and (i % total_workers) != worker_idx:
+            continue
+        ident = str(i + 1)
+        tts = (text or '').strip()
+        entry = {'id': i+1, 'text': tts, 'duration': 0.0, 'cps': 0.0, 'raw_status': 'PENDING', 'path': None, 'ext': '', 'display_status': 'PENDING'}
+        if not tts:
+            results[ident] = entry
+            write_atomic(results)
+            continue
+
+        # find file
+        audio_file = None
+        found_ext = ''
+        candidates = [
+            (audio_dir_p / f"output1 ({ident}).wav", 'wav'),
+            (audio_dir_p / f"output1 ({ident}).mp3", 'mp3'),
+            (audio_dir_p / 'ready' / f"output1 ({ident}).ogg", 'ogg'),
+            (audio_dir_p / 'ready' / f"output1 ({ident}).mp3", 'mp3')
+        ]
+        for p, ext in candidates:
+            if p.exists():
+                audio_file = p
+                found_ext = ext
+                break
+
+        duration = 0.0
+        if audio_file and ffprobe_path:
+            try:
+                res = subprocess.run([ffprobe_path, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(audio_file)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if res.returncode == 0 and res.stdout.strip():
+                    duration = float(res.stdout.strip())
+                else:
+                    duration = -1.0
+            except Exception:
+                duration = -1.0
+
+        raw_status = 'OK'
+        cps = 0.0
+        if not audio_file:
+            raw_status = 'MISSING'
+        elif duration < 0:
+            raw_status = 'ERROR'
+        elif duration == 0:
+            raw_status = 'EMPTY'
+        else:
+            stats = Counter(tts.strip('.?!'))
+            short = stats[','] + stats['-']
+            long = stats['.'] + stats['!'] + stats['?']
+            pauses = (short * 0.4) + (long * 0.6)
+            try:
+                cps = len(tts) / (duration - pauses)
+            except Exception:
+                cps = 0.0
+
+        entry.update({'duration': duration, 'cps': cps, 'raw_status': raw_status, 'path': str(audio_file) if audio_file else None, 'ext': found_ext})
+
+        # display status
+        if raw_status != 'OK':
+            entry['display_status'] = raw_status
+        else:
+            if ignore_short and len(tts) < 5:
+                entry['display_status'] = 'SHORT'
+            else:
+                min_cps = 7.0
+                max_cps = 20.0
+                if cps < min_cps:
+                    entry['display_status'] = f"ZA WOLNO (<{min_cps:.1f})"
+                elif cps > max_cps:
+                    entry['display_status'] = f"ZA SZYBKO (>{max_cps:.1f})"
+                else:
+                    entry['display_status'] = 'OK'
+
+        results[ident] = entry
+        write_atomic(results)
+    # final write
+    write_atomic(results)

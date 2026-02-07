@@ -94,7 +94,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(frame_main, text="...", width=40, command=self.select_start_dir).grid(
             row=0, column=2, sticky="e", padx=10, pady=10)
 
-        ctk.CTkLabel(frame_main, text="Procesy konwersji audio:").grid(
+        ctk.CTkLabel(frame_main, text="Procesy weryfikacji:").grid(
             row=1, column=0, sticky="w", padx=10, pady=(0, 10))
 
         try:
@@ -104,15 +104,16 @@ class SettingsWindow(ctk.CTkToplevel):
             cpu_count = "?"
             default_workers = 4
 
-        self.conversion_workers_var = tk.StringVar(
-            value=self.master.global_config.get('conversion_workers', default_workers))
+        # Read verification_workers with fallback to conversion_workers for compatibility
+        self.verification_workers_var = tk.StringVar(
+            value=self.master.global_config.get('verification_workers', self.master.global_config.get('conversion_workers', default_workers)))
         entry_workers = ctk.CTkEntry(
-            frame_main, textvariable=self.conversion_workers_var)
+            frame_main, textvariable=self.verification_workers_var)
         entry_workers.grid(row=1, column=1, sticky="ew",
                            padx=(0, 10), pady=(0, 10))
         CreateToolTip(
             entry_workers,
-            f"Liczba procesów do konwersji audio (max: {cpu_count}). Więcej = szybciej, ale większe użycie CPU.",
+            f"Liczba procesów do weryfikacji audio (max: {cpu_count}). Więcej = szybciej, ale większe użycie CPU.",
             wraplength=300)
         # *** Koniec nowej sekcji ***
 
@@ -387,7 +388,7 @@ class SettingsWindow(ctk.CTkToplevel):
             self.master.global_config["piper_model_path"] = self.piper_model_path_var.get().strip()
             try:
                 cpu_count = os.cpu_count()
-                workers = int(self.conversion_workers_var.get())
+                workers = int(self.verification_workers_var.get())
                 # Prosta walidacja - nie mniej niż 1, nie więcej niż (CPU * 2)
                 workers = max(
                     1, min(workers, cpu_count * 2 if cpu_count else 32))
@@ -398,7 +399,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
             global_data = {
                 'start_directory': self.start_dir_var.get(),
-                'conversion_workers': workers,
+                'verification_workers': workers,
                 'local_api_url': self.local_api_url_var.get(),
                 'audio_output_format': self.audio_format_var.get(),
                 'xtts_voice_path': new_voice_path,

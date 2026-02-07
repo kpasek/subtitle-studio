@@ -1,4 +1,5 @@
 from collections import Counter
+from typing import List
 
 import customtkinter as ctk
 import os
@@ -9,6 +10,8 @@ import shutil
 import json
 from pathlib import Path
 from tkinter import ttk, messagebox
+
+from app.entity import Line
 
 # Próba importu okna do naprawy nazw plików (AudioRenameWindow)
 try:
@@ -26,7 +29,7 @@ except ImportError:
 
 
 class AudioVerificationWindow(ctk.CTkToplevel):
-    def __init__(self, app, audio_dir, subtitles):
+    def __init__(self, app, audio_dir, subtitles: List[Line]):
         super().__init__(app)
         self.app = app
         self.audio_dir = Path(audio_dir)
@@ -325,10 +328,10 @@ class AudioVerificationWindow(ctk.CTkToplevel):
         stopped_on_error_flag = False
 
         if not self.analysis_results:
-            for i, text in enumerate(self.subtitles):
+            for i, line in enumerate(self.subtitles):
                 self.analysis_results.append({
                     "id": i + 1,
-                    "text": text,
+                    "text": line.tts_text,
                     "duration": 0.0,
                     "cps": 0.0,
                     "raw_status": "PENDING",
@@ -338,7 +341,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
 
         new_cache_data = self.cache_data.copy()
 
-        for i, text in enumerate(self.subtitles):
+        for i, line in enumerate(self.subtitles):
             if self.stop_event.is_set():
                 break
 
@@ -348,7 +351,7 @@ class AudioVerificationWindow(ctk.CTkToplevel):
                 processed_count += 1
                 continue
 
-            text_clean = text.strip()
+            text_clean = line.tts_text.strip()
             if not text_clean:
                 processed_count += 1
                 continue

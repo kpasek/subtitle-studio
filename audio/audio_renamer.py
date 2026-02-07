@@ -110,8 +110,8 @@ class AudioRenameWindow(ctk.CTkToplevel):
         source_id = int(source_str)
 
         # 1. Pokaż tekst dla target
-        if 0 < target_id <= len(self.app.processed_replace):
-            text_content = self.app.processed_replace[target_id - 1]
+        if 0 < target_id <= len(self.app.lines):
+            text_content = self.app.lines[target_id - 1].tts_text
             if len(text_content) > 50: text_content = text_content[:50] + "..."
             self.lbl_target_text.configure(text=f"\"{text_content}\"")
 
