@@ -349,16 +349,22 @@ class SubtitleStudioApp(ctk.CTk):
         self.subtitle_panel.set_preview(self.lines)
         self.set_status(f"Wyczyszczono zawartość linii {idx + 1}")
 
-    def open_shortcuts_window(self):
-        from app.ui_helpers import open_shortcuts_window as _open_shortcuts_window
-        return _open_shortcuts_window(self)
-
     def mark_as_unsaved(self, *args):
         """Oznacza projekt jako niezapisany."""
         if self.current_project_path:
             self.has_unsaved_changes = True
             if "Gotowy" in self.status.cget("text") and "niezapisane" not in self.status.cget("text"):
                 self.set_status(f"{self.status.cget('text')} (niezapisane zmiany)")
+
+    def open_shortcuts_window(self):
+        """Otwiera okno ze skrótami klawiszowymi."""
+        from app.ui_helpers import open_shortcuts_window as _open_shortcuts_window
+        return _open_shortcuts_window(self)
+
+    def show_about_window(self):
+        """Otwiera okno 'O programie'."""
+        from app.ui_helpers import show_about_window as _show_about_window
+        return _show_about_window(self)
 
     def _create_widgets(self):
         """Tworzy główny układ okna (Panel napisów + Status)."""
@@ -459,16 +465,8 @@ class SubtitleStudioApp(ctk.CTk):
 
     # --- PROCES PRZETWARZANIA ---
 
-    def _gather_active_patterns(self) -> tuple[List[PatternItem], List[PatternItem]]:
-        """Deleguje zbieranie aktywnych wzorców do app.patterns.gather_active_patterns."""
-        return gather_active_patterns(self.custom_remove, self.custom_replace)
-
-    def _get_patterns_signature(self, patterns: List[PatternItem]):
-        """Deleguje tworzenie sygnatury wzorców do app.patterns.get_patterns_signature."""
-        return get_patterns_signature(patterns)
-
     def apply_patterns(self, force_refresh=False):
-        """Deleguje aplikowanie wzorców do `app.patterns.apply_patterns`."""
+        """Aplikuje wzorce do napisów."""
         patterns_apply(self, force_refresh=force_refresh)
 
     def _update_subtitle_panel_content(self):
@@ -505,10 +503,6 @@ class SubtitleStudioApp(ctk.CTk):
 
 
     # --- GENEROWANIE ---
-
-    def _prepare_job_dependencies(self) -> bool:
-        from app.generation import prepare_job_dependencies
-        return prepare_job_dependencies(self)
 
     def enqueue_generate_single(self, line_no = None):
         from app.generation import enqueue_generate_single as _enqueue_generate_single
@@ -666,23 +660,30 @@ class SubtitleStudioApp(ctk.CTk):
         from app.update import download_update as _download_update_impl
         return _download_update_impl(self)
 
-    def show_about_window(self):
-        from app.ui_helpers import show_about_window as _show_about_window
-        return _show_about_window(self)
+    def show_generation_queue(self):
+        if self.queue_window is None or not self.queue_window.winfo_exists():
+            self.queue_window = GenerationQueueWindow(self)
+        self.queue_window.lift()
 
     # Proxy dla metod z menu
     def open_audio_deleter(self):
         if not self.lines: return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self)
         if not self.audio_dir: return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self)
 
-        AudioDeleterWindow(self, self.lines, str(self.audio_dir)).wait_visibility().grab_set()
+        win = AudioDeleterWindow(self, self.lines, str(self.audio_dir))
+        win.wait_visibility()
+        win.grab_set()
 
     def open_global_settings(self):
-        SettingsWindow(self, self.torch_installed, mode='global').wait_visibility().grab_set()
+        win = SettingsWindow(self, self.torch_installed, mode='global')
+        win.wait_visibility()
+        win.grab_set()
 
     def open_project_settings(self):
         if not self.current_project_path: return messagebox.showwarning("Brak projektu", "Zapisz projekt.", parent=self)
-        SettingsWindow(self, self.torch_installed, mode='project').wait_visibility().grab_set()
+        win = SettingsWindow(self, self.torch_installed, mode='project')
+        win.wait_visibility()
+        win.grab_set()
 
     def choose_audio_dir(self):
         init_dir = self.global_config.get('start_directory') or (str(self.audio_dir) if self.audio_dir else None)
@@ -1054,38 +1055,6 @@ class SubtitleStudioApp(ctk.CTk):
     def _add_selected_text_to_names(self):
         from app.ui_helpers import add_selected_text_to_names as _add_selected_text_to_names
         return _add_selected_text_to_names(self)
-
-    # --- Proxy methods for integrated verification menu ---
-    def start_verification(self):
-        try:
-            self.subtitle_panel.start_verification()
-        except Exception as e:
-            messagebox.showerror("Błąd", str(e), parent=self)
-
-    def stop_verification(self):
-        try:
-            self.subtitle_panel.stop_verification()
-        except Exception as e:
-            messagebox.showerror("Błąd", str(e), parent=self)
-
-    def refresh_verification(self):
-        try:
-            self.subtitle_panel._refresh_verification_view()
-        except Exception as e:
-            messagebox.showerror("Błąd", str(e), parent=self)
-
-    def delete_all_bad_audio_verification(self):
-        try:
-            self.subtitle_panel.delete_all_bad_audio_verification()
-        except Exception as e:
-            messagebox.showerror("Błąd", str(e), parent=self)
-
-    def open_verification_folder(self):
-        try:
-            self.subtitle_panel.open_verification_folder()
-        except Exception as e:
-            messagebox.showerror("Błąd", str(e), parent=self)
-
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()

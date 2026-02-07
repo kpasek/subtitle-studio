@@ -242,11 +242,27 @@ class SubtitlePanel(ctk.CTkFrame):
             i, ln = idx_line
             try:
                 if col_id == 'line_nr':
-                    return i
+                    return (0, i)  # (nie-None, wartość)
                 if col_id == 'content':
-                    return (ln.text or '').lower()
+                    return (0, (ln.text or '').lower())
                 if col_id == 'duration':
-                    return float(getattr(ln, 'audio_duration', 0.0) or 0.0)
+                    return (0, float(getattr(ln, 'audio_duration', 0.0) or 0.0))
+                if col_id == 'similarity':
+                    # Kolumna similarity z Line.audio_similarity lub ver_analysis_results
+                    try:
+                        sim = float(getattr(ln, 'audio_similarity', 0.0) or 0.0)
+                        if sim is not None:
+                            return (0, sim)
+                    except (TypeError, ValueError):
+                        pass
+                    if i < len(self.ver_analysis_results):
+                        try:
+                            sim = self.ver_analysis_results[i].get('similarity')
+                            if sim is not None:
+                                return (0, float(sim))
+                        except (TypeError, ValueError):
+                            pass
+                    return (1, 0.0)  # None wartości na koniec
                 if col_id == 'cps':
                     # Prefer Line-based CPS calculation, fallback to ver_analysis_results
                     try:
@@ -257,48 +273,59 @@ class SubtitlePanel(ctk.CTkFrame):
                         long = stats['.'] + stats['!'] + stats['?']
                         pauses = (short * 0.4) + (long * 0.6)
                         duration = float(getattr(ln, 'audio_duration', 0.0) or 0.0)
-                        return len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0
+                        return (0, len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0)
                     except Exception:
                         if i < len(self.ver_analysis_results):
-                            return float(self.ver_analysis_results[i].get('cps') or 0.0)
-                        return 0.0
+                            return (0, float(self.ver_analysis_results[i].get('cps') or 0.0))
+                        return (1, 0.0)
                 if col_id == 'status':
                     # Prefer Line audio_status or derived status
                     try:
                         st = getattr(ln, 'audio_status', None)
                         if st:
-                            return st
+                            return (0, st)
                     except Exception:
                         pass
                     if i < len(self.ver_analysis_results):
-                        return self.ver_analysis_results[i].get('display_status') or ''
-                    return ''
+                        stat = self.ver_analysis_results[i].get('display_status') or ''
+                        return (0, stat) if stat else (1, '')
+                    return (1, '')
                 if col_id == 'format':
                     try:
                         fmt = getattr(ln, 'audio_format', '') or ''
                         if fmt:
-                            return fmt.lower()
+                            return (0, fmt.lower())
                     except Exception:
                         pass
                     if i < len(self.ver_analysis_results):
-                        return (self.ver_analysis_results[i].get('ext') or '').lower()
-                    return ''
+                        ext = (self.ver_analysis_results[i].get('ext') or '').lower()
+                        return (0, ext) if ext else (1, '')
+                    return (1, '')
                 if col_id == 'audio_file':
                     try:
                         afn = getattr(ln, 'audio_filename', '')
                         if afn:
-                            return str(Path(getattr(self, 'app').audio_dir or Path('.')) / afn)
+                            return (0, str(Path(getattr(self, 'app').audio_dir or Path('.')) / afn))
                     except Exception:
                         pass
                     if i < len(self.ver_analysis_results):
                         p = self.ver_analysis_results[i].get('path')
-                        return (str(p) if p else '')
-                    return ''
-            except Exception:
-                return ''
+                        return (0, str(p)) if p else (1, '')
+                    return (1, '')
+            except Exception as e:
+                print(f"[ERROR] Sort key_fn error for col {col_id}: {e}")
+                return (1, '')  # None wartości na koniec
+            
+            # Domyślnie None wartości na koniec
+            return (1, '')
 
         indexed = list(enumerate(self.app.lines))
-        indexed.sort(key=key_fn, reverse=not asc)
+        try:
+            indexed.sort(key=key_fn, reverse=not asc)
+        except TypeError as e:
+            print(f"[ERROR] Sort failed for col {col_id}: {e}")
+            return
+            
         # reorder app.lines accordingly
         self.app.lines = [ln for _, ln in indexed]
         # reorder ver_analysis_results if present
