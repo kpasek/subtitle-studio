@@ -23,6 +23,7 @@ class GenerationJob:
     tts_model_name: str
     tts_config: Dict[str, Any]
     converter_config: Dict[str, Any]
+    on_generate: Optional[Callable[[str, str], None]] = None
 
 
 @dataclass
@@ -208,7 +209,9 @@ class GenerationManager:
                 
                 else:
                     raise TypeError(f"Nieznany typ instancji modelu: {type(tts_model_instance)}")
-
+                
+                if getattr(job, 'on_generate', None):\
+                    job.on_generate(identifier, str(output_path))
             except Exception as e:
                 print(f"DEBUG ERROR: Błąd generowania linii {identifier}: {e}")
                 self._notify_progress(i, total_to_gen, f"Błąd linii {identifier}: {e}")

@@ -5,7 +5,7 @@ import sys
 import os
 import importlib.util
 
-from app.entity import PatternItem
+from app.entity import Line, PatternItem
 
 
 def compile_pattern(pat: PatternItem) -> re.Pattern:
@@ -22,7 +22,7 @@ def compile_pattern(pat: PatternItem) -> re.Pattern:
     return re.compile(pat.pattern, flags)
 
 
-def apply_remove_patterns(lines: List[str], patterns: List[PatternItem]) -> List[str]:
+def apply_remove_patterns(lines: List[Line], patterns: List[PatternItem]) -> List[Line]:
     """
     Applies 'remove' patterns to a list of lines.
     Does NOT automatically remove empty lines or duplicates anymore.
@@ -40,14 +40,13 @@ def apply_remove_patterns(lines: List[str], patterns: List[PatternItem]) -> List
         messagebox.showerror("Błąd", f"Nieprawidłowy pattern:\n{e}")
         return []
 
-    out = []
     for line in lines:
-        s = line
+        s = line.text
         for i, pat in enumerate(patterns):
             s = compiled[i].sub(pat.replace, s)
-        out.append(s)
+        line.text = s
 
-    return out
+    return lines
 
 
 def resource_path(relative_path: str) -> str:
@@ -68,7 +67,7 @@ def resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 
-def apply_replace_patterns(lines: List[str], patterns: List[PatternItem]) -> List[str]:
+def apply_replace_patterns(lines: List[Line], patterns: List[PatternItem]) -> List[Line]:
     """
     Applies 'replace' patterns to a list of lines.
     Empty lines are preserved.
@@ -81,13 +80,13 @@ def apply_replace_patterns(lines: List[str], patterns: List[PatternItem]) -> Lis
         A new list of processed lines.
     """
     compiled = [compile_pattern(p) for p in patterns]
-    out = []
+
     for line in lines:
-        s = line
+        s = line.tts_text
         for i, pat in enumerate(patterns):
             s = compiled[i].sub(pat.replace, s)
-        out.append(s)
-    return out
+        line.tts_text = s
+    return lines
 
 
 def is_installed(package_name: str) -> bool:

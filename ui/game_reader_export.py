@@ -119,7 +119,7 @@ class GameReaderExportWindow(ctk.CTkToplevel):
             self.lbl_conv_status.configure(text="---")
             return
 
-        expected_count = len(self.app.processed_replace)
+        expected_count = len(self.app.lines)
 
         # 1. Sprawdź generowanie (WAV/MP3)
         generated_count = 0
@@ -195,7 +195,7 @@ class GameReaderExportWindow(ctk.CTkToplevel):
     def _export_task(self, dest_dir: Path, copy_files: bool):
         try:
             # 1. Zapisz napisy (processed_clean) do subtitlesPL.txt
-            clean_lines = self.app.processed_clean
+            clean_lines = [self.app.lines[i].text for i in range(len(self.app.lines))]
             subtitles_file = dest_dir / "subtitlesPL.txt"
 
             with open(subtitles_file, 'w', encoding='utf-8') as f:
@@ -225,7 +225,7 @@ class GameReaderExportWindow(ctk.CTkToplevel):
                 # Lista plików do skopiowania
                 files_to_copy = []
                 # Szukamy plików odpowiadających ilości linii w projekcie
-                for i in range(len(self.app.processed_replace)):
+                for i in range(len(self.app.lines)):
                     ident = str(i + 1)
                     src_file, _ = self._get_target_file_info(ident, ready_dir)
                     if src_file:

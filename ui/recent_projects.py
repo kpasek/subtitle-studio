@@ -16,6 +16,7 @@ class RecentProjectsWindow(ctk.CTkToplevel):
         self.transient(parent)
         self.wait_visibility()
         self.grab_set()
+        self.parent = parent
 
         self.on_open = on_open_callback
         self.on_delete = on_delete_callback
@@ -80,7 +81,7 @@ class RecentProjectsWindow(ctk.CTkToplevel):
             btn_del.pack(side="right")
 
     def _open_project(self, path):
-        self.on_open(path)
+        self.on_open(self.parent, path)
         self.destroy()
 
     def _delete_entry(self, path):
