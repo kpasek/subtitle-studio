@@ -8,7 +8,8 @@ import os
 
 from app.entity import Line, PatternItem
 from app.tooltip import CreateToolTip
-from app.utils import compile_pattern
+from app.utils import compile_pattern, ready_dir_from_audio_dir
+from app.io import get_audio_candidates
 
 
 class AudioDeleterWindow(ctk.CTkToplevel):
@@ -136,24 +137,7 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         btnX.pack(side="right", padx=4)
 
     def _find_audio_files(self, identifier: str) -> List[tuple[Path, bool]]:
-        """
-        Finds all audio files associated with a given dialog identifier.
-
-        Args:
-            identifier: The dialog line number (e.g., "123").
-
-        Returns:
-            A list of tuples, each containing a Path object and a boolean (True if in /ready/).
-        """
-        candidates = [
-            (self.audio_dir / f"output1 ({identifier}).wav", False),
-            (self.audio_dir / f"output1 ({identifier}).ogg", False),
-            # Dodano mp3 na wszelki wypadek
-            (self.audio_dir / f"output1 ({identifier}).mp3", False),
-            (self.audio_dir / "ready" / f"output1 ({identifier}).ogg", True),
-            (self.audio_dir / "ready" / f"output2 ({identifier}).ogg", True)
-        ]
-        return [(f, ready) for f, ready in candidates if f.exists()]
+        return get_audio_candidates(identifier)
 
     def recalculate_stats(self):
         """
@@ -178,7 +162,7 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         files_set = set()
 
         for i, line in enumerate(self.dialogs):
-            identifier = str(i + 1)
+            identifier = getattr(line, 'uid', str(i + 1))
             is_match = False
             for pat in compiled_patterns:
                 if pat.search(line.text):

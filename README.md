@@ -24,9 +24,7 @@ To serce aplikacji, gdzie odbywa się praca z plikami.
 * **Pokaż kolejkę zadań (Ctrl+Q)** – Otwiera okno menedżera, który w tle przetwarza generowanie TTS i konwersję plików.
 * **Generuj dialogi (Ctrl+Shift+G)** – Rozpoczyna proces generowania audio dla wszystkich linii (lub brakujących).
 * **Konwertuj audio (Ctrl+Shift+R)** – Uruchamia przetwarzanie plików (np. formatowanie do OGG/MP3, normalizacja) przy użyciu FFmpeg.
-* **Dopasuj identyfikatory audio** – Narzędzie do masowej zmiany nazw plików audio, aby pasowały do ID linii w napisach.
 * **Usuń przekonwertowane pliki** – Czyści folder `ready` (gotowe pliki), przydatne przy regeneracji.
-* **Imiona (Ctrl+Shift+N)** – Lista imion, które mają być wycinane przez program Game Reader.
 * **Pobierz napisy / Pobierz napisy TTS** – Eksportuje przetworzone napisy:
     * *Clean* – Czyste napisy wyświetlane w grze.
     * *TTS* – Napisy przygotowane pod syntezator mowy (np. z rozwiniętymi skrótami "100 zł" -> "sto złotych").

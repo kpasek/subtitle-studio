@@ -7,7 +7,7 @@ from pathlib import Path
 
 from audio.verification_manager import VerificationManager
 from app.tooltip import CreateToolTip
-from app.io import update_line_in_csv
+from app.io import update_line_in_csv, get_primary_audio_path, get_audio_candidates
 
 class VerificationWindow(ctk.CTkToplevel):
     """Window with Start / Stop / Ignore cache and progress bar for verification."""
@@ -140,13 +140,14 @@ class VerificationWindow(ctk.CTkToplevel):
                     elif not force and has_audio_filename and not has_transcribed_text and self.verify_similarity_var.get():
                         print(f"[SKIP_VERIFY_LINE] Linia {i+1}: ma audio, weryfikuję tylko similarity")
                         # Pominąć verify_line ale bezpośrednio przejść do apply_similarity_to_line
+                        path_obj = get_primary_audio_path(line.uid)
                         res = {
                             'id': i + 1,
                             'text': line.tts_text or '',
                             'duration': float(getattr(line, 'audio_duration', 0) or 0.0),
                             'raw_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
-                            'path': str(Path(getattr(self.master_app, 'audio_dir', Path('.'))) / has_audio_filename),
-                            'ext': getattr(line, 'audio_format', '') or Path(has_audio_filename).suffix.lstrip('.'),
+                            'path': str(path_obj) if path_obj else None,
+                            'ext': (path_obj.suffix.lstrip('.') if path_obj else '') or getattr(line, 'audio_format', ''),
                             'display_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
                             'similarity': 0.0,
                             'transcribed_text': ''
@@ -160,11 +161,11 @@ class VerificationWindow(ctk.CTkToplevel):
                         res = VerificationManager.verify_line(
                             line=line,
                             audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
-                            line_id=i+1,
                             ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
                             ignore_short=False,
                             verify_duration=self.verify_duration_var.get()
                         )
+                        res['id'] = i + 1
                         line_was_modified = True
 
                     # if OK and similarity enabled, attempt similarity (may be slow)
@@ -187,6 +188,7 @@ class VerificationWindow(ctk.CTkToplevel):
                     if res.get('path'):
                         line.audio_filename = Path(res.get('path')).name
                     line.audio_format = res.get('ext', '') or ''
+                    line.audio_status = res.get('display_status') or res.get('raw_status') or ''
                     
                     # Update similarity and transcribed text from Line object
                     if hasattr(line, 'audio_similarity'):

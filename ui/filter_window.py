@@ -1,6 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 
 class FilterWindow(ctk.CTkToplevel):
@@ -36,8 +36,8 @@ class FilterWindow(ctk.CTkToplevel):
 
         # Similarity
         ctk.CTkLabel(frm, text="Similarity (min/max):").grid(row=2, column=0, sticky="w", pady=(8,0))
-        self.min_sim = tk.StringVar(value=str(self.current_filters.get('min_sim', '')))
-        self.max_sim = tk.StringVar(value=str(self.current_filters.get('max_sim', '')))
+        self.min_sim = tk.StringVar(value=self._display_percentage(self.current_filters.get('min_sim')))
+        self.max_sim = tk.StringVar(value=self._display_percentage(self.current_filters.get('max_sim')))
         ctk.CTkEntry(frm, textvariable=self.min_sim, width=60).grid(row=2, column=1, sticky="w", padx=(6,0), pady=(8,0))
         ctk.CTkEntry(frm, textvariable=self.max_sim, width=60).grid(row=2, column=2, sticky="w", padx=(6,0), pady=(8,0))
 
@@ -70,14 +70,12 @@ class FilterWindow(ctk.CTkToplevel):
             if self.max_len.get(): filters['max_len'] = int(self.max_len.get())
         except Exception:
             pass
-        try:
-            if self.min_sim.get(): filters['min_sim'] = float(self.min_sim.get())
-        except Exception:
-            pass
-        try:
-            if self.max_sim.get(): filters['max_sim'] = float(self.max_sim.get())
-        except Exception:
-            pass
+        sim_min = self._parse_percentage(self.min_sim.get())
+        sim_max = self._parse_percentage(self.max_sim.get())
+        if sim_min is not None:
+            filters['min_sim'] = sim_min
+        if sim_max is not None:
+            filters['max_sim'] = sim_max
         filters['show'] = self.show_option.get()
 
         if callable(self.apply_callback):
@@ -94,3 +92,28 @@ class FilterWindow(ctk.CTkToplevel):
         self.show_option.set('Wszystkie')
         if callable(self.apply_callback):
             self.apply_callback({})
+
+    def _display_percentage(self, value: Optional[float]) -> str:
+        if value is None or value == '':
+            return ''
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return ''
+        percent = numeric * 100 if numeric <= 1 else numeric
+        percent = max(0.0, min(percent, 100.0))
+        if percent.is_integer():
+            return str(int(percent))
+        return f"{percent:.1f}"
+
+    def _parse_percentage(self, text: str) -> Optional[float]:
+        if not text:
+            return None
+        try:
+            val = float(text)
+        except ValueError:
+            return None
+        if val > 1:
+            val = val / 100.0
+        val = max(0.0, min(val, 1.0))
+        return val

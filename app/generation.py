@@ -1,91 +1,54 @@
 from tkinter import messagebox
-from typing import Optional, List, Tuple
+from typing import List, Tuple, Dict
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from pathlib import Path
+from app.utils import ready_dir_from_audio_dir
+from app.entity import Line
+from app.io import get_primary_audio_path
 import os
 import json
 
 
+LineList = List[Line]
+
+
 def prepare_job_dependencies(app) -> bool:
+    lines: LineList = app.lines
     if not app.audio_dir or not app.audio_dir.is_dir():
         messagebox.showwarning("Brak katalogu", "Najpierw wybierz katalog audio.", parent=app)
         return False
     if not app.current_project_path:
         messagebox.showwarning("Brak projektu", "Zapisz projekt przed dodaniem do kolejki.", parent=app)
         return False
-    if not app.lines:
+    if not lines:
         messagebox.showwarning("Brak danych", "Najpierw przetwórz napisy.", parent=app)
         return False
     return True
 
 
-def enqueue_generate_single(app, line_no: Optional[int] = None):
-    if not prepare_job_dependencies(app):
-        return
-    if line_no is None:
-        if app.selected_line_index is None:
-            messagebox.showwarning("Brak zaznaczenia", "Najpierw wybierz linię.", parent=app)
-            return
-        line_no = int(app.selected_line_index + 1)
+def _audio_path(audio_dir: Path, uid: str, ext: str) -> Path:
+    """Konstruuje pełną ścieżkę do pliku audio na podstawie uid"""
+    path = get_primary_audio_path(uid)
+    if path and path.suffix.lower() == f'.{ext}':
+        return path
+    # Fallback jeśli chcemy konkretne rozszerzenie inne niż domyślne wav
+    return audio_dir / f"output1 ({uid}).{ext}"
 
-    identifier = (line_no - 1)
-    try:
-        text = app.lines[identifier].tts_text
-        lines_to_gen = [(str(line_no), text)]
-    except (IndexError, ValueError):
-        return
 
-    tts_model = app._get_active_tts_model_name()
-    if not tts_model:
-        messagebox.showerror("Błąd", "Brak modelu TTS.")
-        return
-
-    job = GenerationJob(
-        project_path=f"POJEDYNCZY ({line_no}) - {app.current_project_path.name}",
-        audio_dir=app.audio_dir,
-        lines_to_generate=lines_to_gen,
-        tts_model_name=tts_model,
-        tts_config=app._gather_tts_config(),
-        converter_config=app._gather_converter_config()
-    )
-    # notify app after each generated file so UI/model can be updated
-    def _on_generate(identifier: str, path: str):
-        try:
-            idx = int(identifier) - 1
-            if 0 <= idx < len(app.lines):
-                app.lines[idx].audio_filename = Path(path).name
-                app.lines[idx].audio_status = 'OK'
-                # try to probe duration via ffprobe
-                try:
-                    from app.subtitles import SubtitlePanel
-                    # best-effort: leave duration to verification or external probe
-                except Exception:
-                    pass
-                # persist csv
-                try:
-                    from app.io import save_lines_to_file
-                    if getattr(app, 'loaded_path', None):
-                        save_lines_to_file(str(app.loaded_path), app.lines)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-    job.on_generate = _on_generate
-    GenerationManager.get_instance().add_job(job)
-    app.set_status(f"Dodano zadanie (linia {line_no}) do kolejki.")
 
 
 def enqueue_generate_all(app):
     if not prepare_job_dependencies(app):
         return
 
-    total_items = len(app.lines)
+    lines: LineList = app.lines
+    total_items = len(lines)
     existing_items = 0
 
-    for i in range(total_items):
-        identifier = str(i + 1)
-        raw_wav = app.audio_dir / f"output1 ({identifier}).wav"
-        raw_mp3 = app.audio_dir / f"output1 ({identifier}).mp3"
+    for i, line in enumerate(lines):
+        uid = line.uid
+        raw_wav = _audio_path(app.audio_dir, uid, 'wav')
+        raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
         if raw_wav.exists() or raw_mp3.exists():
             existing_items += 1
 
@@ -106,24 +69,43 @@ def _execute_generate_all(app, overwrite: bool):
 
     dialogs_to_generate = []
 
-    for i, line in enumerate(app.lines):
-        identifier = str(i + 1)
-        text = line.tts_text.strip()
+    uid_to_idx: Dict[str, int] = {}
+    lines: LineList = app.lines
+    for i, line in enumerate(lines):
+        uid = line.uid
+        text = line.get_tts_text().strip()
 
         if not text:
             continue
 
         if not overwrite:
-            raw_wav = app.audio_dir / f"output1 ({identifier}).wav"
-            raw_mp3 = app.audio_dir / f"output1 ({identifier}).mp3"
+            raw_wav = _audio_path(app.audio_dir, uid, 'wav')
+            raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
             if raw_wav.exists() or raw_mp3.exists():
                 continue
-
-        dialogs_to_generate.append((identifier, text))
+        dialogs_to_generate.append((uid, text))
+        uid_to_idx[uid] = i
 
     if not dialogs_to_generate:
         messagebox.showinfo("Info", "Brak dialogów do wygenerowania (wszystkie istnieją lub są puste).")
         return
+
+    def _on_generate(identifier: str, path: str):
+        try:
+            target_idx = uid_to_idx.get(identifier)
+            if target_idx is None:
+                target_idx = next((i for i, l in enumerate(lines) if l.uid == identifier), None)
+            if target_idx is not None and 0 <= target_idx < len(lines):
+                lines[target_idx].audio_filename = Path(path).name
+                lines[target_idx].audio_status = 'OK'
+            try:
+                from app.io import save_lines_to_file
+                if getattr(app, 'loaded_path', None):
+                    save_lines_to_file(str(app.loaded_path), lines)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     job = GenerationJob(
         project_path=app.current_project_path.name,
@@ -133,23 +115,9 @@ def _execute_generate_all(app, overwrite: bool):
         tts_config=app._gather_tts_config(),
         converter_config=app._gather_converter_config()
     )
-    def _on_generate(identifier: str, path: str):
-        try:
-            idx = int(identifier) - 1
-            if 0 <= idx < len(app.lines):
-                app.lines[idx].audio_filename = Path(path).name
-                app.lines[idx].audio_status = 'OK'
-                try:
-                    from app.io import save_lines_to_file
-                    if getattr(app, 'loaded_path', None):
-                        save_lines_to_file(str(app.loaded_path), app.lines)
-                except Exception:
-                    pass
-        except Exception:
-            pass
     job.on_generate = _on_generate
     GenerationManager.get_instance().add_job(job)
-    app.show_generation_queue()
+    show_generation_queue(app)
     app.set_status(f"Dodano {len(dialogs_to_generate)} linii do kolejki.")
 
 
@@ -161,7 +129,7 @@ def enqueue_convert_all(app):
     source_files = list(app.audio_dir.glob("output1 (*).wav")) + list(app.audio_dir.glob("output1 (*).mp3"))
     total_source = len(source_files)
 
-    ready_dir = app.audio_dir / "ready"
+    ready_dir = ready_dir_from_audio_dir(app.audio_dir)
     existing_target = 0
     if ready_dir.exists():
         existing_target = len(list(ready_dir.glob("*.ogg"))) + len(list(ready_dir.glob("*.mp3")))
@@ -176,9 +144,16 @@ def enqueue_convert_all(app):
     )
 
 
+def show_generation_queue(app):
+    from audio.generation_queue import GenerationQueueWindow
+    if app.queue_window is None or not app.queue_window.winfo_exists():
+        app.queue_window = GenerationQueueWindow(app)
+    app.queue_window.lift()
+
+
 def _execute_convert_all(app, overwrite: bool):
     if overwrite:
-        ready_dir = app.audio_dir / "ready"
+        ready_dir = ready_dir_from_audio_dir(app.audio_dir)
         if ready_dir.exists():
             try:
                 for f in ready_dir.glob("*.ogg"):

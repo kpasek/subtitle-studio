@@ -195,18 +195,20 @@ class SettingsWindow(ctk.CTkToplevel):
         CreateToolTip(entry_gcp_voice, "Np. pl-PL-Wavenet-B", wraplength=300)
 
         # Zakładka Piper
-        ctk.CTkLabel(tab_xtts, text="Ścieżka modelu Piper (.onnx):").grid(
-            row=1, column=0, sticky="w", padx=10, pady=(5, 10))
+        tab_piper = tts_tabview.add("Piper")
+        tab_piper.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(tab_piper, text="Ścieżka modelu Piper (.onnx):").grid(
+            row=0, column=0, sticky="w", padx=10, pady=(10, 5))
         self.piper_model_path_var = tk.StringVar(
             value=self.master.global_config.get('piper_model_path', ''))
         entry_model = ctk.CTkEntry(
-            tab_xtts, textvariable=self.piper_model_path_var)
-        entry_model.grid(row=1, column=1, sticky="ew",
-                         padx=(0, 10), pady=(5, 10))
-        ctk.CTkButton(tab_xtts, text="...", width=40, command=self.select_model_file).grid(
-            row=1, column=2, sticky="e", padx=10, pady=(5, 10))
+            tab_piper, textvariable=self.piper_model_path_var)
+        entry_model.grid(row=0, column=1, sticky="ew",
+                         padx=(0, 10), pady=(10, 5))
+        ctk.CTkButton(tab_piper, text="...", width=40, command=self.select_model_file).grid(
+            row=0, column=2, sticky="e", padx=10, pady=(10, 5))
         CreateToolTip(
-            entry_model, "Ścieżka do pliku .onnx używanego przez Piper API (jeśli wymagane).", wraplength=300)
+            entry_model, "Ścieżka do pliku .onnx używanego przez Piper.", wraplength=300)
 
         theme_frame = ctk.CTkFrame(frame)
         theme_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=6)
@@ -385,7 +387,6 @@ class SettingsWindow(ctk.CTkToplevel):
             filters_data = {key: {"enabled": en_var.get(), "params": par_var.get()}
                             for key, (par_var, en_var) in self.filter_vars.items()}
 
-            self.master.global_config["piper_model_path"] = self.piper_model_path_var.get().strip()
             try:
                 cpu_count = os.cpu_count()
                 workers = int(self.verification_workers_var.get())
@@ -407,6 +408,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 'elevenlabs_voice_id': self.el_voice_id_var.get(),
                 'google_credentials_path': self.gcp_creds_var.get(),
                 'google_voice_name': self.gcp_voice_name_var.get(),
+                'piper_model_path': self.piper_model_path_var.get().strip(),
                 'ffmpeg_filters': filters_data,
                 'appearance_mode': self.appearance_mode_var.get(),
                 'color_theme': self.color_theme_var.get()

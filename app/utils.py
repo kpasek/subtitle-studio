@@ -4,6 +4,7 @@ import re
 import sys
 import os
 import importlib.util
+from pathlib import Path
 
 from app.entity import Line, PatternItem
 
@@ -100,3 +101,32 @@ def is_installed(package_name: str) -> bool:
         True if the package is found, False otherwise.
     """
     return importlib.util.find_spec(package_name) is not None
+
+
+def project_generated_dir(project_path: Path) -> Path:
+    """Zwraca katalog generated powiązany z plikiem projektu."""
+    return project_path.parent / "generated"
+
+
+def project_subtitles_dir(project_path: Path) -> Path:
+    """Zwraca katalog subtitles powiązany z plikiem projektu."""
+    return project_path.parent / "subtitles"
+
+
+def project_ready_dir(project_path: Path) -> Path:
+    """Zwraca katalog ready powiązany z plikiem projektu."""
+    return project_path.parent / "ready"
+
+
+def ready_dir_from_audio_dir(audio_dir: Path) -> Path:
+    """Zwraca katalog ready na podstawie katalogu audio (zakłada, że ready jest obok)."""
+    return audio_dir.parent / "ready"
+
+
+def ensure_project_dirs(project_path: Path) -> None:
+    """Tworzy katalogi generated/subtitles/ready w projekcie, jeśli nie istnieją."""
+    for directory in (project_generated_dir(project_path),
+                      project_subtitles_dir(project_path),
+                      project_ready_dir(project_path)):
+        directory.mkdir(parents=True, exist_ok=True)
+

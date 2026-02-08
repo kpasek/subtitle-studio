@@ -13,6 +13,7 @@ from generators.google_cloud_tts import GoogleCloudTTS
 from generators.elevenlabs_tts import ElevenLabsTTS
 from generators.tts_base import TTSBase
 from audio.audio_converter import AudioConverter
+from app.utils import ready_dir_from_audio_dir
 
 
 @dataclass
@@ -193,6 +194,7 @@ class GenerationManager:
                 raise InterruptedError()
 
             self._notify_progress(i, total_to_gen, f"Generowanie... ({i + 1}/{total_to_gen})")
+            # Konstrukcja nazwy pliku na podstawie UID
             output_path = job.audio_dir / f"output1 ({identifier}).wav"
 
             try:
@@ -316,7 +318,7 @@ class GenerationManager:
             max_workers = int(config.get('conversion_workers', default_workers))
 
             converter = AudioConverter(filter_settings=filter_settings, out_format=config.get('audio_output_format', 'mp3'))
-            output_dir = audio_dir / "ready"
+            output_dir = ready_dir_from_audio_dir(audio_dir)
             os.makedirs(output_dir, exist_ok=True)
 
             def conversion_progress(current: int, total: int):
