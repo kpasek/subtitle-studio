@@ -5,9 +5,152 @@ from pathlib import Path
 from typing import Optional, List
 from tkinter import filedialog, messagebox, TclError, simpledialog
 
-from app.utils import ensure_project_dirs, project_generated_dir
+from app.utils import ensure_project_dirs, project_generated_dir, project_ready_dir, project_subtitles_dir
 from app.entity import Line, PatternItem
 from app.io import load_subtitle_file, save_lines_to_file, APP_CONFIG
+
+
+def create_new_project(app):
+    """Tworzy nową strukturę projektu w wybranym folderze."""
+    if not _check_unsaved_changes(app):
+        return
+
+    # 1. Wybierz katalog nadrzędny projektu
+    initial_dir = app.global_config.get('start_directory') or str(Path.cwd())
+    project_dir = filedialog.askdirectory(title="Wybierz folder bazowy dla projektu", initialdir=initial_dir)
+    if not project_dir:
+        return
+
+    # 2. Podaj nazwę projektu
+    project_name = simpledialog.askstring("Nowy projekt", "Podaj nazwę projektu (nazwa pliku json):")
+    if not project_name:
+        return
+
+    if not project_name.lower().endswith(".json"):
+        project_name += ".json"
+
+    project_path = Path(project_dir) / project_name
+
+    if project_path.exists():
+        if not messagebox.askyesno("Projekt istnieje", f"Plik {project_name} już istnieje. Nadpisać?"):
+            return
+
+    # 3. Stwórz strukturę katalogów
+    ensure_project_dirs(project_path)
+
+    # 4. Stwórz pusty plik projektu z domyślną konfiguracją
+    default_cfg = {
+        "builtin_remove_state": [True] * len(app.builtin_remove_state),
+        "builtin_replace_state": [True] * len(app.builtin_replace_state),
+        "custom_remove": [],
+        "custom_replace": [],
+        "subtitle_path": None,
+        "audio_path": str(project_generated_dir(project_path).absolute()),
+        "active_tts_model": "XTTS",
+        "base_audio_speed": 1.1
+    }
+
+    try:
+        with open(project_path, "w", encoding="utf-8") as f:
+            json.dump(default_cfg, f, indent=2, ensure_ascii=False)
+
+        # 5. Otwórz nowy projekt
+        open_project(app, str(project_path))
+    except Exception as e:
+        messagebox.showerror("Błąd", f"Nie udało się stworzyć projektu:\n{e}")
+
+
+def import_old_project(app):
+    """Importuje stary projekt i dostosowuje do nowej struktury (UID na podstawie nr linii)."""
+    if not _check_unsaved_changes(app):
+        return
+
+    initial_dir = app.global_config.get('start_directory') or str(Path.cwd())
+    path = filedialog.askopenfilename(title="Wybierz stary projekt (.json) do importu",
+                                      filetypes=[("JSON", "*.json")],
+                                      initialdir=initial_dir)
+    if not path:
+        return
+
+    try:
+        open_project(app, path)
+        project_path = Path(path)
+        project_root = project_path.parent
+
+        # 1. Obsługa starych ścieżek audio
+        old_audio_path_str = app.project_config.get("audio_path")
+        if old_audio_path_str:
+            old_audio_path = Path(old_audio_path_str)
+            new_gen_dir = project_generated_dir(project_path)
+            new_ready_dir = project_ready_dir(project_path)
+
+            if old_audio_path.exists() and old_audio_path.resolve() != new_gen_dir.resolve():
+                import shutil
+                # Przenieś pliki z starego katalogu audio do generated/
+                for item in old_audio_path.iterdir():
+                    if item.is_file():
+                        shutil.move(str(item), str(new_gen_dir / item.name))
+                    elif item.is_dir() and item.name == "ready":
+                        # Przenieś zawartość starego ready do nowego ready/
+                        for ready_item in item.iterdir():
+                            if ready_item.is_file():
+                                shutil.move(str(ready_item), str(new_ready_dir / ready_item.name))
+                
+                # Zaktualizuj ścieżkę w konfiguracji projektu
+                app.project_config["audio_path"] = str(new_gen_dir.absolute())
+
+        # 2. Przypisanie UID na podstawie numeru linii
+        if app.lines:
+            import shutil
+            for i, line in enumerate(app.lines, start=1):
+                old_uid = line.uid
+                new_uid = str(i)
+                
+                # Jeśli importujemy projekt, a pliki mają już zapisaną UID,
+                # musimy zmienić ich nazwy, aby pasowały do nowych UID (numerów linii).
+                if old_uid and old_uid != new_uid and app.audio_dir:
+                    for ext in ['.wav', '.mp3', '.ogg']:
+                        # Konwencje nazw: "output1 (uid).ext"
+                        old_file = app.audio_dir / f"output1 ({old_uid}){ext}"
+                        if old_file.exists():
+                            new_file = app.audio_dir / f"output1 ({new_uid}){ext}"
+                            try:
+                                if not new_file.exists():
+                                    shutil.move(str(old_file), str(new_file))
+                                else:
+                                    # Jeśli plik docelowy istnieje, usuwamy stary (zakładamy migrację)
+                                    old_file.unlink()
+                            except Exception as e:
+                                print(f"Błąd zmiany nazwy pliku audio {old_file.name}: {e}")
+                        
+                        # Sprawdź pliki w ready/ (jeśli istnieją)
+                        ready_dir = project_ready_dir(project_path)
+                        old_ready = ready_dir / f"output1 ({old_uid}){ext}"
+                        if old_ready.exists():
+                            new_ready = ready_dir / f"output1 ({new_uid}){ext}"
+                            try:
+                                if not new_ready.exists():
+                                    shutil.move(str(old_ready), str(new_ready))
+                                else:
+                                    old_ready.unlink()
+                            except Exception as e:
+                                print(f"Błąd zmiany nazwy w ready/ {old_ready.name}: {e}")
+
+                line.uid = new_uid
+                # Czyścimy starą nazwę pliku - teraz pole polega wyłącznie na UID
+                line.audio_filename = ""
+
+            line_count = len(app.lines)
+
+            # Skorzystaj z logiki "Zatwierdź zmiany", aby przenieść plik do /subtitles i zaktualizować projekt
+            # Ważne: UID muszą być ustawione ZANIM wywołamy _finalize_processing
+            from app.patterns import _finalize_processing
+            _finalize_processing(app, remove_empty=False, remove_duplicates=False)
+
+            msg = f"Import zakończony powodzeniem, zaimportowano {line_count} wierszy oraz {line_count} dialogów."
+            messagebox.showinfo("Import", msg)
+    except Exception as e:
+        messagebox.showerror("Błąd importu", f"Nie udało się zaimportować projektu:\n{e}")
 
 
 def open_project(app, path: Optional[str] = None):
@@ -52,6 +195,11 @@ def open_project(app, path: Optional[str] = None):
 
         app.custom_remove = [PatternItem.from_json(x) for x in cfg.get("custom_remove", [])]
         app.custom_replace = [PatternItem.from_json(x) for x in cfg.get("custom_replace", [])]
+        
+        # Reset edycji ręcznych przy otwieraniu/tworzeniu projektu
+        app.manual_edits = {}
+        app.tts_edits = {}
+        
         app._refresh_custom_lists()
 
         # Wczytaj audio_path PIERWSZY - potrzebny dla kompatybilności wstecznej txt
@@ -88,7 +236,12 @@ def open_project(app, path: Optional[str] = None):
                 app.lines = []
         else:
             app.lines = []
+            app.loaded_path = None
             app.apply_patterns()
+            # Wymuś odświeżenie panelu, gdy lista jest pusta
+            if hasattr(app, '_update_subtitle_panel_content'):
+                app._update_subtitle_panel_content()
+            
             if app.lbl_filename:
                 app.lbl_filename.configure(text="Brak wczytanego pliku")
 

@@ -119,13 +119,15 @@ class VerificationManager:
             print(f"[VERIFY_LINE EMPTY] id={line_id} uid={uid}")
             return entry
         
-        # Szukanie pliku audio
+        # Szukanie pliku audio - wyłącznie po UID
         audio_file = None
         found_ext = ''
-        if uid:
-            base = uid if uid.startswith("output1 (") else f"output1 ({uid})"
-        else:
-            base = f"output1 ({ident_str})"
+        if not uid:
+            entry['raw_status'] = 'MISSING'
+            entry['display_status'] = 'MISSING'
+            return entry
+
+        base = uid if uid.startswith("output1 (") else f"output1 ({uid})"
         candidates = [
             (audio_dir_p / f"{base}.wav", 'wav'),
             (audio_dir_p / f"{base}.mp3", 'mp3'),

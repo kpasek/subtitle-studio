@@ -220,7 +220,8 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
                 'audio_similarity': ln.audio_similarity,
                 'audio_status': ln.audio_status,
                 'audio_format': ln.audio_format,
-                'audio_transcribed_text': ln.audio_transcribed_text
+                'audio_transcribed_text': ln.audio_transcribed_text,
+                'uid': getattr(ln, 'uid', None)
             }
 
     # 2. Aplikuj wzorce na kopiach (symulacja końcowego tekstu)
@@ -274,6 +275,9 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
             obj.audio_status = meta['audio_status']
             obj.audio_format = meta['audio_format']
             obj.audio_transcribed_text = meta['audio_transcribed_text']
+            # Przenieś UID jeśli istnieje
+            if meta.get('uid'):
+                obj.uid = meta['uid']
             
         final_objs.append(obj)
 

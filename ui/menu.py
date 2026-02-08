@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
-from app.project import (open_project, save_project, save_project_as, close_project, 
+from app.project import (create_new_project, import_old_project, open_project, save_project, save_project_as, close_project, 
                          open_recent_projects_window, save_global_config,
                          add_new_subtitles, change_subtitle_file, download_clean, download_replace,
                          delete_all_converted_audio)
@@ -26,6 +26,9 @@ class AppMenu:
 
         # --- Projekt ---
         config_menu = tk.Menu(menubar, tearoff=0)
+        config_menu.add_command(label="Nowy projekt", command=lambda: create_new_project(self.app))
+        config_menu.add_command(label="Importuj projekt (starsza wersja)", command=lambda: import_old_project(self.app))
+        config_menu.add_separator()
         config_menu.add_command(label="Otwórz projekt (.json)", command=lambda: open_project(self.app))
         config_menu.add_command(label="Otwórz ostatni...", command=lambda: open_recent_projects_window(self.app),
                                 accelerator="Ctrl+E")

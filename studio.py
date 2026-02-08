@@ -29,7 +29,7 @@ from app.patterns import (apply_patterns as patterns_apply, BUILTIN_REMOVE, BUIL
                           open_add_remove_pattern, open_add_replace_pattern, open_edit_pattern,
                           handle_pattern_update, add_remove_pattern_from_selection,
                           add_replace_pattern_from_selection, _clear_custom_list)
-from app.project import (open_project, close_project, save_project, save_project_as, 
+from app.project import (create_new_project, import_old_project, open_project, close_project, save_project, save_project_as, 
                          set_project_config, _gather_project_config, _load_app_config, 
                          save_app_setting, save_global_config, _check_unsaved_changes, 
                          _update_recent_projects, open_recent_projects_window, 

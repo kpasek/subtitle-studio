@@ -225,7 +225,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
         with open(p, 'w', encoding='utf-8', newline='') as f:
             fieldnames = [
                 'original_text', 'text', 'tts_text', 'audio_duration',
-                'audio_filename', 'audio_similarity', 'audio_format',
+                'audio_similarity', 'audio_format',
                 'audio_transcribed_text', 'uid'
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -240,12 +240,15 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                         'text': text_value,
                         'tts_text': tts_value,
                         'audio_duration': item.audio_duration,
-                        'audio_filename': item.audio_filename,
                         'audio_similarity': item.audio_similarity,
                         'audio_format': item.audio_format,
                         'audio_transcribed_text': getattr(item, 'audio_transcribed_text', ''),
-                        'uid': _cleanup_uid_field(getattr(item, 'uid', '')) or uuid.uuid4().hex[:8]
+                        'uid': _cleanup_uid_field(getattr(item, 'uid', ''))
                     }
+                    if not row_dict['uid']:
+                        # Jeśli brak UID, używamy UUID jako absolutny fallback, 
+                        # ale w normalnym cyklu pracy UID powinno być już nadane.
+                        row_dict['uid'] = uuid.uuid4().hex[:8]
                     writer.writerow(row_dict)
                     saved_count += 1
                 else:
@@ -336,7 +339,7 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
         with open(p, 'w', encoding='utf-8', newline='') as f:
             fieldnames = [
                 'original_text', 'text', 'tts_text', 'audio_duration',
-                'audio_filename', 'audio_similarity', 'audio_format',
+                'audio_similarity', 'audio_format',
                 'audio_transcribed_text', 'uid'
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -348,14 +351,11 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
                     'text': text_value,
                     'tts_text': tts_value,
                     'audio_duration': item.audio_duration,
-                    'audio_filename': item.audio_filename,
                     'audio_similarity': item.audio_similarity,
                     'audio_format': item.audio_format,
                     'audio_transcribed_text': getattr(item, 'audio_transcribed_text', ''),
                     'uid': _cleanup_uid_field(getattr(item, 'uid', '')) or uuid.uuid4().hex[:8]
                 }
-                if idx == line_index:
-                    print(f"[DEBUG] Writing line {line_index} to CSV: audio_transcribed_text = {repr(row_dict['audio_transcribed_text'])}")
                 writer.writerow(row_dict)
     except Exception as e:
         print(f"Blad aktualizacji linii w CSV: {e}")

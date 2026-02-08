@@ -1294,22 +1294,11 @@ class SubtitlePanel(ctk.CTkFrame):
             try:
                 selected_line = self.app.lines[self.app.selected_line_index]
                 
-                # Próba 1: Użycie zapisanej nazwy pliku w obiekcie Line
+                # Szukanie wyłącznie po UID (standardowa konwencja)
+                uid = getattr(selected_line, 'uid', None)
                 found_files = []
-                if hasattr(selected_line, 'audio_filename') and selected_line.audio_filename:
-                    audio_path = self.app.audio_dir / selected_line.audio_filename
-                    if audio_path.exists():
-                        found_files.append((audio_path, True))
-                
-                # Próba 2: Szukanie po UID (standardowa konwencja)
-                if not found_files:
-                    uid = getattr(selected_line, 'uid', None)
-                    if uid:
-                        found_files = self._find_audio_files(uid)
-                
-                # Próba 3: Szukanie po starym formacie indeksu (rezerwowo)
-                if not found_files:
-                    found_files = self._find_audio_files(f"output1 ({self.app.selected_line_index + 1})")
+                if uid:
+                    found_files = self._find_audio_files(uid)
 
                 if found_files:
                     status_msg = f"Audio: znaleziono {len(found_files)}"
@@ -1363,33 +1352,14 @@ class SubtitlePanel(ctk.CTkFrame):
         if not line_obj:
             return
 
-        # Logika wyszukiwania pliku
+        # Logika wyszukiwania pliku - oparta wyłącznie na UID
         file_to_play = None
+        identifier = getattr(line_obj, 'uid', None)
         
-        # Próba 1: Jeśli obiekt Line ma zapisaną nazwę pliku
-        if hasattr(line_obj, 'audio_filename') and line_obj.audio_filename:
-            path = self.app.audio_dir / line_obj.audio_filename
-            if path.exists():
-                file_to_play = path
-
-        # Próba 2: Szukanie po UID lub identyfikatorze
-        if not file_to_play:
-            identifier = getattr(line_obj, 'uid', None)
-            if identifier:
-                files = self._find_audio_files(identifier)
-                if files:
-                    file_to_play = files[0][0]
-
-        # Próba 3: Fallback na indeks (stara konwencja)
-        if not file_to_play:
-            try:
-                idx = self.app.lines.index(line_obj)
-                identifier = f"output1 ({idx + 1})"
-                files = self._find_audio_files(identifier)
-                if files:
-                    file_to_play = files[0][0]
-            except Exception:
-                pass
+        if identifier:
+            files = self._find_audio_files(identifier)
+            if files:
+                file_to_play = files[0][0]
 
         if not file_to_play:
             return
