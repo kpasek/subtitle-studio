@@ -182,8 +182,12 @@ class SubtitlePanel(ctk.CTkFrame):
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         self.tree.bind("<Double-Button-1>", self.play_selected_audio)
         self.tree.bind("<Button-3>", self._show_context_menu)
-        # Obsługa Ctrl+Klik (edycja inline)
-        self.tree.bind("<Control-Button-1>", self._start_inline_edit)
+        # Obsługa Alt+Klik (edycja inline) zamiast Ctrl+Klik (konflikt z multi-select)
+        self.tree.bind("<Alt-Button-1>", self._start_inline_edit)
+        # Dodatkowe skróty klawiszowe dla tabeli
+        self.tree.bind("<F2>", self._start_inline_edit)
+        self.tree.bind("<Return>", self._start_inline_edit)
+        self.tree.bind("<space>", self.play_selected_audio)
 
         # Zmienne do edycji inline
         self.inline_edit_entry = None
@@ -218,7 +222,7 @@ class SubtitlePanel(ctk.CTkFrame):
                     return (0, float(val if val is not None else 0.0))
                 if col_id == 'similarity':
                     val = getattr(ln, 'audio_similarity', 0.0)
-                    if val is None and i < len(self.ver_analysis_results):
+                    if (val is None or val == 0.0) and i < len(self.ver_analysis_results):
                         val = self.ver_analysis_results[i].get('similarity', 0.0)
                     return (0, float(val if val is not None else 0.0))
                 if col_id == 'cps':
@@ -261,7 +265,13 @@ class SubtitlePanel(ctk.CTkFrame):
             obj_id = id(obj)
             if obj_id in line_to_idx:
                 new_indices.append(line_to_idx[obj_id])
+        
+        # WAŻNE: Aktualizujemy indices i index primary
         self.selected_line_indices = new_indices
+        if new_indices:
+            self.app.selected_line_index = new_indices[0]
+        else:
+            self.app.selected_line_index = None
 
         self.set_preview(self.app.lines)
 
@@ -526,33 +536,51 @@ class SubtitlePanel(ctk.CTkFrame):
         self.update_audio_buttons_state()
 
     def _start_inline_edit(self, event):
-        """Uruchamia edycję inline tekstu w tabeli przy Ctrl+Click."""
+        """Uruchamia edycję inline tekstu w tabeli."""
         # Sprawdzenie czy jesteśmy w edytowalnym trybie
         mode = self.app.view_mode.get()
         if mode == "Oryginał":
             return
         
-        # Znajdź wiersz i kolumnę pod kursorem
-        item = self.tree.identify_row(event.y)
-        col = self.tree.identify_column(event.x)
-        
-        if not item or not col:
-            return
-        
-        # Pobierz indeks kolumny
-        try:
-            col_idx = int(col[1]) - 1  # col jest w formacie '#1', '#2' itd.
-        except (ValueError, IndexError):
-            return
-        
-        # Sprawdzenie czy to kolumna "content"
-        if col_idx >= len(self.columns_config):
-            return
-        
-        col_id = self.columns_config[col_idx]["id"]
+        # Jeśli wywołane klawiszem (np. F2), weź aktualnie zaznaczony element
+        if event.type == tk.EventType.KeyPress:
+            selected = self.tree.selection()
+            if not selected:
+                return
+            item = selected[0]
+            # Znajdź indeks kolumny "content"
+            col_id = "content"
+            col_idx = 0
+            for i, config in enumerate(self.columns_config):
+                if config["id"] == "content":
+                    col_idx = i
+                    break
+        else:
+            # Kliknięcie myszą (Alt+Btn1)
+            item = self.tree.identify_row(event.y)
+            col = self.tree.identify_column(event.x)
+            
+            if not item or not col:
+                return
+            
+            # Pobierz indeks kolumny (np. '#1' -> 0)
+            try:
+                col_idx = int(col[1:]) - 1
+            except (ValueError, IndexError):
+                return
+            
+            if col_idx < 0 or col_idx >= len(self.columns_config):
+                return
+            col_id = self.columns_config[col_idx]["id"]
+
         if col_id != "content":
             return
         
+        # Upewnij się, że wiersz jest zaznaczony przed edycją
+        if item not in self.tree.selection():
+            self.tree.selection_set(item)
+            self.on_tree_select(None)
+
         # Pobierz obiekt linii i jej indeks
         line_obj = self.item_line_map.get(item)
         if not line_obj:
@@ -1260,8 +1288,23 @@ class SubtitlePanel(ctk.CTkFrame):
             # Sprawdz pierwszy zaznaczony
             try:
                 selected_line = self.app.lines[self.app.selected_line_index]
-                identifier = getattr(selected_line, 'uid', f"output1 ({self.app.selected_line_index + 1})")
-                found_files = self._find_audio_files(identifier)
+                
+                # Próba 1: Użycie zapisanej nazwy pliku w obiekcie Line
+                found_files = []
+                if hasattr(selected_line, 'audio_filename') and selected_line.audio_filename:
+                    audio_path = self.app.audio_dir / selected_line.audio_filename
+                    if audio_path.exists():
+                        found_files.append((audio_path, True))
+                
+                # Próba 2: Szukanie po UID (standardowa konwencja)
+                if not found_files:
+                    uid = getattr(selected_line, 'uid', None)
+                    if uid:
+                        found_files = self._find_audio_files(uid)
+                
+                # Próba 3: Szukanie po starym formacie indeksu (rezerwowo)
+                if not found_files:
+                    found_files = self._find_audio_files(f"output1 ({self.app.selected_line_index + 1})")
 
                 if found_files:
                     status_msg = f"Audio: znaleziono {len(found_files)}"
@@ -1289,8 +1332,10 @@ class SubtitlePanel(ctk.CTkFrame):
             return
 
         item_id = None
-        if event is not None:
+        # Jeśli wywołane klawiszem (np. spacją), ignoruj pozycję myszy
+        if event is not None and event.type != tk.EventType.KeyPress:
             try:
+                # identifies the row under the mouse cursor
                 item_id = self.tree.identify_row(event.y)
             except Exception:
                 item_id = None
@@ -1313,17 +1358,37 @@ class SubtitlePanel(ctk.CTkFrame):
         if not line_obj:
             return
 
-        identifier = getattr(line_obj, 'uid', None)
-        if not identifier and self.app.selected_line_index is not None:
-            identifier = f"output1 ({self.app.selected_line_index + 1})"
-        if not identifier:
+        # Logika wyszukiwania pliku
+        file_to_play = None
+        
+        # Próba 1: Jeśli obiekt Line ma zapisaną nazwę pliku
+        if hasattr(line_obj, 'audio_filename') and line_obj.audio_filename:
+            path = self.app.audio_dir / line_obj.audio_filename
+            if path.exists():
+                file_to_play = path
+
+        # Próba 2: Szukanie po UID lub identyfikatorze
+        if not file_to_play:
+            identifier = getattr(line_obj, 'uid', None)
+            if identifier:
+                files = self._find_audio_files(identifier)
+                if files:
+                    file_to_play = files[0][0]
+
+        # Próba 3: Fallback na indeks (stara konwencja)
+        if not file_to_play:
+            try:
+                idx = self.app.lines.index(line_obj)
+                identifier = f"output1 ({idx + 1})"
+                files = self._find_audio_files(identifier)
+                if files:
+                    file_to_play = files[0][0]
+            except Exception:
+                pass
+
+        if not file_to_play:
             return
 
-        files = self._find_audio_files(identifier)
-        if not files:
-            return
-
-        file_to_play = files[0][0]
         self.stop_audio()
         try:
             startupinfo = None
