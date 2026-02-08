@@ -170,11 +170,13 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         self.btn_convert.configure(state="disabled" if is_conv_ok else "normal")
 
     def _run_generation(self):
-        self.app.enqueue_generate_all()
+        from app.generation import enqueue_generate_all
+        enqueue_generate_all(self.app)
         messagebox.showinfo("Info", "Uruchomiono proces generowania. Dokończ go, a następnie wróć tutaj.", parent=self)
 
     def _run_conversion(self):
-        self.app.enqueue_convert_all()
+        from app.generation import enqueue_convert_all
+        enqueue_convert_all(self.app)
         messagebox.showinfo("Info", "Uruchomiono proces konwersji. Dokończ go, a następnie wróć tutaj.", parent=self)
 
     def _choose_directory(self):

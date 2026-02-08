@@ -119,7 +119,7 @@ def _execute_generate_all(app, overwrite: bool):
     )
     job.on_generate = _on_generate
     GenerationManager.get_instance().add_job(job)
-    app.show_generation_queue()
+    show_generation_queue(app)
     app.set_status(f"Dodano {len(dialogs_to_generate)} linii do kolejki.")
 
 
@@ -144,6 +144,13 @@ def enqueue_convert_all(app):
         existing_target,
         callback=lambda overwrite: _execute_convert_all(app, overwrite)
     )
+
+
+def show_generation_queue(app):
+    from audio.generation_queue import GenerationQueueWindow
+    if app.queue_window is None or not app.queue_window.winfo_exists():
+        app.queue_window = GenerationQueueWindow(app)
+    app.queue_window.lift()
 
 
 def _execute_convert_all(app, overwrite: bool):

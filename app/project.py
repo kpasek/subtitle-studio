@@ -1,10 +1,13 @@
 import json
 import os
+import datetime
 from pathlib import Path
-from typing import Optional
-from tkinter import filedialog, messagebox, TclError
+from typing import Optional, List
+from tkinter import filedialog, messagebox, TclError, simpledialog
 
 from app.utils import ensure_project_dirs, project_generated_dir
+from app.entity import Line, PatternItem
+from app.io import load_subtitle_file, save_lines_to_file, APP_CONFIG
 
 
 def open_project(app, path: Optional[str] = None):
@@ -47,8 +50,8 @@ def open_project(app, path: Optional[str] = None):
         for var in all_vars:
             var.trace_add("write", app.mark_as_unsaved)
 
-        app.custom_remove = [type(app.custom_remove[0]).from_json(x) if app.custom_remove else __import__('app').entity.PatternItem.from_json(x) for x in cfg.get("custom_remove", [])]
-        app.custom_replace = [type(app.custom_replace[0]).from_json(x) if app.custom_replace else __import__('app').entity.PatternItem.from_json(x) for x in cfg.get("custom_replace", [])]
+        app.custom_remove = [PatternItem.from_json(x) for x in cfg.get("custom_remove", [])]
+        app.custom_replace = [PatternItem.from_json(x) for x in cfg.get("custom_replace", [])]
         app._refresh_custom_lists()
 
         # Wczytaj audio_path PIERWSZY - potrzebny dla kompatybilności wstecznej txt
@@ -168,9 +171,9 @@ def _gather_project_config(app) -> dict:
 
 
 def _load_app_config(app, only_config=False):
-    if os.path.exists(__import__('app').io.APP_CONFIG):
+    if os.path.exists(APP_CONFIG):
         try:
-            with open(__import__('app').io.APP_CONFIG, "r", encoding="utf-8") as f:
+            with open(APP_CONFIG, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             app.global_config = cfg
         except Exception as e:
@@ -183,7 +186,7 @@ def _load_app_config(app, only_config=False):
 def save_app_setting(app, param, value):
     app.global_config.update({param: value})
     try:
-        with open(__import__('app').io.APP_CONFIG, "w", encoding="utf-8") as f:
+        with open(APP_CONFIG, "w", encoding="utf-8") as f:
             json.dump(app.global_config, f, indent=2)
     except Exception:
         pass
@@ -194,7 +197,7 @@ def save_global_config(app, data: dict):
         app.global_config[key] = value
 
     try:
-        with open(__import__('app').io.APP_CONFIG, "w", encoding="utf-8") as f:
+        with open(APP_CONFIG, "w", encoding="utf-8") as f:
             json.dump(app.global_config, f, indent=4)
         app.set_status("Zapisano ustawienia aplikacji.")
         app.apply_theme_settings()
@@ -254,3 +257,239 @@ def _remove_recent_project(app, path: str):
 
 def _clear_recent_projects(app):
     save_app_setting(app, 'recent_projects', [])
+
+
+def add_new_subtitles(app):
+    """Dodaje nowe wiersze do pliku CSV. Może załadować z istniejącego CSV lub pliku TXT."""
+    # Pytanie czy załadować z CSV czy TXT
+    choice = messagebox.askyesno(
+        "Dodaj napisy",
+        "Czy załadować z pliku?\n\nTAK  - wybierz plik CSV lub TXT\nNIE - dodaj puste wiersze",
+        parent=app
+    )
+
+    new_lines_to_add: List[Line] = []
+
+    if choice:
+        # Użytkownik wybrał załadowanie z pliku
+        init_dir = app.global_config.get('start_directory')
+        file_path = filedialog.askopenfilename(
+            title="Wybierz plik CSV lub TXT z napisami",
+            filetypes=[('CSV files', '*.csv'), ('Text files', '*.txt'), ('All files', '*.*')],
+            initialdir=init_dir,
+            parent=app
+        )
+
+        if not file_path:
+            return
+
+        file_path = Path(file_path)
+
+        # Wczytaj plik za pośrednictwem load_subtitle_file
+        try:
+            # Jeśli to TXT, przesłaj audio_dir dla kompatybilności wstecznej
+            audio_dir_for_compat = app.audio_dir if file_path.suffix.lower() == '.txt' else None
+            new_lines_to_add = load_subtitle_file(str(file_path), audio_dir=audio_dir_for_compat)
+
+            if not new_lines_to_add:
+                messagebox.showwarning('Brak danych', 'Plik nie zawiera żadnych danych.', parent=app)
+                return
+
+            target_csv = file_path
+            if file_path.suffix.lower() == '.txt':
+                csv_candidate = file_path.with_suffix('.csv')
+                if not csv_candidate.exists():
+                    try:
+                        save_lines_to_file(str(csv_candidate), new_lines_to_add)
+                    except Exception as write_err:
+                        messagebox.showerror('Błąd', f'Nie udało się utworzyć pliku CSV: {write_err}', parent=app)
+                        return
+                target_csv = csv_candidate
+
+            if target_csv.exists() and not app.loaded_path:
+                app.loaded_path = target_csv
+                if app.lbl_filename:
+                    app.lbl_filename.configure(text=f"Plik: {app.loaded_path.name}")
+
+        except Exception as e:
+            messagebox.showerror('Błąd', f'Nie udało się wczytać pliku: {str(e)}', parent=app)
+            return
+    else:
+        # Użytkownik wybrał dodanie ręczne
+        num_rows = simpledialog.askinteger(
+            "Dodaj napisy",
+            "Ile nowych wierszy dodać?",
+            parent=app,
+            minvalue=1,
+            maxvalue=1000,
+            initialvalue=10
+        )
+
+        if num_rows is None or num_rows <= 0:
+            return
+
+        # Utwórz puste wiersze
+        for _ in range(num_rows):
+            new_line = Line(
+                original_text="",
+                text="",
+                tts_text="",
+                audio_duration=0.0,
+                audio_filename="",
+                audio_similarity=0.0,
+                audio_transcribed_text="",
+                audio_status="",
+                audio_format=""
+            )
+            new_lines_to_add.append(new_line)
+
+    # Automatycznie stwórz nowy plik CSV jeśli go nie ma
+    if not app.loaded_path:
+        try:
+            # Określ katalog docelowy
+            if app.current_project_path:
+                target_dir = app.current_project_path.parent / 'subtitles'
+                target_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                start_dir = app.global_config.get('start_directory')
+                target_dir = Path(start_dir) if start_dir else Path.home()
+
+            # Utwórz nazwę pliku z timestampem
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            new_csv_filename = f"{timestamp}_subtitles.csv"
+            app.loaded_path = target_dir / new_csv_filename
+
+            if app.lbl_filename:
+                app.lbl_filename.configure(text=f"Plik: {app.loaded_path.name}")
+
+        except Exception as e:
+            messagebox.showerror('Błąd', f'Nie udało się utworzyć ścieżki pliku CSV: {str(e)}', parent=app)
+            return
+
+    # Dodaj nowe wiersze do app.lines i zapisz
+    try:
+        from app.patterns import apply_patterns
+        lines = app.lines
+        lines.extend(new_lines_to_add)
+
+        # Zapisz do CSV
+        save_lines_to_file(str(app.loaded_path), lines)
+
+        # Odświeź UI
+        apply_patterns(app)
+
+        num_added = len(new_lines_to_add)
+        app.set_status(f"Dodano {num_added} wierszy do {app.loaded_path.name}")
+        messagebox.showinfo('Gotowe', f'Dodano {num_added} wierszy do pliku CSV.')
+    except Exception as e:
+        messagebox.showerror('Błąd', f'Nie udało się dodać wierszy: {str(e)}', parent=app)
+
+
+def change_subtitle_file(app):
+    """Zmienia plik CSV z napisami na inny."""
+    from app.patterns import apply_patterns
+    init_dir = app.global_config.get('start_directory')
+    path = filedialog.askopenfilename(
+        title="Wybierz plik CSV z napisami",
+        filetypes=[('CSV', '*.csv'), ('Wszystkie pliki', '*.*')],
+        initialdir=init_dir,
+        parent=app
+    )
+
+    if not path:
+        return
+
+    # Sprawdzenie czy plik istnieje
+    csv_path = Path(path)
+    if not csv_path.exists():
+        messagebox.showerror('Błąd', 'Wybrany plik nie istnieje.', parent=app)
+        return
+
+    try:
+        # Wczytaj nowy plik (uwzglednij kompatybilnosc dla txt)
+        audio_dir_for_compat = app.audio_dir if csv_path.suffix.lower() == '.txt' else None
+        app.lines = load_subtitle_file(str(csv_path), audio_dir=audio_dir_for_compat)
+        app.loaded_path = csv_path
+
+        # Zaktualizuj etykietę z nazwą pliku
+        if app.lbl_filename:
+            app.lbl_filename.configure(text=f"Plik: {csv_path.name}")
+
+        # Odśwież UI
+        apply_patterns(app)
+
+        app.set_status(f"Wczytano: {csv_path.name}")
+        messagebox.showinfo('Gotowe', f'Wczytano plik: {csv_path.name}')
+    except Exception as e:
+        messagebox.showerror('Błąd', f'Nie udało się wczytać pliku: {str(e)}', parent=app)
+
+
+def download_clean(app):
+    lines = app.lines
+    if not lines:
+        return
+    path = filedialog.asksaveasfilename(defaultextension='.txt', filetypes=[('CSV', '*.csv'), ('Text files', '*.txt')])
+    if path:
+        if Path(path).suffix.lower() == '.csv':
+            save_lines_to_file(path, lines)
+        else:
+            save_lines_to_file(path, [l.text for l in lines])
+        messagebox.showinfo('Gotowe', f'Zapisano: {path}')
+
+
+def download_replace(app):
+    lines = app.lines
+    if not lines:
+        return
+    path = filedialog.asksaveasfilename(defaultextension='.txt', filetypes=[('CSV', '*.csv'), ('Text files', '*.txt')])
+    if path:
+        if Path(path).suffix.lower() == '.csv':
+            save_lines_to_file(path, lines)
+        else:
+            save_lines_to_file(path, [l.tts_text for l in lines])
+        messagebox.showinfo('Gotowe', f'Zapisano: {path}')
+
+
+def delete_all_converted_audio(app):
+    from app.utils import ready_dir_from_audio_dir
+    if not app.audio_dir:
+        return messagebox.showwarning("Brak katalogu", "Wybierz katalog audio.", parent=app)
+    ready_dir = ready_dir_from_audio_dir(app.audio_dir)
+    if not ready_dir.is_dir() or not messagebox.askyesno("Potwierdź", f"Usunąć wszystko z {ready_dir}?"):
+        return
+
+    # POPRAWKA: Uwzględnienie zarówno plików .ogg jak i .mp3
+    files_to_delete = list(ready_dir.glob('*.ogg')) + list(ready_dir.glob('*.mp3'))
+
+    for f in files_to_delete:
+        try:
+            os.remove(f)
+        except:
+            pass
+    app.subtitle_panel.update_audio_buttons_state()
+
+
+def get_active_tts_model_name(app):
+    return app.project_config.get('active_tts_model')
+
+
+def gather_tts_config(app):
+    return {
+        'local_api_url': app.global_config.get('local_api_url', 'http://127.0.0.1:8001'),
+        'xtts_voice_path': app.project_config.get('xtts_voice_path') or app.global_config.get('xtts_voice_path'),
+        'piper_model_path': app.project_config.get('piper_model_path') or app.global_config.get('piper_model_path'),
+        'elevenlabs_api_key': app.global_config.get('elevenlabs_api_key'),
+        'elevenlabs_voice_id': app.global_config.get('elevenlabs_voice_id'),
+        'google_credentials_path': app.global_config.get('google_credentials_path'),
+        'google_voice_name': app.global_config.get('google_voice_name'),
+    }
+
+
+def gather_converter_config(app):
+    default_workers = max(1, os.cpu_count() // 2 if os.cpu_count() else 4)
+    max_workers = int(app.global_config.get('conversion_workers', default_workers))
+    return {
+        'ffmpeg_filters': app.global_config.get('ffmpeg_filters', {}),
+        'conversion_workers': max_workers,
+        'audio_output_format': app.global_config.get('audio_output_format', 'ogg')
+    }

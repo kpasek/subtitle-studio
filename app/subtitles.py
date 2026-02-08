@@ -14,6 +14,10 @@ import json
 import shutil
 
 from app.io import update_line_in_csv
+from app.patterns import (apply_patterns, apply_processing, 
+                          add_replace_pattern_from_selection, add_remove_pattern_from_selection)
+from app.update import download_update
+from app.project import get_active_tts_model_name, gather_tts_config, gather_converter_config
 
 # Spróbuj załadować VerificationManager
 try:
@@ -71,7 +75,7 @@ class SubtitlePanel(ctk.CTkFrame):
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
         ctk.CTkButton(stats_frame, text="Zatwierdź zmiany",
-                      command=self.app.apply_processing,
+                      command=lambda: apply_processing(self.app),
                       fg_color="#2E8B57", hover_color="#1E613B").pack(side="left", padx=5)
 
         ctk.CTkLabel(stats_frame, text="Widok:").pack(side="left", padx=(15, 5))
@@ -85,7 +89,7 @@ class SubtitlePanel(ctk.CTkFrame):
         self.view_switcher.pack(side="left", padx=5)
 
         self.app.update_button = ctk.CTkButton(stats_frame, text="Nowa wersja!",
-                                               command=self.app._download_update,
+                                               command=lambda: download_update(self.app),
                                                fg_color="#006400", hover_color="#004d00")
         self.app.update_button.pack(side="left", padx=5)
         self.app.update_button.pack_forget()
@@ -120,10 +124,10 @@ class SubtitlePanel(ctk.CTkFrame):
         # Pole do wyszukiwania tekstu
         self.search_entry = ctk.CTkEntry(audio_btn_frame, placeholder_text="Tekst")
         self.search_entry.grid(row=0, column=4, sticky="ew")
-        self.search_entry.bind("<Return>", lambda event: self.app.apply_patterns())
+        self.search_entry.bind("<Return>", lambda event: apply_patterns(self.app))
         self.search_entry.bind("<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
 
-        self.search_button = ctk.CTkButton(audio_btn_frame, text="Szukaj", command=self.app.apply_patterns, width=60)
+        self.search_button = ctk.CTkButton(audio_btn_frame, text="Szukaj", command=lambda: apply_patterns(self.app), width=60)
         self.search_button.grid(row=0, column=5, padx=(6, 0))
         self.filter_button = ctk.CTkButton(audio_btn_frame, text="Filtruj", command=self.open_filter_window, width=80)
         self.filter_button.grid(row=0, column=6, padx=(6, 0))
@@ -186,15 +190,18 @@ class SubtitlePanel(ctk.CTkFrame):
         self.inline_edit_item = None
 
     def _on_view_mode_change(self, value):
-        self.app.apply_patterns()
+        apply_patterns(self.app)
         self.set_preview(self.app.lines)
-        self.app.save_app_setting('last_view_mode', value)
+        from app.project import save_app_setting
+        save_app_setting(self.app, 'last_view_mode', value)
 
 
 
     def _sort_by_column(self, col_id: str):
         """Sortuje `self.app.lines` i `ver_analysis_results` według kolumny, toggle asc/desc."""
-        # Initialize sort state dict
+        # Zapamiętaj aktualnie zaznaczone obiekty Line
+        selected_objs = [self.app.lines[idx] for idx in self.selected_line_indices if 0 <= idx < len(self.app.lines)]
+
         if not hasattr(self, '_sort_state'):
             self._sort_state = {}
         asc = not self._sort_state.get(col_id, True)
@@ -204,103 +211,59 @@ class SubtitlePanel(ctk.CTkFrame):
             i, ln = idx_line
             try:
                 if col_id == 'content':
-                    text_value = ln.get_text() if hasattr(ln, 'get_text') else (ln.text or '')
-                    return (0, (text_value or '').lower())
+                    val = ln.get_text() if hasattr(ln, 'get_text') else getattr(ln, 'text', '')
+                    return (0, str(val or '').lower())
                 if col_id == 'duration':
-                    return (0, float(getattr(ln, 'audio_duration', 0.0) or 0.0))
+                    val = getattr(ln, 'audio_duration', 0.0)
+                    return (0, float(val if val is not None else 0.0))
                 if col_id == 'similarity':
-                    # Kolumna similarity z Line.audio_similarity lub ver_analysis_results
-                    try:
-                        sim = float(getattr(ln, 'audio_similarity', 0.0) or 0.0)
-                        if sim is not None:
-                            return (0, sim)
-                    except (TypeError, ValueError):
-                        pass
-                    if i < len(self.ver_analysis_results):
-                        try:
-                            sim = self.ver_analysis_results[i].get('similarity')
-                            if sim is not None:
-                                return (0, float(sim))
-                        except (TypeError, ValueError):
-                            pass
-                    return (1, 0.0)  # None wartości na koniec
+                    val = getattr(ln, 'audio_similarity', 0.0)
+                    if val is None and i < len(self.ver_analysis_results):
+                        val = self.ver_analysis_results[i].get('similarity', 0.0)
+                    return (0, float(val if val is not None else 0.0))
                 if col_id == 'cps':
-                    # Prefer Line-based CPS calculation, fallback to ver_analysis_results
-                    try:
-                        txt = (ln.tts_text or '').strip('.?!')
-                        from collections import Counter
-                        stats = Counter(txt)
-                        short = stats[','] + stats['-']
-                        long = stats['.'] + stats['!'] + stats['?']
-                        pauses = (short * 0.4) + (long * 0.6)
-                        duration = float(getattr(ln, 'audio_duration', 0.0) or 0.0)
-                        return (0, len(txt) / (duration - pauses) if (duration - pauses) > 0 else 0.0)
-                    except Exception:
-                        if i < len(self.ver_analysis_results):
-                            return (0, float(self.ver_analysis_results[i].get('cps') or 0.0))
-                        return (1, 0.0)
-                if col_id == 'status':
-                    # Prefer Line audio_status or derived status
-                    try:
-                        st = getattr(ln, 'audio_status', None)
-                        if st:
-                            return (0, st)
-                    except Exception:
-                        pass
+                    # Uproszczone CPS do sortowania
+                    txt = getattr(ln, 'tts_text', '') or getattr(ln, 'text', '') or ''
+                    duration = float(getattr(ln, 'audio_duration', 0.0) or 0.0)
+                    if duration > 0:
+                        return (0, len(txt) / duration)
                     if i < len(self.ver_analysis_results):
-                        stat = self.ver_analysis_results[i].get('display_status') or ''
-                        return (0, stat) if stat else (1, '')
-                    return (1, '')
-                if col_id == 'format':
-                    try:
-                        fmt = getattr(ln, 'audio_format', '') or ''
-                        if fmt:
-                            return (0, fmt.lower())
-                    except Exception:
-                        pass
-                    if i < len(self.ver_analysis_results):
-                        ext = (self.ver_analysis_results[i].get('ext') or '').lower()
-                        return (0, ext) if ext else (1, '')
-                    return (1, '')
+                        return (0, float(self.ver_analysis_results[i].get('cps') or 0.0))
+                    return (1, 0.0)
                 if col_id == 'audio_file':
-                    try:
-                        afn = getattr(ln, 'audio_filename', '')
-                        if afn:
-                            return (0, str(Path(getattr(self, 'app').audio_dir or Path('.')) / afn))
-                    except Exception:
-                        pass
-                    if i < len(self.ver_analysis_results):
-                        p = self.ver_analysis_results[i].get('path')
-                        return (0, str(p)) if p else (1, '')
-                    return (1, '')
-            except Exception as e:
-                print(f"[ERROR] Sort key_fn error for col {col_id}: {e}")
-                return (1, '')  # None wartości na koniec
-            
-            # Domyślnie None wartości na koniec
+                    val = getattr(ln, 'audio_filename', '') or ''
+                    return (0, str(val).lower())
+            except Exception:
+                return (1, '')
             return (1, '')
 
         indexed = list(enumerate(self.app.lines))
         try:
             indexed.sort(key=key_fn, reverse=not asc)
-        except TypeError as e:
+        except Exception as e:
             print(f"[ERROR] Sort failed for col {col_id}: {e}")
             return
             
-        # reorder app.lines accordingly
         self.app.lines = [ln for _, ln in indexed]
-        # reorder ver_analysis_results if present
-        try:
-            self.ver_analysis_results = [self.ver_analysis_results[i] for i, _ in indexed if i < len(self.ver_analysis_results)]
-        except Exception:
-            pass
-        # refresh UI
-        try:
-            self._refresh_verification_view()
-        except Exception:
-            pass
+        
+        if self.ver_analysis_results:
+            new_results = []
+            for old_idx, _ in indexed:
+                if old_idx < len(self.ver_analysis_results):
+                    new_results.append(self.ver_analysis_results[old_idx])
+            self.ver_analysis_results = new_results
 
-    
+        # Przywróć zaznaczone indeksy
+        new_indices = []
+        # Używamy id(obj) jako unikalnego klucza dla Line, bo klasa nie jest hashable
+        line_to_idx = {id(ln): idx for idx, ln in enumerate(self.app.lines)}
+        for obj in selected_objs:
+            obj_id = id(obj)
+            if obj_id in line_to_idx:
+                new_indices.append(line_to_idx[obj_id])
+        self.selected_line_indices = new_indices
+
+        self.set_preview(self.app.lines)
 
     def set_preview(self, lines_to_show: list[Line]):
         """
@@ -671,7 +634,7 @@ class SubtitlePanel(ctk.CTkFrame):
             print(f"Błąd zapisu do CSV: {e}")
         
         # Odśwież UI
-        self.app.apply_patterns()
+        apply_patterns(self.app)
         self.set_preview(self.app.lines)
 
     def _cancel_inline_edit(self, event=None):
@@ -715,7 +678,7 @@ class SubtitlePanel(ctk.CTkFrame):
                          state=tk.NORMAL if can_edit else tk.DISABLED)
         menu.add_separator()
         menu.add_command(label="➕ Dodaj wzorzec zamieniający (Ctrl+Klik)",
-                         command=lambda: self.app.add_replace_pattern_from_selection(from_menu=True), state=tk.NORMAL)
+                         command=lambda: add_replace_pattern_from_selection(self.app, from_menu=True), state=tk.NORMAL)
 
         # Obliczamy ID. current_line_index jest liczony od 0, a pliki od 1.
         current_id = self.app.selected_line_index + 1
@@ -1403,7 +1366,7 @@ class SubtitlePanel(ctk.CTkFrame):
             messagebox.showwarning("Brak danych", "Nie można wygenerować audio dla zaznaczonych linii.", parent=self)
             return
 
-        tts_model = self.app._get_active_tts_model_name()
+        tts_model = get_active_tts_model_name(self.app)
         if not tts_model:
             messagebox.showerror("Błąd", "Brak modelu TTS.", parent=self)
             return
@@ -1414,8 +1377,8 @@ class SubtitlePanel(ctk.CTkFrame):
             audio_dir=self.app.audio_dir,
             lines_to_generate=lines_to_gen,
             tts_model_name=tts_model,
-            tts_config=self.app._gather_tts_config(),
-            converter_config=self.app._gather_converter_config()
+            tts_config=gather_tts_config(self.app),
+            converter_config=gather_converter_config(self.app)
         )
 
         uid_to_idx = {getattr(self.app.lines[i], 'uid', ''): i for i in range(len(self.app.lines))}
