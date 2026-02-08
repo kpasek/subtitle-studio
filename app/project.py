@@ -388,7 +388,12 @@ def add_new_subtitles(app):
 def change_subtitle_file(app):
     """Zmienia plik CSV z napisami na inny."""
     from app.patterns import apply_patterns
-    init_dir = app.global_config.get('start_directory')
+    # Start in [project_dir]/subtitles if a project is open
+    if app.current_project_path:
+        init_dir = str(app.current_project_path.parent / 'subtitles')
+    else:
+        init_dir = app.global_config.get('start_directory')
+
     path = filedialog.askopenfilename(
         title="Wybierz plik CSV z napisami",
         filetypes=[('CSV', '*.csv'), ('Wszystkie pliki', '*.*')],
