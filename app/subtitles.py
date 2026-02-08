@@ -894,18 +894,7 @@ class SubtitlePanel(ctk.CTkFrame):
                     
                 except Exception:
                     pass
-        
-        # Przywróć zaznaczenie
-        try:
-            items_to_select = [line_to_item[self.app.lines[idx]] for idx in self.selected_line_indices 
-                               if 0 <= idx < len(self.app.lines) and self.app.lines[idx] in line_to_item]
-            
-            if items_to_select:
-                self.tree.selection_set(*items_to_select)
-                self.tree.see(items_to_select[0])
-        except Exception:
-            pass
-
+    
     def _apply_verification_results(self, data: dict):
         """
         Apply merged verification results (called on main thread).
@@ -948,12 +937,13 @@ class SubtitlePanel(ctk.CTkFrame):
                     except Exception:
                         line.audio_filename = str(path)
                 line.audio_format = (v.get('ext') or '').upper()
+                line.audio_status = v.get('display_status') or v.get('raw_status') or ''
                 # similarity and transcribed text
                 try:
                     line.audio_similarity = float(v.get('similarity') or 0.0)
                 except Exception:
                     line.audio_similarity = 0.0
-                line.audio_transcribed_text = v.get('transcribed_text', '') or v.get('transcribed_text', '')
+                line.audio_transcribed_text = v.get('transcribed_text', '')
                 duration_value = float(v.get('duration') or 0)
                 cps_value = float(v.get('cps') or 0)
                 similarity_value = line.audio_similarity
@@ -1269,15 +1259,40 @@ class SubtitlePanel(ctk.CTkFrame):
         return f"output1 ({uid})"
 
     def _find_audio_files(self, identifier: str) -> List[Tuple[Path, bool]]:
+        """Znajduje wszystkie dostępne pliki audio dla danego identyfikatora (UID)."""
         if not self.app.audio_dir:
             return []
-        base = self._normalize_uid(identifier)
-        candidates = [
-            (self.app.audio_dir / f"{base}.wav", False),
-            (self.app.audio_dir / f"{base}.mp3", False),
-            (self.app.audio_dir / f"{base}.ogg", False),
-        ]
-        return [(f, ready) for f, ready in candidates if f.exists()]
+            
+        uid_str = str(identifier).strip()
+        bases = []
+        if uid_str.startswith("output1 (") and uid_str.endswith(")"):
+            bases.append(uid_str)
+        else:
+            bases.append(f"output1 ({uid_str})")
+            bases.append(f"output1({uid_str})")
+            bases.append(uid_str)
+            
+        # Katalogi
+        gen_dir = self.app.audio_dir
+        ready_dir = gen_dir.parent / "ready"
+        
+        found = []
+        extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
+        
+        for base in bases:
+            # Szukaj w generated (is_ready=False)
+            for ext in extensions:
+                p = gen_dir / f"{base}.{ext}"
+                if p.exists() and (p, False) not in found:
+                    found.append((p, False))
+            
+            # Szukaj w ready (is_ready=True)
+            for ext in extensions:
+                p = ready_dir / f"{base}.{ext}"
+                if p.exists() and (p, True) not in found:
+                    found.append((p, True))
+                    
+        return found
 
     def update_audio_buttons_state(self):
         """Aktualizuje stan przycisków w oparciu o zaznaczenie."""
@@ -1507,7 +1522,7 @@ class SubtitlePanel(ctk.CTkFrame):
                 try:
                     line = self.app.lines[line_idx]
                     line_id = line_idx + 1  # 1-based ID
-                    line_uid = getattr(line, 'uid', str(line_id))
+                    line_uid = (getattr(line, 'uid', None) or str(line_id)).strip()
                     if not self._find_audio_files(line_uid):
                         results[str(line_id)] = {
                             'id': line_id,
@@ -1525,12 +1540,12 @@ class SubtitlePanel(ctk.CTkFrame):
                     result = VerificationManager.verify_line(
                         line=line,
                         audio_dir=audio_dir,
-                        line_id=line_id,
-                        line_uid=line_uid,
                         ffprobe_path=ffprobe,
                         ignore_short=True,
                         verify_duration=True
                     )
+                    # Ustawienie id kompatybilnego z GUI (1-based index)
+                    result['id'] = line_id
                     results[str(line_id)] = result
                 except Exception as e:
                     results[str(line_idx + 1)] = {
@@ -1635,11 +1650,14 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str
             base = _normalize_uid(uid)
         else:
             base = f"output1 ({ident})"
+            
+        ready_dir = audio_dir_p.parent / "ready"
         candidates = [
             (audio_dir_p / f"{base}.wav", 'wav'),
             (audio_dir_p / f"{base}.mp3", 'mp3'),
-            (audio_dir_p / 'ready' / f"{base}.ogg", 'ogg'),
-            (audio_dir_p / 'ready' / f"{base}.mp3", 'mp3')
+            (ready_dir / f"{base}.ogg", 'ogg'),
+            (ready_dir / f"{base}.mp3", 'mp3'),
+            (ready_dir / f"{base}.wav", 'wav')
         ]
         for p, ext in candidates:
             if p.exists():

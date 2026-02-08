@@ -11,7 +11,7 @@ import csv
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, List, Dict, Any
+from typing import Callable, Optional, List, Dict, Any, Tuple
 from collections import Counter
 
 from app.entity import Line
@@ -73,34 +73,43 @@ class VerificationManager:
         return cls()
 
     @staticmethod
-    def verify_line(line, audio_dir: str, line_id: int, line_uid: Optional[str] = None, ffprobe_path: Optional[str] = None, ignore_short: bool = False, verify_duration: bool = True) -> 'dict':
+    def verify_line(
+        line: Line, 
+        audio_dir: str, 
+        ffprobe_path: Optional[str] = None, 
+        ignore_short: bool = False, 
+        verify_duration: bool = True
+    ) -> Dict[str, Any]:
         """
-        Weryfikuje pojedynczą linię audio.
+        Weryfikuje pojedynczą linię audio (istnienie pliku, czas trwania, CPS, transkrypcja).
         
         Args:
-            line: Obiekt Line do weryfikacji
-            audio_dir: Sciezka do katalogu audio
-            line_id: ID linii (numer) do raportowania
-            line_uid: UID powiazany z nazwa pliku audio
-            ffprobe_path: Sciezka do ffprobe
-            ignore_short: Czy ignorowac krotkie napisy
+            line: Obiekt Line do weryfikacji.
+            audio_dir: Ścieżka do katalogu wygenerowanego audio (root/generated).
+            ffprobe_path: Opcjonalna ścieżka do ffprobe.
+            ignore_short: Czy ignorować błędy CPS dla bardzo krótkich tekstów.
+            verify_duration: Czy wykonywać pomiar czasu (wymaga ffprobe).
             
         Returns:
-            dict: Słownik z wynikami weryfikacji
+            Dict[str, Any]: Wyniki weryfikacji w formie słownika zgodnego z GUI.
         """
-        from app.entity import Line
-        
         audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
-        ident_str = str(line_id)
-        uid = line_uid or ''
+        uid = line.uid
+        text = line.get_tts_text().strip()
         
-        # Inicjalizacja wyniku
-        getter = getattr(line, 'get_tts_text', None)
-        resolved_text = getter() if callable(getter) else getattr(line, 'tts_text', '')
-        resolved_text = (resolved_text or '').strip()
+        # Inicjalizacja wyniku (id to numer porządkowy dla GUI oparty na uid lub line_id jeśli numeryczne)
+        # UWAGA: GUI w subtitles.py używa int(k), gdzie k to klucz z rezultatu workera (str(i+1)).
+        # Zostawiamy 'id' w słowniku, ale pobieramy go z line.uid jeśli jest numerem, lub opcjonalnie.
+        # W nowym systemie UID = numer linii (1, 2, 3...) podczas importu.
+        
+        try:
+            display_id = int(uid)
+        except (ValueError, TypeError):
+            display_id = 0 # fallback
+            
         entry = {
-            'id': line_id,
-            'text': resolved_text,
+            'id': display_id,
+            'text': text,
             'duration': 0.0,
             'cps': 0.0,
             'raw_status': 'PENDING',
@@ -109,93 +118,47 @@ class VerificationManager:
             'display_status': 'PENDING'
         }
         
-        text_clean = (resolved_text or '').strip()
-        
-        # Jeśli brak tekstu, zwróć pusty wynik
-        print(f"[VERIFY_LINE] id={line_id} uid={uid} text_len={len(text_clean)} audio_dir={audio_dir_p}")
-        if not text_clean:
-            entry['raw_status'] = 'EMPTY'
-            entry['display_status'] = 'EMPTY'
-            print(f"[VERIFY_LINE EMPTY] id={line_id} uid={uid}")
+        if not text:
+            entry.update({'raw_status': 'EMPTY', 'display_status': 'EMPTY'})
             return entry
         
-        # Szukanie pliku audio - wyłącznie po UID
-        audio_file = None
-        found_ext = ''
-        if not uid:
-            entry['raw_status'] = 'MISSING'
-            entry['display_status'] = 'MISSING'
-            return entry
-
-        base = uid if uid.startswith("output1 (") else f"output1 ({uid})"
-        candidates = [
-            (audio_dir_p / f"{base}.wav", 'wav'),
-            (audio_dir_p / f"{base}.mp3", 'mp3'),
-            (audio_dir_p / 'ready' / f"{base}.ogg", 'ogg'),
-            (audio_dir_p / 'ready' / f"{base}.mp3", 'mp3')
-        ]
+        # Szukanie pliku - na podstawie UID
+        audio_file, ext = VerificationManager._find_audio_for_uid(audio_dir_p, uid)
         
-        for p, ext in candidates:
-            if p.exists():
-                audio_file = p
-                found_ext = ext
-                break
-        
-        # Jeśli plik nie istnieje
         if not audio_file:
-            entry['raw_status'] = 'MISSING'
-            entry['display_status'] = 'MISSING'
-            print(f"[VERIFY_LINE MISSING] id={line_id} uid={uid} base={base} candidates={[str(p) for p,_ in candidates]}" )
+            entry.update({'raw_status': 'MISSING', 'display_status': 'MISSING'})
             return entry
+            
+        entry.update({'path': str(audio_file), 'ext': ext})
         
-        entry['path'] = str(audio_file)
-        entry['ext'] = found_ext
-
-        # If duration verification is disabled, skip computing duration/CPS
         if not verify_duration:
-            entry['duration'] = 0.0
-            entry['cps'] = 0.0
-            entry['raw_status'] = 'OK'
-            entry['display_status'] = 'OK'
+            entry.update({'raw_status': 'OK', 'display_status': 'OK'})
             return entry
-        
+            
         # Pobieranie długości audio
-        duration = VerificationManager._get_audio_duration(audio_file, found_ext, ffprobe_path)
+        duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
         
-        if duration < 0:
-            entry['duration'] = duration
-            entry['raw_status'] = 'ERROR'
-            entry['display_status'] = 'ERROR'
+        if duration <= 0:
+            status = 'ERROR' if duration < 0 else 'EMPTY'
+            entry.update({'duration': duration, 'raw_status': status, 'display_status': status})
             return entry
-        
-        if duration == 0:
-            entry['duration'] = 0.0
-            entry['raw_status'] = 'EMPTY'
-            entry['display_status'] = 'EMPTY'
-            return entry
-        
+            
         entry['duration'] = duration
         
-        # Obliczenie CPS
-        stats = Counter(text_clean.strip('.?!'))
-        short = stats[','] + stats['-']
-        long = stats['.'] + stats['!'] + stats['?']
-        pauses = (short * 0.4) + (long * 0.6)
+        # Obliczenie tempa (CPS) z uwzględnieniem pauz
+        stats = Counter(text.strip('.?!'))
+        pauses = (stats[','] + stats['-']) * 0.4 + (stats['.'] + stats['!'] + stats['?']) * 0.6
+        time_net = duration - pauses
         
-        try:
-            cps = len(text_clean) / (duration - pauses) if (duration - pauses) > 0 else 0.0
-        except:
-            cps = 0.0
-        
+        cps = len(text) / time_net if time_net > 0 else 0.0
         entry['cps'] = cps
         entry['raw_status'] = 'OK'
         
-        # Określenie status wyświetlania
-        if ignore_short and len(text_clean) < 5:
+        # Status wizualny CPS
+        if ignore_short and len(text) < 5:
             entry['display_status'] = 'SHORT'
         else:
-            min_cps = 7.0
-            max_cps = 20.0
+            min_cps, max_cps = 7.0, 20.0
             if cps < min_cps:
                 entry['display_status'] = f"ZA WOLNO (<{min_cps:.1f})"
             elif cps > max_cps:
@@ -212,10 +175,54 @@ class VerificationManager:
             if sim_result.get('success'):
                 entry['similarity'] = sim_result.get('similarity', 0.0)
                 entry['transcribed_text'] = sim_result.get('transcribed_text', '')
-        except Exception as e:
+        except Exception:
             pass
         
         return entry
+
+    @staticmethod
+    def _find_audio_for_uid(audio_dir: Path, uid: str) -> Tuple[Optional[Path], str]:
+        """Pomocnicza metoda do znajdowania pliku audio po UID."""
+        if not uid:
+            return None, ''
+            
+        uid_str = str(uid).strip()
+        
+        # Potencjalne bazy nazw plików
+        bases = []
+        if uid_str.startswith("output1 (") and uid_str.endswith(")"):
+            bases.append(uid_str)
+            # Dodaj też sam środek jako fallback
+            inner = uid_str[9:-1]
+            if inner:
+                bases.append(f"output1 ({inner})")
+        else:
+            bases.append(f"output1 ({uid_str})")
+            bases.append(f"output1({uid_str})") # wariant bez spacji
+            bases.append(uid_str) # sam UID jako nazwa pliku
+            
+        # Katalogi do przeszukania
+        audio_dir_p = Path(audio_dir)
+        ready_dir = audio_dir_p.parent / "ready"
+        
+        # Rozszerzenia (case-insensitive check)
+        extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
+        
+        for base in bases:
+            # Najpierw szukaj w generated (audio_dir)
+            for ext in extensions:
+                p = audio_dir_p / f"{base}.{ext}"
+                if p.exists():
+                    return p, ext.lower()
+            
+            # Potem szukaj w ready
+            for ext in extensions:
+                p = ready_dir / f"{base}.{ext}"
+                if p.exists():
+                    return p, ext.lower()
+                    
+        return None, ''
+
 
     @staticmethod
     def _get_audio_duration(file_path: Path, ext: str, ffprobe_path: Optional[str] = None) -> float:
@@ -617,18 +624,20 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: li
         ident = str(i + 1)
         uid = line_uids[i] if line_uids and i < len(line_uids) else ''
         
-        # Tworzenie obiektu Line
-        line = Line(original_text=text, text=text, tts_text=text.strip())
+        # Tworzenie obiektu Line z poprawnym UID
+        line = Line(original_text=text, text=text, tts_text=text.strip(), uid=uid)
         
-        # Weryfikacja linii
+        # Weryfikacja linii (teraz z obiektem Line jako głównym źródłem danych)
         result = VerificationManager.verify_line(
             line=line,
             audio_dir=audio_dir,
-            line_id=i + 1,
-            line_uid=uid,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
             ignore_short=ignore_short
         )
+        
+        # Nadpisujemy 'id' wynikiem 'i + 1', bo worker używa indeksu pętli 
+        # do komunikacji z GUI (które mapuje k-1 -> index)
+        result['id'] = i + 1
         
         results[ident] = result
         write_atomic(results)
