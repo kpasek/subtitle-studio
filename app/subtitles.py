@@ -45,11 +45,11 @@ class SubtitlePanel(ctk.CTkFrame):
 
         # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
         self.columns_config = [
-            {"id": "content", "text": "Tekst", "width": 500, "anchor": "w"},
-            {"id": "duration", "text": "Czas [s]", "width": 20, "anchor": "center"},
-            {"id": "cps", "text": "CPS", "width": 20, "anchor": "center"},
-            {"id": "similarity", "text": "Podobieństwo", "width": 40, "anchor": "center"},
-            {"id": "audio_file", "text": "Plik audio", "width": 100, "anchor": "w"},
+            {"id": "content", "text": "Tekst", "width": 600, "anchor": "w", "stretch": True},
+            {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
+            {"id": "cps", "text": "CPS", "width": 70, "anchor": "center", "stretch": False},
+            {"id": "similarity", "text": "SIM %", "width": 80, "anchor": "center", "stretch": False},
+            {"id": "audio_file", "text": "Plik", "width": 250, "anchor": "w", "stretch": False},
         ]
 
         self.grid_rowconfigure(2, weight=1)
@@ -169,7 +169,12 @@ class SubtitlePanel(ctk.CTkFrame):
         for col_conf in self.columns_config:
             # add click-to-sort handler
             self.tree.heading(col_conf["id"], text=col_conf["text"], command=lambda c=col_conf["id"]: self._sort_by_column(c))
-            self.tree.column(col_conf["id"], width=col_conf["width"], anchor=col_conf["anchor"])
+            self.tree.column(
+                col_conf["id"],
+                width=col_conf["width"],
+                anchor=col_conf["anchor"],
+                stretch=col_conf.get("stretch", True)
+            )
 
         self.tree.grid(row=0, column=0, sticky="nsew")
 
