@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 from app.utils import ready_dir_from_audio_dir
 from app.entity import Line
+from app.io import get_audio_candidates, get_primary_audio_path
 
 if TYPE_CHECKING:
     from studio import SubtitleStudioApp
@@ -103,25 +104,18 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         # Inicjalizacja stanu
         self._check_files_status()
 
-    def _normalize_uid(self, uid: str) -> str:
-        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        if uid.startswith("output1 ("):
-            return uid
-        return f"output1 ({uid})"
-
     def _get_target_file_info(self, uid: str, ready_dir: Path) -> Tuple[Optional[Path], Optional[str]]:
-        """Zwraca sciezke do przekonwertowanego pliku po uid (preferuje OGG, potem MP3) i jego rozszerzenie."""
-        base = self._normalize_uid(uid)
-        # 1. Sprawdz OGG
-        ogg_path = ready_dir / f"{base}.ogg"
-        if ogg_path.exists():
-            return ogg_path, ".ogg"
-
-        # 2. Sprawdz MP3
-        mp3_path = ready_dir / f"{base}.mp3"
-        if mp3_path.exists():
-            return mp3_path, ".mp3"
-
+        """Zwraca ścieżkę do przekonwertowanego pliku po uid (preferuje OGG, potem MP3) i jego rozszerzenie."""
+        candidates = get_audio_candidates(uid)
+        # Filtrujemy tylko te z ready_dir i z odpowiednimi rozszerzeniami
+        # get_audio_candidates zwraca (Path, is_ready)
+        
+        # Preferencja: ogg w ready, potem mp3 w ready
+        for ext in ['.ogg', '.mp3']:
+            for p, is_ready in candidates:
+                if is_ready and p.suffix.lower() == ext:
+                    return p, ext
+                    
         return None, None
 
     def _check_files_status(self):
@@ -138,9 +132,8 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         generated_count = 0
         for i, line in enumerate(lines):
             uid = line.uid
-            base = self._normalize_uid(uid)
-            if (self.app.audio_dir / f"{base}.wav").exists() or \
-                    (self.app.audio_dir / f"{base}.mp3").exists():
+            # Sprawdź czy istnieje jakikolwiek kandydat w folderze generated
+            if any(not is_ready for p, is_ready in get_audio_candidates(uid)):
                 generated_count += 1
 
         is_gen_ok = generated_count >= expected_count and expected_count > 0
@@ -156,10 +149,8 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         if ready_dir.exists():
             for i, line in enumerate(lines):
                 uid = line.uid
-                base = self._normalize_uid(uid)
-                ogg_path = ready_dir / f"{base}.ogg"
-                mp3_path = ready_dir / f"{base}.mp3"
-                if ogg_path.exists() or mp3_path.exists():
+                # Sprawdź czy istnieje jakikolwiek kandydat w folderze ready
+                if any(is_ready for p, is_ready in get_audio_candidates(uid)):
                     converted_count += 1
 
         is_conv_ok = converted_count >= expected_count and expected_count > 0

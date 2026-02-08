@@ -13,7 +13,8 @@ import time
 import json
 import shutil
 
-from app.io import update_line_in_csv
+from app.io import (update_line_in_csv, load_manual_edits, save_manual_edits, 
+                    load_tts_edits, save_tts_edits, get_primary_audio_path, get_audio_candidates, set_audio_dir)
 from app.patterns import (apply_patterns, apply_processing, 
                           add_replace_pattern_from_selection, add_remove_pattern_from_selection)
 from app.update import download_update
@@ -772,7 +773,7 @@ class SubtitlePanel(ctk.CTkFrame):
         workers = max(1, min(workers_cfg, cpu_count * 2))
 
         lines_texts = [_line_verification_text(line) for line in self.app.lines]
-        line_uids = [getattr(l, 'uid', f"output1 ({i + 1})") for i, l in enumerate(self.app.lines)]
+        line_uids = [getattr(l, 'uid', str(i + 1)) for i, l in enumerate(self.app.lines)]
         audio_dir = str(self.app.audio_dir)
         ffprobe = shutil.which('ffprobe')
 
@@ -1254,45 +1255,11 @@ class SubtitlePanel(ctk.CTkFrame):
 
     def _normalize_uid(self, uid: str) -> str:
         """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        if uid.startswith("output1 ("):
-            return uid
         return f"output1 ({uid})"
 
     def _find_audio_files(self, identifier: str) -> List[Tuple[Path, bool]]:
         """Znajduje wszystkie dostępne pliki audio dla danego identyfikatora (UID)."""
-        if not self.app.audio_dir:
-            return []
-            
-        uid_str = str(identifier).strip()
-        bases = []
-        if uid_str.startswith("output1 (") and uid_str.endswith(")"):
-            bases.append(uid_str)
-        else:
-            bases.append(f"output1 ({uid_str})")
-            bases.append(f"output1({uid_str})")
-            bases.append(uid_str)
-            
-        # Katalogi
-        gen_dir = self.app.audio_dir
-        ready_dir = gen_dir.parent / "ready"
-        
-        found = []
-        extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
-        
-        for base in bases:
-            # Szukaj w generated (is_ready=False)
-            for ext in extensions:
-                p = gen_dir / f"{base}.{ext}"
-                if p.exists() and (p, False) not in found:
-                    found.append((p, False))
-            
-            # Szukaj w ready (is_ready=True)
-            for ext in extensions:
-                p = ready_dir / f"{base}.{ext}"
-                if p.exists() and (p, True) not in found:
-                    found.append((p, True))
-                    
-        return found
+        return get_audio_candidates(identifier)
 
     def update_audio_buttons_state(self):
         """Aktualizuje stan przycisków w oparciu o zaznaczenie."""
@@ -1412,7 +1379,7 @@ class SubtitlePanel(ctk.CTkFrame):
                 text = (candidate or '').strip()
                 if not text:
                     continue
-                uid = getattr(line_obj, 'uid', f"output1 ({line_no})")
+                uid = getattr(line_obj, 'uid', str(line_no))
                 lines_to_gen.append((uid, text))
             except (IndexError, ValueError):
                 continue
@@ -1585,7 +1552,7 @@ class SubtitlePanel(ctk.CTkFrame):
         for idx in self.selected_line_indices:
             line_num = idx + 1
             line_obj = self.app.lines[idx]
-            identifier = getattr(line_obj, 'uid', f"output1 ({line_num})")
+            identifier = getattr(line_obj, 'uid', str(line_num))
             found_files = self._find_audio_files(identifier)
             if found_files:
                 files_to_delete.extend(found_files)
@@ -1624,8 +1591,6 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str
 
     def _normalize_uid(uid: str) -> str:
         """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        if uid.startswith("output1 ("):
-            return uid
         return f"output1 ({uid})"
 
     for i, text in enumerate(lines_texts):

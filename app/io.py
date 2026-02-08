@@ -104,6 +104,77 @@ def _cleanup_uid_field(raw_uid: Optional[str]) -> str:
     return normalized or candidate
 
 
+# --- Globalny stan katalogu audio ---
+_current_audio_dir: Optional[Path] = None
+
+def set_audio_dir(path: Optional[Union[str, Path]]):
+    """Ustawia globalną ścieżkę do katalogu generated audio."""
+    global _current_audio_dir
+    if path:
+        _current_audio_dir = Path(path)
+    else:
+        _current_audio_dir = None
+
+def get_audio_dir() -> Optional[Path]:
+    """Pobiera obecny katalog generated audio."""
+    return _current_audio_dir
+
+def get_primary_audio_path(uid: str) -> Optional[Path]:
+    """
+    Zwraca ścieżkę do podstawowego pliku audio (generated/output1 (uid).wav).
+    Jeśli plik nie istnieje jako .wav, próbuje też .mp3.
+    """
+    if not uid or not _current_audio_dir:
+        return None
+    
+    # Podstawowy format to WAV (generowany przez TTS)
+    p_wav = _current_audio_dir / f"output1 ({uid}).wav"
+    if p_wav.exists():
+        return p_wav
+        
+    p_mp3 = _current_audio_dir / f"output1 ({uid}).mp3"
+    if p_mp3.exists():
+        return p_mp3
+        
+    return p_wav # Zwróć ścieżkę .wav nawet jeśli nie istnieje jako domyślną
+
+def get_audio_candidates(uid: str) -> List[Tuple[Path, bool]]:
+    """
+    Zwraca wszystkie możliwe pliki audio dla danego UID w generated/ i ready/.
+    Zwraca listę krotek (ścieżka, czy_jest_w_ready).
+    """
+    if not uid or not _current_audio_dir:
+        return []
+        
+    uid_str = str(uid).strip()
+    bases = [f"output1 ({uid_str})", f"output1({uid_str})", uid_str]
+    
+    gen_dir = _current_audio_dir
+    ready_dir = gen_dir.parent / "ready"
+    
+    found = []
+    # Sprawdzamy popularne rozszerzenia, także wielkimi literami
+    extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
+    
+    for base in bases:
+        # 1. Szukaj w generated (is_ready=False)
+        for ext in extensions:
+            p = gen_dir / f"{base}.{ext}"
+            if p.exists():
+                # Unikaj duplikatów ścieżek
+                if not any(f[0].resolve() == p.resolve() for f in found):
+                    found.append((p, False))
+        
+        # 2. Szukaj w ready (is_ready=True)
+        for ext in extensions:
+            p = ready_dir / f"{base}.{ext}"
+            if p.exists():
+                if not any(f[0].resolve() == p.resolve() for f in found):
+                    found.append((p, True))
+                    
+    return found
+
+
 def _normalize_text_fields(line: Line) -> Tuple[str, str]:
     """Zwraca wartości `text` i `tts_text`, pomijając duplikaty względem oryginału."""
     original = line.original_text or ''

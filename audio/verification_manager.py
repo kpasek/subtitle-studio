@@ -15,6 +15,7 @@ from typing import Callable, Optional, List, Dict, Any, Tuple
 from collections import Counter
 
 from app.entity import Line
+from app.io import get_audio_candidates, get_primary_audio_path
 
 try:
     from mutagen.mp3 import MP3
@@ -183,44 +184,11 @@ class VerificationManager:
     @staticmethod
     def _find_audio_for_uid(audio_dir: Path, uid: str) -> Tuple[Optional[Path], str]:
         """Pomocnicza metoda do znajdowania pliku audio po UID."""
-        if not uid:
-            return None, ''
-            
-        uid_str = str(uid).strip()
-        
-        # Potencjalne bazy nazw plików
-        bases = []
-        if uid_str.startswith("output1 (") and uid_str.endswith(")"):
-            bases.append(uid_str)
-            # Dodaj też sam środek jako fallback
-            inner = uid_str[9:-1]
-            if inner:
-                bases.append(f"output1 ({inner})")
-        else:
-            bases.append(f"output1 ({uid_str})")
-            bases.append(f"output1({uid_str})") # wariant bez spacji
-            bases.append(uid_str) # sam UID jako nazwa pliku
-            
-        # Katalogi do przeszukania
-        audio_dir_p = Path(audio_dir)
-        ready_dir = audio_dir_p.parent / "ready"
-        
-        # Rozszerzenia (case-insensitive check)
-        extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
-        
-        for base in bases:
-            # Najpierw szukaj w generated (audio_dir)
-            for ext in extensions:
-                p = audio_dir_p / f"{base}.{ext}"
-                if p.exists():
-                    return p, ext.lower()
-            
-            # Potem szukaj w ready
-            for ext in extensions:
-                p = ready_dir / f"{base}.{ext}"
-                if p.exists():
-                    return p, ext.lower()
-                    
+        candidates = get_audio_candidates(uid)
+        if candidates:
+            path, is_ready = candidates[0]
+            ext = path.suffix.lower().lstrip('.')
+            return path, ext
         return None, ''
 
 
@@ -613,8 +581,6 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: li
     
     def _normalize_uid(uid: str) -> str:
         """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        if uid.startswith("output1 ("):
-            return uid
         return f"output1 ({uid})"
 
     for i, text in enumerate(lines_texts):

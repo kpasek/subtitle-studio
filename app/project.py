@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox, TclError, simpledialog
 
 from app.utils import ensure_project_dirs, project_generated_dir, project_ready_dir, project_subtitles_dir
 from app.entity import Line, PatternItem
-from app.io import load_subtitle_file, save_lines_to_file, APP_CONFIG
+from app.io import load_subtitle_file, save_lines_to_file, APP_CONFIG, set_audio_dir
 
 
 def create_new_project(app):
@@ -372,9 +372,11 @@ def _check_unsaved_changes(app) -> bool:
 def _set_project_audio_state(app):
     if not app.current_project_path:
         app.audio_dir = None
+        set_audio_dir(None)
         return
     ensure_project_dirs(app.current_project_path)
     app.audio_dir = project_generated_dir(app.current_project_path)
+    set_audio_dir(app.audio_dir)
     panel = getattr(app, 'subtitle_panel', None)
     if panel:
         panel.update_audio_buttons_state()

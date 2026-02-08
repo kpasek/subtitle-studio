@@ -194,12 +194,8 @@ class GenerationManager:
                 raise InterruptedError()
 
             self._notify_progress(i, total_to_gen, f"Generowanie... ({i + 1}/{total_to_gen})")
-            # identifier to pełny uid (np. "output1 (12345abc)") lub "output1 (1)" dla kompatybilności
-            # Jeśli uid już ma prefix "output1 (", to nie dodajemy go ponownie
-            if identifier.startswith("output1 ("):
-                output_path = job.audio_dir / f"{identifier}.wav"
-            else:
-                output_path = job.audio_dir / f"output1 ({identifier}).wav"
+            # Konstrukcja nazwy pliku na podstawie UID
+            output_path = job.audio_dir / f"output1 ({identifier}).wav"
 
             try:
                 # Zabezpieczenie przed różnicą wielkości liter (xtts vs XTTS, stylish vs STylish)

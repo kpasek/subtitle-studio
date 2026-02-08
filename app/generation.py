@@ -4,6 +4,7 @@ from audio.generation_manager import GenerationManager, GenerationJob, Conversio
 from pathlib import Path
 from app.utils import ready_dir_from_audio_dir
 from app.entity import Line
+from app.io import get_primary_audio_path
 import os
 import json
 
@@ -25,16 +26,13 @@ def prepare_job_dependencies(app) -> bool:
     return True
 
 
-def _normalize_uid(uid: str) -> str:
-    """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-    if uid.startswith("output1 ("):
-        return uid
-    return f"output1 ({uid})"
-
-
 def _audio_path(audio_dir: Path, uid: str, ext: str) -> Path:
     """Konstruuje pełną ścieżkę do pliku audio na podstawie uid"""
-    return audio_dir / f"{_normalize_uid(uid)}.{ext}"
+    path = get_primary_audio_path(uid)
+    if path and path.suffix.lower() == f'.{ext}':
+        return path
+    # Fallback jeśli chcemy konkretne rozszerzenie inne niż domyślne wav
+    return audio_dir / f"output1 ({uid}).{ext}"
 
 
 

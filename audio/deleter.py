@@ -9,6 +9,7 @@ import os
 from app.entity import Line, PatternItem
 from app.tooltip import CreateToolTip
 from app.utils import compile_pattern, ready_dir_from_audio_dir
+from app.io import get_audio_candidates
 
 
 class AudioDeleterWindow(ctk.CTkToplevel):
@@ -108,12 +109,6 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         self.ent_remove_pattern.delete(0, "end")
         self.recalculate_stats()
 
-    def _normalize_uid(self, uid: str) -> str:
-        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        if uid.startswith("output1 ("):
-            return uid
-        return f"output1 ({uid})"
-
     def add_row(self, frame, pattern_item: PatternItem, target_list: List[PatternItem]):
         """
         Adds a UI row for a pattern to the scrollable frame.
@@ -142,25 +137,7 @@ class AudioDeleterWindow(ctk.CTkToplevel):
         btnX.pack(side="right", padx=4)
 
     def _find_audio_files(self, identifier: str) -> List[tuple[Path, bool]]:
-        """
-        Finds all audio files associated with a given dialog identifier.
-
-        Args:
-            identifier: UID linii (np. "output1 (123)" albo "output1 (abc123)").
-
-        Returns:
-            A list of tuples, each containing a Path object and a boolean (True if in /ready/).
-        """
-        base = self._normalize_uid(identifier)
-        ready_folder = ready_dir_from_audio_dir(self.audio_dir)
-        candidates = [
-            (self.audio_dir / f"{base}.wav", False),
-            (self.audio_dir / f"{base}.ogg", False),
-            (self.audio_dir / f"{base}.mp3", False),
-            (ready_folder / f"{base}.ogg", True),
-            (ready_folder / f"{base}.mp3", True)
-        ]
-        return [(f, ready) for f, ready in candidates if f.exists()]
+        return get_audio_candidates(identifier)
 
     def recalculate_stats(self):
         """
