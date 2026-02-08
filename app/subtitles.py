@@ -451,9 +451,19 @@ class SubtitlePanel(ctk.CTkFrame):
                     row_values[col_pos['format']] = (fmt or '').upper()
                 if 'audio_file' in col_pos:
                     path = None
-                    if line_obj and getattr(line_obj, 'audio_filename', ''):
-                        path = str(Path(getattr(self, 'app').audio_dir or Path('.')) / line_obj.audio_filename)
-                    elif i < len(self.ver_analysis_results):
+                    if line_obj:
+                        fname = getattr(line_obj, 'audio_filename', '')
+                        if fname:
+                            path = str(Path(getattr(self, 'app').audio_dir or Path('.')) / fname)
+                        else:
+                            # Próba znalezienia pliku na podstawie UID jeśli nie ma go w metadanych
+                            candidates = get_audio_candidates(line_obj.uid)
+                            if candidates:
+                                # Wybieramy ready jeśli jest, inaczej pierwszy znaleziony
+                                best = next((c for c in candidates if c[1]), candidates[0])
+                                path = str(best[0])
+
+                    if not path and i < len(self.ver_analysis_results):
                         path = self.ver_analysis_results[i].get('path')
                     row_values[col_pos['audio_file']] = Path(path).name if path else ''
             except Exception:
