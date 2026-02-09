@@ -50,6 +50,7 @@ class SubtitlePanel(ctk.CTkFrame):
             {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
             {"id": "cps", "text": "CPS", "width": 70, "anchor": "center", "stretch": False},
             {"id": "similarity", "text": "SIM %", "width": 80, "anchor": "center", "stretch": False},
+            {"id": "hallucination", "text": "Halu!", "width": 70, "anchor": "center", "stretch": False},
             {"id": "audio_file", "text": "Plik", "width": 250, "anchor": "w", "stretch": False},
         ]
 
@@ -402,6 +403,24 @@ class SubtitlePanel(ctk.CTkFrame):
             except Exception:
                 pass
 
+            # hallucination filter
+            try:
+                hal_f = f.get('halucination', 'Wszystkie')
+                halo_val = getattr(line_obj, 'audio_hallucination', '') or (ar.get('hallucination', '') if ar else '')
+                status_val = getattr(line_obj, 'audio_status', '') or (ar.get('display_status', '') if ar else '')
+                
+                if hal_f == 'Tylko halucynacje':
+                    if not halo_val:
+                        continue
+                elif hal_f == 'Bez halucynacji':
+                    if not status_val or halo_val:
+                        continue
+                elif hal_f == 'Nieweryfikowane':
+                    if status_val:
+                        continue
+            except Exception:
+                pass
+
             # Budowanie wartości dla wiersza zgodnie z self.columns_config
             row_values = []
             for col in self.columns_config:
@@ -444,6 +463,19 @@ class SubtitlePanel(ctk.CTkFrame):
                 if 'similarity' in col_pos:
                     sim_display = self._format_similarity_percent(sim_val)
                     row_values[col_pos['similarity']] = sim_display if sim_display else '-'
+                if 'hallucination' in col_pos:
+                    halo = getattr(line_obj, 'audio_hallucination', '') or ''
+                    if not halo and i < len(self.ver_analysis_results):
+                        halo = self.ver_analysis_results[i].get('hallucination') or ''
+                    
+                    status = getattr(line_obj, 'audio_status', '') or (self.ver_analysis_results[i].get('display_status', '') if i < len(self.ver_analysis_results) else '')
+                    
+                    if halo:
+                        row_values[col_pos['hallucination']] = halo
+                    elif status:
+                        row_values[col_pos['hallucination']] = "Brak"
+                    else:
+                        row_values[col_pos['hallucination']] = "-"
                 if 'format' in col_pos:
                     fmt = (getattr(line_obj, 'audio_format', '') or '')
                     if not fmt and i < len(self.ver_analysis_results):

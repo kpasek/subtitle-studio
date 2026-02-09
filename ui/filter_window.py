@@ -9,7 +9,7 @@ class FilterWindow(ctk.CTkToplevel):
     def __init__(self, master, current_filters: Dict = None, apply_callback: Callable[[Dict], None] = None):
         super().__init__(master)
         self.title("Filtracja")
-        self.geometry("350x200")
+        self.geometry("380x280")
         self.transient(master)
         self.apply_callback = apply_callback
         self.current_filters = current_filters or {}
@@ -46,9 +46,14 @@ class FilterWindow(ctk.CTkToplevel):
         self.show_option = tk.StringVar(value=self.current_filters.get('show', 'Wszystkie'))
         ctk.CTkOptionMenu(frm, variable=self.show_option, values=["Wszystkie", "Wygenerowane", "Niewygenerowane"]).grid(row=3, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
 
+        # Hallucination filter
+        ctk.CTkLabel(frm, text="Halucynacje: ").grid(row=4, column=0, sticky="w", pady=(8,0))
+        self.hal_option = tk.StringVar(value=self.current_filters.get('halucination', 'Wszystkie'))
+        ctk.CTkOptionMenu(frm, variable=self.hal_option, values=["Wszystkie", "Tylko halucynacje", "Bez halucynacji", "Nieweryfikowane"]).grid(row=4, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
+
         # Buttons
         btn_frame = ctk.CTkFrame(frm, fg_color="transparent")
-        btn_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(12,0))
+        btn_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(12,0))
         ctk.CTkButton(btn_frame, text="Wyczyść", command=self._on_clear).pack(side="left", padx=6)
         ctk.CTkButton(btn_frame, text="Zastosuj", command=self._on_apply).pack(side="right", padx=6)
 
@@ -77,6 +82,7 @@ class FilterWindow(ctk.CTkToplevel):
         if sim_max is not None:
             filters['max_sim'] = sim_max
         filters['show'] = self.show_option.get()
+        filters['halucination'] = self.hal_option.get()
 
         if callable(self.apply_callback):
             self.apply_callback(filters)
@@ -90,6 +96,7 @@ class FilterWindow(ctk.CTkToplevel):
         self.min_sim.set('')
         self.max_sim.set('')
         self.show_option.set('Wszystkie')
+        self.hal_option.set('Wszystkie')
         if callable(self.apply_callback):
             self.apply_callback({})
 

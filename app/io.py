@@ -242,6 +242,7 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                         audio_similarity=float(row.get('audio_similarity') or 0.0),
                         audio_format=row.get('audio_format', '') or '',
                         audio_transcribed_text=transcribed,
+                        audio_hallucination=row.get('audio_hallucination', '') or '',
                         uid=uid
                     ))
             print(f"[LOAD_CSV] Wczytano {row_count} linii z CSV")
@@ -269,6 +270,7 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                         audio_similarity=float(row.get('audio_similarity') or 0.0),
                         audio_format=row.get('audio_format', '') or '',
                         audio_transcribed_text=transcribed,
+                        audio_hallucination=row.get('audio_hallucination', '') or '',
                         uid=uid
                     ))
             print(f"[LOAD_CSV] Wczytanych linii (latin-1): {row_count}")
@@ -297,7 +299,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
             fieldnames = [
                 'original_text', 'text', 'tts_text', 'audio_duration',
                 'audio_similarity', 'audio_format',
-                'audio_transcribed_text', 'uid'
+                'audio_transcribed_text', 'audio_hallucination', 'uid'
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
             writer.writeheader()
@@ -314,6 +316,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                         'audio_similarity': item.audio_similarity,
                         'audio_format': item.audio_format,
                         'audio_transcribed_text': getattr(item, 'audio_transcribed_text', ''),
+                        'audio_hallucination': getattr(item, 'audio_hallucination', ''),
                         'uid': _cleanup_uid_field(getattr(item, 'uid', ''))
                     }
                     if not row_dict['uid']:
@@ -378,6 +381,7 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
                         audio_similarity=(lambda v: float(v.replace(',', '.')) if isinstance(v, str) and v else float(v) if v not in (None, '') else 0.0)(row.get('audio_similarity') or row.get('similarity') or 0),
                         audio_format=row.get('audio_format', '') or row.get('ext', '') or '',
                         audio_transcribed_text=row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or '',
+                        audio_hallucination=row.get('audio_hallucination', '') or row.get('hallucination', '') or '',
                         uid=uid
                     ))
         except UnicodeDecodeError:
@@ -401,6 +405,7 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
                         audio_similarity=(lambda v: float(v.replace(',', '.')) if isinstance(v, str) and v else float(v) if v not in (None, '') else 0.0)(row.get('audio_similarity') or row.get('similarity') or 0),
                         audio_format=row.get('audio_format', '') or row.get('ext', '') or '',
                         audio_transcribed_text=row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or '',
+                        audio_hallucination=row.get('audio_hallucination', '') or row.get('hallucination', '') or '',
                         uid=uid
                     ))
 
@@ -410,8 +415,8 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
         with open(p, 'w', encoding='utf-8', newline='') as f:
             fieldnames = [
                 'original_text', 'text', 'tts_text', 'audio_duration',
-                'audio_similarity', 'audio_format',
-                'audio_transcribed_text', 'uid'
+                'audio_similarity', 'audio_format', 'audio_filename',
+                'audio_transcribed_text', 'audio_hallucination', 'uid'
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
             writer.writeheader()
@@ -424,7 +429,9 @@ def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
                     'audio_duration': item.audio_duration,
                     'audio_similarity': item.audio_similarity,
                     'audio_format': item.audio_format,
+                    'audio_filename': getattr(item, 'audio_filename', ''),
                     'audio_transcribed_text': getattr(item, 'audio_transcribed_text', ''),
+                    'audio_hallucination': getattr(item, 'audio_hallucination', ''),
                     'uid': _cleanup_uid_field(getattr(item, 'uid', '')) or uuid.uuid4().hex[:8]
                 }
                 writer.writerow(row_dict)

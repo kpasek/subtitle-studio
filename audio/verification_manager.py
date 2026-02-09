@@ -9,6 +9,8 @@ import multiprocessing
 import subprocess
 import csv
 import warnings
+import shutil
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List, Dict, Any, Tuple
@@ -46,6 +48,8 @@ class VerificationJob:
     ignore_short: bool
     ffprobe: Optional[str]
     workers: int
+    verify_hallucination: bool = False
+    verify_similarity: bool = False
     apply_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
 
@@ -79,72 +83,57 @@ class VerificationManager:
         audio_dir: str, 
         ffprobe_path: Optional[str] = None, 
         ignore_short: bool = False, 
-        verify_duration: bool = True
-    ) -> Dict[str, Any]:
+        verify_duration: bool = True,
+        verify_hallucination: bool = False,
+        verify_similarity: bool = False
+    ) -> Line:
         """
-        Weryfikuje pojedynczą linię audio (istnienie pliku, czas trwania, CPS, transkrypcja).
+        Weryfikuje pojedynczą linię audio i aktualizuje obiekt Line.
         
         Args:
-            line: Obiekt Line do weryfikacji.
+            line: Obiekt Line do weryfikacji (zostanie zmodyfikowany).
             audio_dir: Ścieżka do katalogu wygenerowanego audio (root/generated).
             ffprobe_path: Opcjonalna ścieżka do ffprobe.
             ignore_short: Czy ignorować błędy CPS dla bardzo krótkich tekstów.
             verify_duration: Czy wykonywać pomiar czasu (wymaga ffprobe).
+            verify_hallucination: Czy weryfikować halucynacje.
+            verify_similarity: Czy weryfikować podobieństwo (Whisper).
             
         Returns:
-            Dict[str, Any]: Wyniki weryfikacji w formie słownika zgodnego z GUI.
+            Line: Zaktualizowany obiekt Line.
         """
         audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
         uid = line.uid
         text = line.get_tts_text().strip()
         
-        # Inicjalizacja wyniku (id to numer porządkowy dla GUI oparty na uid lub line_id jeśli numeryczne)
-        # UWAGA: GUI w subtitles.py używa int(k), gdzie k to klucz z rezultatu workera (str(i+1)).
-        # Zostawiamy 'id' w słowniku, ale pobieramy go z line.uid jeśli jest numerem, lub opcjonalnie.
-        # W nowym systemie UID = numer linii (1, 2, 3...) podczas importu.
-        
-        try:
-            display_id = int(uid)
-        except (ValueError, TypeError):
-            display_id = 0 # fallback
-            
-        entry = {
-            'id': display_id,
-            'text': text,
-            'duration': 0.0,
-            'cps': 0.0,
-            'raw_status': 'PENDING',
-            'path': None,
-            'ext': '',
-            'display_status': 'PENDING'
-        }
-        
         if not text:
-            entry.update({'raw_status': 'EMPTY', 'display_status': 'EMPTY'})
-            return entry
+            line.audio_status = 'EMPTY'
+            return line
         
         # Szukanie pliku - na podstawie UID
         audio_file, ext = VerificationManager._find_audio_for_uid(audio_dir_p, uid)
         
         if not audio_file:
-            entry.update({'raw_status': 'MISSING', 'display_status': 'MISSING'})
-            return entry
+            line.audio_status = 'MISSING'
+            return line
             
-        entry.update({'path': str(audio_file), 'ext': ext})
+        line.audio_filename = audio_file.name
+        line.audio_format = ext
         
         if not verify_duration:
-            entry.update({'raw_status': 'OK', 'display_status': 'OK'})
-            return entry
+            line.audio_status = 'OK'
+            return line
             
         # Pobieranie długości audio
         duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
         
         if duration <= 0:
             status = 'ERROR' if duration < 0 else 'EMPTY'
-            entry.update({'duration': duration, 'raw_status': status, 'display_status': status})
-            return entry
+            line.audio_duration = 0.0
+            line.audio_status = status
+            return line
             
-        entry['duration'] = duration
+        line.audio_duration = round(duration, 3)
         
         # Obliczenie tempa (CPS) z uwzględnieniem pauz
         stats = Counter(text.strip('.?!'))
@@ -152,34 +141,97 @@ class VerificationManager:
         time_net = duration - pauses
         
         cps = len(text) / time_net if time_net > 0 else 0.0
-        entry['cps'] = cps
-        entry['raw_status'] = 'OK'
         
-        # Status wizualny CPS
+        # Status wizualny CPS (audio_status)
         if ignore_short and len(text) < 5:
-            entry['display_status'] = 'SHORT'
+            line.audio_status = 'SHORT'
         else:
             min_cps, max_cps = 7.0, 20.0
             if cps < min_cps:
-                entry['display_status'] = f"ZA WOLNO (<{min_cps:.1f})"
+                line.audio_status = f"ZA WOLNO (<{min_cps:.1f})"
             elif cps > max_cps:
-                entry['display_status'] = f"ZA SZYBKO (>{max_cps:.1f})"
+                line.audio_status = f"ZA SZYBKO (>{max_cps:.1f})"
             else:
-                entry['display_status'] = 'OK'
+                line.audio_status = 'OK'
         
-        # Weryfikacja similarity i transkrypcji via Whisper
-        entry['similarity'] = 0.0
-        entry['transcribed_text'] = ''
+        # 1. Weryfikacja similarity i transkrypcji via Whisper
+        if verify_similarity:
+            try:
+                sim_result = VerificationManager.verify_similarity(line, audio_file)
+                if sim_result.get('success'):
+                    line.audio_similarity = sim_result.get('similarity', 0.0)
+                    line.audio_transcribed_text = sim_result.get('transcribed_text', '')
+            except Exception:
+                pass
+
+        # 2. Wykrywanie halucynacji (cisza / brzęczenie)
+        if verify_hallucination:
+            hallucinations = []
+            
+            # Detekcja ciszy przez ffmpeg
+            ffmpeg_path = None
+            if ffprobe_path:
+                 potential_ffmpeg = ffprobe_path.replace('ffprobe', 'ffmpeg')
+                 if os.path.exists(potential_ffmpeg):
+                     ffmpeg_path = potential_ffmpeg
+            
+            if not ffmpeg_path:
+                ffmpeg_path = shutil.which('ffmpeg')
+                
+            if ffmpeg_path:
+                silences = VerificationManager.detect_silence(audio_file, ffmpeg_path)
+                long_silences = [s for s in silences if s['duration'] > 1.0]
+                if long_silences:
+                    hallucinations.append("CISZA")
+            
+            # Detekcja brzęczenia / "zawieszenia"
+            if line.audio_similarity > 0 and line.audio_similarity < 0.4:
+                if duration > (len(text) / 4.0 + 3.0):
+                    hallucinations.append("HALU?")
+            
+            # Ekstremalnie niski CPS
+            if cps > 0 and cps < 4.0 and duration > 5.0:
+                if "HALU?" not in hallucinations:
+                    hallucinations.append("BARDZO WOLNO")
+
+            if hallucinations:
+                line.audio_hallucination = ", ".join(hallucinations)
+            else:
+                line.audio_hallucination = "Brak"
         
+        return line
+
+    @staticmethod
+    def detect_silence(file_path: Path, ffmpeg_path: str) -> List[Dict[str, float]]:
+        """
+        Używa ffmpeg do wykrycia fragmentów ciszy.
+        """
         try:
-            sim_result = VerificationManager.verify_similarity(line, audio_file)
-            if sim_result.get('success'):
-                entry['similarity'] = sim_result.get('similarity', 0.0)
-                entry['transcribed_text'] = sim_result.get('transcribed_text', '')
-        except Exception:
-            pass
-        
-        return entry
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            # silencedetect: n = noise threshold (-40dB), d = duration threshold (1s)
+            cmd = [ffmpeg_path, "-i", str(file_path), "-af", "silencedetect=n=-40dB:d=1", "-f", "null", "-"]
+            
+            res = subprocess.run(cmd, stderr=subprocess.PIPE, text=True, startupinfo=startupinfo, timeout=15)
+            output = res.stderr
+            
+            silences = []
+            starts = re.findall(r"silence_start: ([\d.]+)", output)
+            ends = re.findall(r"silence_end: ([\d.]+) \| silence_duration: ([\d.]+)", output)
+            
+            for i in range(min(len(starts), len(ends))):
+                silences.append({
+                    'start': float(starts[i]),
+                    'end': float(ends[i][0]),
+                    'duration': float(ends[i][1])
+                })
+            return silences
+        except Exception as e:
+            print(f"[DEBUG] detect_silence error: {e}")
+            return []
 
     @staticmethod
     def _find_audio_for_uid(audio_dir: Path, uid: str) -> Tuple[Optional[Path], str]:
@@ -461,7 +513,7 @@ class VerificationManager:
             out_path = str(Path(tmpdir) / f"cps_worker_{uid}.{wi}.json")
             p = multiprocessing.Process(
                 target=_verification_process_entry,
-                args=(job.audio_dir, job.lines_texts, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers)
+                args=(job.audio_dir, job.lines_texts, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers, job.verify_hallucination, job.verify_similarity)
             )
             p.start()
             procs.append(p)
@@ -546,7 +598,7 @@ class VerificationManager:
             if not results:
                 return False
             
-            fieldnames = ['id', 'text', 'duration', 'cps', 'raw_status', 'path', 'ext', 'display_status', 'similarity']
+            fieldnames = ['id', 'text', 'duration', 'cps', 'raw_status', 'path', 'ext', 'display_status', 'similarity', 'hallucination', 'transcribed_text']
             
             with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -562,7 +614,7 @@ class VerificationManager:
 
 
 # --- worker entry (updated to use verify_line static method) ---
-def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1):
+def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
     """
     Pracownik procesu do weryfikacji audio.
     Zapisuje wyniki do JSON.
@@ -570,6 +622,7 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: li
     import json
     from pathlib import Path
     from app.entity import Line
+    from dataclasses import asdict
     
     results = {}
     
@@ -594,18 +647,34 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: li
         line = Line(original_text=text, text=text, tts_text=text.strip(), uid=uid)
         
         # Weryfikacja linii (teraz z obiektem Line jako głównym źródłem danych)
-        result = VerificationManager.verify_line(
+        VerificationManager.verify_line(
             line=line,
             audio_dir=audio_dir,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
-            ignore_short=ignore_short
+            ignore_short=ignore_short,
+            verify_hallucination=verify_hallucination,
+            verify_similarity=verify_similarity
         )
         
-        # Nadpisujemy 'id' wynikiem 'i + 1', bo worker używa indeksu pętli 
-        # do komunikacji z GUI (które mapuje k-1 -> index)
-        result['id'] = i + 1
+        # Przygotowanie wyniku dla GUI (JSON)
+        # GUI oczekuje pewnych pól do sprawnego odświeżania tabeli
+        res = asdict(line)
+        res['id'] = i + 1
+        res['text'] = line.get_tts_text()
         
-        results[ident] = result
+        # Ścieżka bezwzględna (pomocna dla GUI)
+        audio_file, _ = VerificationManager._find_audio_for_uid(Path(audio_dir), uid)
+        res['path'] = str(audio_file) if audio_file else None
+        
+        # Kompatybilność wsteczna kluczy
+        res['duration'] = line.audio_duration
+        res['similarity'] = line.audio_similarity
+        res['transcribed_text'] = line.audio_transcribed_text
+        res['hallucination'] = line.audio_hallucination
+        res['display_status'] = line.audio_status
+        res['ext'] = line.audio_format
+        
+        results[ident] = res
         write_atomic(results)
     
     write_atomic(results)

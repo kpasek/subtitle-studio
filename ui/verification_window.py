@@ -4,6 +4,7 @@ from tkinter import ttk
 import threading
 import time
 from pathlib import Path
+from dataclasses import asdict
 
 from audio.verification_manager import VerificationManager
 from app.tooltip import CreateToolTip
@@ -17,7 +18,7 @@ class VerificationWindow(ctk.CTkToplevel):
         self.master_app = master_app
         self.subtitle_panel = getattr(master_app, 'subtitle_panel', None)
         self.title('Weryfikacja audio')
-        self.geometry('420x160')
+        self.geometry('550x300')
         self.transient(master_app)
 
         self.force_refresh = tk.BooleanVar(value=False)
@@ -37,8 +38,6 @@ class VerificationWindow(ctk.CTkToplevel):
         self.start_btn.pack(side='left', padx=6)
         self.stop_btn = ctk.CTkButton(btn_frame, text='Stop', width=80, command=self._on_stop)
         self.stop_btn.pack(side='left', padx=6)
-        self.ignore_cb = ctk.CTkCheckBox(btn_frame, text='Ignoruj cache', variable=self.force_refresh)
-        self.ignore_cb.pack(side='left', padx=12)
 
         # Progress
         prog_frame = ctk.CTkFrame(frm)
@@ -49,23 +48,45 @@ class VerificationWindow(ctk.CTkToplevel):
         self.status_label = ctk.CTkLabel(frm, text='Status: idle')
         self.status_label.pack(anchor='w', padx=6)
 
-        # Options: verify duration and verify similarity
+        # Options: list of checkboxes
         opts_frame = ctk.CTkFrame(frm, fg_color='transparent')
-        opts_frame.pack(fill='x', padx=6, pady=(4,0))
+        opts_frame.pack(fill='x', padx=6, pady=(10,0))
 
+        # Row 0: Ignore cache
+        row_ignore = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row_ignore.pack(fill='x', pady=2)
+        self.ignore_cb = ctk.CTkCheckBox(row_ignore, text='Ignoruj cache (wymuś ponowną weryfikację)', variable=self.force_refresh)
+        self.ignore_cb.pack(side='left', padx=(0,8))
+
+        # Row 1: Duration
+        row1 = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row1.pack(fill='x', pady=2)
         self.verify_duration_var = tk.BooleanVar(value=True)
-        cb_dur = ctk.CTkCheckBox(opts_frame, text='Weryfikuj długość audio', variable=self.verify_duration_var)
+        cb_dur = ctk.CTkCheckBox(row1, text='Weryfikuj długość audio', variable=self.verify_duration_var)
         cb_dur.pack(side='left', padx=(0,8))
-        lbl_dur_i = ctk.CTkLabel(opts_frame, text='(i)')
+        lbl_dur_i = ctk.CTkLabel(row1, text='(i)', cursor='hand2')
         lbl_dur_i.pack(side='left')
         CreateToolTip(lbl_dur_i, text='Sprawdza długość pliku audio i oblicza CPS (znaki na sekundę).')
 
+        # Row 2: Similarity
+        row2 = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row2.pack(fill='x', pady=2)
         self.verify_similarity_var = tk.BooleanVar(value=False)
-        cb_sim = ctk.CTkCheckBox(opts_frame, text='Weryfikuj podobieństwo', variable=self.verify_similarity_var)
-        cb_sim.pack(side='left', padx=(12,8))
-        lbl_sim_i = ctk.CTkLabel(opts_frame, text='(i)')
+        cb_sim = ctk.CTkCheckBox(row2, text='Weryfikuj podobieństwo', variable=self.verify_similarity_var)
+        cb_sim.pack(side='left', padx=(0,8))
+        lbl_sim_i = ctk.CTkLabel(row2, text='(i)', cursor='hand2')
         lbl_sim_i.pack(side='left')
         CreateToolTip(lbl_sim_i, text='Uruchamia rozpoznawanie mowy (Whisper) i porównanie tekstu. Proces jest powolny.')
+
+        # Row 3: Hallucination
+        row3 = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row3.pack(fill='x', pady=2)
+        self.verify_hallucination_var = tk.BooleanVar(value=True)
+        cb_hal = ctk.CTkCheckBox(row3, text='Weryfikuj halucynacje', variable=self.verify_hallucination_var)
+        cb_hal.pack(side='left', padx=(0,8))
+        lbl_hal_i = ctk.CTkLabel(row3, text='(i)', cursor='hand2')
+        lbl_hal_i.pack(side='left')
+        CreateToolTip(lbl_hal_i, text='Wykrywa ciszę lub zawieszenia modelu TTS (wymaga ffmpeg).')
 
     def _on_start(self):
         if not self.subtitle_panel:
@@ -121,20 +142,24 @@ class VerificationWindow(ctk.CTkToplevel):
                     
                     # Jeśli już ma transkrybowany tekst, całkowite pominięcie
                     if not force and has_transcribed_text:
-                        print(f"[SKIP_FULL] Linia {i+1}: już zweryfikowana (audio_transcribed_text={repr(has_transcribed_text[:50])})")
+                        print(f"[SKIP_FULL] Linia {i+1}: już zweryfikowana")
                         # Szybkie pominięcie - tylko skopiuj dane z Line
                         res = {
                             'id': i + 1,
-                            'text': line.tts_text or '',
-                            'duration': float(getattr(line, 'audio_duration', 0) or 0.0),
-                            'raw_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
-                            'path': str(Path(getattr(self.master_app, 'audio_dir', Path('.'))) / has_audio_filename) if has_audio_filename else None,
-                            'ext': getattr(line, 'audio_format', '') or (Path(has_audio_filename).suffix.lstrip('.') if has_audio_filename else ''),
-                            'display_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
-                            'similarity': getattr(line, 'audio_similarity', 0.0),
-                            'transcribed_text': has_transcribed_text
+                            'text': line.get_tts_text(),
+                            'duration': line.audio_duration,
+                            'similarity': line.audio_similarity,
+                            'transcribed_text': line.audio_transcribed_text,
+                            'hallucination': line.audio_hallucination,
+                            'display_status': line.audio_status or ('OK' if line.audio_duration > 0 else 'MISSING'),
+                            'ext': line.audio_format,
+                            'raw_status': 'OK' if line.audio_duration > 0 else 'MISSING'
                         }
-                        # Nie zapisuj do CSV bo nic się nie zmieniło
+                        
+                        # Pobierz ścieżkę do pliku
+                        audio_path_obj, _ = VerificationManager._find_audio_for_uid(Path(getattr(self.master_app, 'audio_dir', '.')), line.uid)
+                        res['path'] = str(audio_path_obj) if audio_path_obj else None
+                        
                         line_was_modified = False
                     # Jeśli ma audio_filename ale brak transkrypcji, i similarity jest włączony - pominąć verify_line, ale zweryfikować similarity
                     elif not force and has_audio_filename and not has_transcribed_text and self.verify_similarity_var.get():
@@ -150,51 +175,50 @@ class VerificationWindow(ctk.CTkToplevel):
                             'ext': (path_obj.suffix.lstrip('.') if path_obj else '') or getattr(line, 'audio_format', ''),
                             'display_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
                             'similarity': 0.0,
-                            'transcribed_text': ''
+                            'transcribed_text': '',
+                            'hallucination': ''
                         }
                         # Będzie modyfikowana przez apply_similarity_to_line
                         line_was_modified = True
                     # Pełna weryfikacja
                     else:
-                        print(f"[VERIFY] Linia {i+1}: weryfikuję verify_line")
-                        # perform verification (respect verify duration option)
-                        res = VerificationManager.verify_line(
+                        print(f"[VERIFY] Linia {i+1}: weryfikuję")
+                        
+                        # Pobierz flagi
+                        v_dur = self.verify_duration_var.get()
+                        v_hal = self.verify_hallucination_var.get()
+                        v_sim = self.verify_similarity_var.get()
+                        
+                        # Wykonaj weryfikację (bezpośrednio aktualizuje obiekt line)
+                        VerificationManager.verify_line(
                             line=line,
                             audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
                             ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
                             ignore_short=False,
-                            verify_duration=self.verify_duration_var.get()
+                            verify_duration=v_dur,
+                            verify_hallucination=v_hal,
+                            verify_similarity=v_sim
                         )
-                        res['id'] = i + 1
+                        
+                        # Przygotowanie słownika wyniku dla panel.ver_analysis_results
+                        # Zachowujemy kompatybilność z Treeview w subtitles.py
+                        res = {
+                            'id': i + 1,
+                            'text': line.get_tts_text(),
+                            'duration': line.audio_duration,
+                            'similarity': line.audio_similarity,
+                            'transcribed_text': line.audio_transcribed_text,
+                            'hallucination': line.audio_hallucination,
+                            'display_status': line.audio_status,
+                            'ext': line.audio_format,
+                            'raw_status': 'OK' if line.audio_duration > 0 else 'MISSING'
+                        }
+                        
+                        # Bezwzględna ścieżka do audio do odtwarzania w GUI
+                        audio_path_obj, _ = VerificationManager._find_audio_for_uid(Path(getattr(self.master_app, 'audio_dir', '.')), line.uid)
+                        res['path'] = str(audio_path_obj) if audio_path_obj else None
+                        
                         line_was_modified = True
-
-                    # if OK and similarity enabled, attempt similarity (may be slow)
-                    # NIE rób similarity jeśli już ma transkrybowany tekst!
-                    if self.verify_similarity_var.get() and res.get('path') and res.get('raw_status') == 'OK' and not has_transcribed_text:
-                        try:
-                            line = VerificationManager.apply_similarity_to_line(line, res.get('path'))
-                            res['similarity'] = getattr(line, 'audio_similarity', 0.0)
-                            res['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
-                            print(f"[DEBUG] Line {i+1}: transcribed_text = {repr(res['transcribed_text'])}, line.audio_transcribed_text = {repr(getattr(line, 'audio_transcribed_text', ''))}")
-                        except Exception as e:
-                            print(f"[ERROR] apply_similarity_to_line failed for line {i+1}: {e}")
-                            res['similarity'] = 0.0
-                            res['transcribed_text'] = ''
-
-                    # store result and mark processed
-                    # update Line fields so they persist to main CSV
-                    if res.get('duration') is not None:
-                        line.audio_duration = round(float(res.get('duration')) * 1000, 3) / 1000
-                    if res.get('path'):
-                        line.audio_filename = Path(res.get('path')).name
-                    line.audio_format = res.get('ext', '') or ''
-                    line.audio_status = res.get('display_status') or res.get('raw_status') or ''
-                    
-                    # Update similarity and transcribed text from Line object
-                    if hasattr(line, 'audio_similarity'):
-                        res['similarity'] = line.audio_similarity
-                    if hasattr(line, 'audio_transcribed_text'):
-                        res['transcribed_text'] = line.audio_transcribed_text
 
                     panel.ver_analysis_results[i] = res
                     panel.ver_processed_indices.add(i)

@@ -32,6 +32,7 @@ class Line:
     # Weryfikacja / metadane audio
     audio_status: str = ""  # MISSING/ERROR/OK/SHORT/etc.
     audio_format: str = ""  # WAV/MP3/OGG
+    audio_hallucination: str = ""  # Flag for TTS hallucinations (silence, buzzing)
     uid: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     def get_text(self) -> str:
