@@ -24,10 +24,12 @@ class ShortcutsWindow(ctk.CTkToplevel):
                 ("Tab", "Przełącz widok (Napisy <-> TTS)"),
             ]),
             ("Edycja i Wybór", [
+                ("Ctrl + A", "Zaznacz widoczne (limit 100)"),
                 ("Ctrl + C", "Kopiuj tekst zaznaczonej linii"),
                 ("Ctrl + K", "Zatwierdź zmiany"),
                 ("Ctrl + R", "Menedżer wzorców"),
             ]),
+
             ("Audio (Weryfikacja)", [
                 ("Ctrl + Y", "Weryfikuj ZAZNACZONE audio"),
                 ("Ctrl + Shift + Y", "Otwórz okno weryfikacji"),

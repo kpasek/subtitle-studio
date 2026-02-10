@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import json
 import sys
-from typing import Optional, Dict, List, Union, Tuple
+from typing import Callable, Optional, Dict, List, Union, Tuple
 import csv
 import uuid
 
@@ -17,66 +17,45 @@ else:
 
 APP_CONFIG = os.path.join(application_path, "subtitle-studio.json")
 
+_csv_cache_data: List[Dict] = []
+_csv_cache_path: Optional[str] = None
+_csv_cache_mtime: float = 0
+_project_path_provider: Optional[Callable[[], Optional[str]]] = None
 
-def get_edits_file_path(loaded_path: Optional[Path]) -> Optional[Path]:
-    """Sciezka dla edycji napisow (clean layer)."""
-    if not loaded_path:
-        return None
-    return loaded_path.with_suffix(".edits.json")
+def set_project_path_provider(provider: Callable[[], Optional[str]]):
+    """Ustawia funkcję zwracającą aktualną ścieżkę do pliku projektu."""
+    global _project_path_provider
+    _project_path_provider = provider
 
+def _get_effective_csv_path(passed_path: Optional[str]) -> Optional[str]:
+    if passed_path:
+        return passed_path
+    if _project_path_provider:
+        return _project_path_provider()
+    return None
 
-def get_tts_edits_file_path(loaded_path: Optional[Path]) -> Optional[Path]:
-    """Sciezka dla edycji TTS (replace layer)."""
-    if not loaded_path:
-        return None
-    return loaded_path.with_name(loaded_path.stem + ".tts_edits.json")
-
-
-def load_manual_edits(loaded_path: Optional[Path]) -> Dict[int, str]:
-    edits: Dict[int, str] = {}
-    path = get_edits_file_path(loaded_path)
-    if path and path.exists():
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                edits = {int(k): v for k, v in data.items()}
-        except Exception as e:
-            print(f"Blad edycji (Napisy): {e}")
-    return edits
-
-
-def save_manual_edits(loaded_path: Optional[Path], edits: Dict[int, str]) -> None:
-    path = get_edits_file_path(loaded_path)
-    if path:
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(edits, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Blad zapisu edycji (Napisy): {e}")
-
-
-def load_tts_edits(loaded_path: Optional[Path]) -> Dict[int, str]:
-    edits: Dict[int, str] = {}
-    path = get_tts_edits_file_path(loaded_path)
-    if path and path.exists():
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                edits = {int(k): v for k, v in data.items()}
-        except Exception as e:
-            print(f"Blad edycji (TTS): {e}")
-    return edits
-
-
-def save_tts_edits(loaded_path: Optional[Path], edits: Dict[int, str]) -> None:
-    path = get_tts_edits_file_path(loaded_path)
-    if path:
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(edits, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Blad zapisu edycji (TTS): {e}")
-
+def _ensure_csv_cache(path: str) -> bool:
+    """Wczytuje CSV do pamięci, jeśli jeszcze go nie ma lub plik się zmienił."""
+    global _csv_cache_data, _csv_cache_path, _csv_cache_mtime
+    p = Path(path)
+    if not p.exists():
+        return False
+        
+    try:
+        current_mtime = p.stat().st_mtime
+        if _csv_cache_path == path and _csv_cache_mtime == current_mtime:
+            return True
+            
+        with open(p, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f)
+            _csv_cache_data = list(reader)
+            
+        _csv_cache_path = path
+        _csv_cache_mtime = current_mtime
+        return True
+    except Exception as e:
+        print(f"[CSV_CACHE_ERR] {e}")
+        return False
 
 def _extract_uid_component(value: Optional[str]) -> Optional[str]:
     """Wyodrębnia sam identyfikator z nazwy audio lub zapisanej UID."""
@@ -104,7 +83,6 @@ def _cleanup_uid_field(raw_uid: Optional[str]) -> str:
     return normalized or candidate
 
 
-# --- Globalny stan katalogu audio ---
 _current_audio_dir: Optional[Path] = None
 
 def set_audio_dir(path: Optional[Union[str, Path]]):
@@ -120,14 +98,10 @@ def get_audio_dir() -> Optional[Path]:
     return _current_audio_dir
 
 def get_primary_audio_path(uid: str) -> Optional[Path]:
-    """
-    Zwraca ścieżkę do podstawowego pliku audio (generated/output1 (uid).wav).
-    Jeśli plik nie istnieje jako .wav, próbuje też .mp3.
-    """
+    """Zwraca ścieżkę do podstawowego pliku audio."""
     if not uid or not _current_audio_dir:
         return None
     
-    # Podstawowy format to WAV (generowany przez TTS)
     p_wav = _current_audio_dir / f"output1 ({uid}).wav"
     if p_wav.exists():
         return p_wav
@@ -136,13 +110,10 @@ def get_primary_audio_path(uid: str) -> Optional[Path]:
     if p_mp3.exists():
         return p_mp3
         
-    return p_wav # Zwróć ścieżkę .wav nawet jeśli nie istnieje jako domyślną
+    return p_wav
 
 def get_audio_candidates(uid: str) -> List[Tuple[Path, bool]]:
-    """
-    Zwraca wszystkie możliwe pliki audio dla danego UID w generated/ i ready/.
-    Zwraca listę krotek (ścieżka, czy_jest_w_ready).
-    """
+    """Zwraca wszystkie możliwe pliki audio dla danego UID."""
     if not uid or not _current_audio_dir:
         return []
         
@@ -153,19 +124,15 @@ def get_audio_candidates(uid: str) -> List[Tuple[Path, bool]]:
     ready_dir = gen_dir.parent / "ready"
     
     found = []
-    # Sprawdzamy popularne rozszerzenia, także wielkimi literami
     extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
     
     for base in bases:
-        # 1. Szukaj w generated (is_ready=False)
         for ext in extensions:
             p = gen_dir / f"{base}.{ext}"
             if p.exists():
-                # Unikaj duplikatów ścieżek
                 if not any(f[0].resolve() == p.resolve() for f in found):
                     found.append((p, False))
         
-        # 2. Szukaj w ready (is_ready=True)
         for ext in extensions:
             p = ready_dir / f"{base}.{ext}"
             if p.exists():
@@ -187,19 +154,10 @@ def _normalize_text_fields(line: Line) -> Tuple[str, str]:
 
 
 def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line]:
-    """Wczytuje plik napisow.
-    - CSV: wiersze jako Line z metadanymi, w tym uid
-    - TXT (stara wersja): Line z uid zgodnym z plikami audio, jesli istnieja
-    """
+    """Wczytuje plik napisów (CSV lub TXT)."""
     p = Path(path)
 
     def _ensure_uid(value: str, idx: int, audio_dir_path: Optional[Path], audio_filename: str) -> str:
-        """Inteligentna rezolucja UID:
-        1. Jeśli już podany - zwróć (po oczyszczeniu)
-        2. Jeśli nazwa audio zawiera UID - wyodrębnij
-        3. Jeśli plik istnieje w audio_dir - użyj numeru linii
-        4. Wygeneruj nowy UUID
-        """
         normalized_value = _cleanup_uid_field(value)
         if normalized_value:
             return normalized_value
@@ -209,70 +167,52 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
             return inferred
 
         if audio_dir_path and audio_dir_path.is_dir():
-            pattern_candidates = [f"output1 ({idx})", f"output1({idx})", f"output1 {idx}", str(idx)]
+            pattern_candidates = [f"output1 ({idx})", str(idx)]
             for pattern in pattern_candidates:
-                for ext in ['.wav', '.mp3', '.ogg']:
+                for ext in ['.wav', '.mp3']:
                     candidate = audio_dir_path / f"{pattern}{ext}"
                     if candidate.exists():
                         return str(idx)
 
         return uuid.uuid4().hex[:8]
 
+    
+    def _load_csv_file(f) -> List[Line]:
+        reader = csv.DictReader(f)
+        row_count = 0
+        for row in reader:
+            row_count += 1
+            try:
+                dur = round(float(row.get('audio_duration') or 0), 3)
+            except Exception:
+                dur = 0.0
+            transcribed = row.get('audio_transcribed_text', '') or ''
+            audio_filename = row.get('audio_filename', '') or ''
+            uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
+            out.append(Line(
+                original_text=row.get('original_text', '') or '',
+                text=row.get('text', '') or '',
+                tts_text=row.get('tts_text', '') or '',
+                audio_duration=dur,
+                audio_filename=audio_filename,
+                audio_similarity=float(row.get('audio_similarity') or 0.0),
+                audio_format=row.get('audio_format', '') or '',
+                audio_transcribed_text=transcribed,
+                audio_hallucination=row.get('audio_hallucination', 'PENDING'),
+                uid=uid
+            ))
+
+        return out
+    
     if p.suffix.lower() == '.csv':
         out: List[Line] = []
         try:
             with open(p, 'r', encoding='utf-8', newline='') as f:
-                reader = csv.DictReader(f)
-                row_count = 0
-                for row in reader:
-                    row_count += 1
-                    try:
-                        dur = round(float(row.get('audio_duration') or 0), 3)
-                    except Exception:
-                        dur = 0.0
-                    transcribed = row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or ''
-                    audio_filename = row.get('audio_filename', '') or ''
-                    uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
-                    out.append(Line(
-                        original_text=row.get('original_text', '') or '',
-                        text=row.get('text', '') or '',
-                        tts_text=row.get('tts_text', '') or '',
-                        audio_duration=dur,
-                        audio_filename=audio_filename,
-                        audio_similarity=float(row.get('audio_similarity') or 0.0),
-                        audio_format=row.get('audio_format', '') or '',
-                        audio_transcribed_text=transcribed,
-                        uid=uid
-                    ))
-            print(f"[LOAD_CSV] Wczytano {row_count} linii z CSV")
-            return out
+                return _load_csv_file(f)
         except UnicodeDecodeError:
             print("[LOAD_CSV] UTF-8 decode failed, probuje latin-1...")
             with open(p, 'r', encoding='latin-1', newline='') as f:
-                reader = csv.DictReader(f)
-                row_count = 0
-                for row in reader:
-                    row_count += 1
-                    try:
-                        dur = round(float(row.get('audio_duration') or 0), 3)
-                    except Exception:
-                        dur = 0.0
-                    transcribed = row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or ''
-                    audio_filename = row.get('audio_filename', '') or ''
-                    uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
-                    out.append(Line(
-                        original_text=row.get('original_text', '') or '',
-                        text=row.get('text', '') or '',
-                        tts_text=row.get('tts_text', '') or '',
-                        audio_duration=dur,
-                        audio_filename=audio_filename,
-                        audio_similarity=float(row.get('audio_similarity') or 0.0),
-                        audio_format=row.get('audio_format', '') or '',
-                        audio_transcribed_text=transcribed,
-                        uid=uid
-                    ))
-            print(f"[LOAD_CSV] Wczytanych linii (latin-1): {row_count}")
-            return out
+                return _load_csv_file(f)        
 
     with open(p, 'r', encoding='utf-8') as f:
         lines = f.read().splitlines()
@@ -287,146 +227,179 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
 
 def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
     """Zapisuje linie.
-    - lista Line i .csv -> zapis CSV z metadanymi
+    - lista Line i .csv -> zapis CSV z metadanymi (sortowane po UID)
     - lista str lub .txt -> zapis jako zwykly plik tekstowy
     """
+    global _csv_cache_data, _csv_cache_path, _csv_cache_mtime
     p = Path(path)
 
     if (isinstance(lines, list) and lines and isinstance(lines[0], Line)) or p.suffix.lower() == '.csv':
-        with open(p, 'w', encoding='utf-8', newline='') as f:
-            fieldnames = [
-                'original_text', 'text', 'tts_text', 'audio_duration',
-                'audio_similarity', 'audio_format',
-                'audio_transcribed_text', 'uid'
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
-            writer.writeheader()
+        # Sortowanie po UID dla zachowania spójności pliku
+        if isinstance(lines, list) and lines and isinstance(lines[0], Line):
+            lines = sorted(lines, key=lambda l: str(l.uid))
 
-            saved_count = 0
-            for item in lines:
-                if isinstance(item, Line):
-                    text_value, tts_value = _normalize_text_fields(item)
-                    row_dict = {
-                        'original_text': item.original_text,
-                        'text': text_value,
-                        'tts_text': tts_value,
-                        'audio_duration': item.audio_duration,
-                        'audio_similarity': item.audio_similarity,
-                        'audio_format': item.audio_format,
-                        'audio_transcribed_text': getattr(item, 'audio_transcribed_text', ''),
-                        'uid': _cleanup_uid_field(getattr(item, 'uid', ''))
-                    }
-                    if not row_dict['uid']:
-                        # Jeśli brak UID, używamy UUID jako absolutny fallback, 
-                        # ale w normalnym cyklu pracy UID powinno być już nadane.
-                        row_dict['uid'] = uuid.uuid4().hex[:8]
-                    writer.writerow(row_dict)
-                    saved_count += 1
-                else:
-                    writer.writerow({'original_text': item, 'text': item, 'tts_text': item})
-
-            print(f"[SAVE_CSV] Zapisano {saved_count} linii")
-    else:
-        with open(p, 'w', encoding='utf-8') as f:
-            if isinstance(lines, list) and lines and isinstance(lines[0], Line):
-                f.write('\n'.join([l.text for l in lines]))
-            else:
-                f.write('\n'.join(lines))
-
-
-def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
-    """Aktualizuje pojedyncza linie w pliku CSV z danymi audio.
-    Jeśli oryginalny plik to TXT, sprawdza czy już istnieje plik CSV (nie tworzy automatycznie).
-    """
-    p = Path(csv_path)
-
-    # Jeśli to TXT - sprawdź czy obok nie istnieje już CSV
-    if p.suffix.lower() == '.txt':
-        csv_candidate = p.with_suffix('.csv')
-        if csv_candidate.exists():
-            csv_path = str(csv_candidate)
-            p = Path(csv_path)
-        else:
-            # Jeśli CSV nie istnieje, nie robimy nic
-            print(f"[INFO] TXT plik bez skojarzonego CSV: {csv_path}, uwaga audio metadata nie będą persystentne")
-            return
-
-    if p.suffix.lower() != '.csv':
-        print(f"[WARNING] Plik nie jest CSV: {csv_path}, przerwanie zapisu audio danych")
-        return
-
-    try:
-        all_lines: List[Line] = []
+        temp_path = p.with_suffix(p.suffix + ".tmp")
         try:
-            with open(p, 'r', encoding='utf-8', newline='') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    try:
-                        raw_dur = row.get('audio_duration') or row.get('duration') or 0
-                        if isinstance(raw_dur, str):
-                            raw_dur = raw_dur.replace(',', '.')
-                        dur = float(raw_dur or 0)
-                    except Exception:
-                        dur = 0.0
-                    uid = _cleanup_uid_field(row.get('uid')) or uuid.uuid4().hex[:8]
-                    all_lines.append(Line(
-                        original_text=row.get('original_text', '') or '',
-                        text=row.get('text', '') or '',
-                        tts_text=row.get('tts_text', '') or '',
-                        audio_duration=dur,
-                        audio_filename=row.get('audio_filename', '') or '',
-                        audio_similarity=(lambda v: float(v.replace(',', '.')) if isinstance(v, str) and v else float(v) if v not in (None, '') else 0.0)(row.get('audio_similarity') or row.get('similarity') or 0),
-                        audio_format=row.get('audio_format', '') or row.get('ext', '') or '',
-                        audio_transcribed_text=row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or '',
-                        uid=uid
-                    ))
-        except UnicodeDecodeError:
-            with open(p, 'r', encoding='latin-1', newline='') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    try:
-                        raw_dur = row.get('audio_duration') or row.get('duration') or 0
-                        if isinstance(raw_dur, str):
-                            raw_dur = raw_dur.replace(',', '.')
-                        dur = float(raw_dur or 0)
-                    except Exception:
-                        dur = 0.0
-                    uid = _cleanup_uid_field(row.get('uid')) or uuid.uuid4().hex[:8]
-                    all_lines.append(Line(
-                        original_text=row.get('original_text', '') or '',
-                        text=row.get('text', '') or '',
-                        tts_text=row.get('tts_text', '') or '',
-                        audio_duration=dur,
-                        audio_filename=row.get('audio_filename', '') or '',
-                        audio_similarity=(lambda v: float(v.replace(',', '.')) if isinstance(v, str) and v else float(v) if v not in (None, '') else 0.0)(row.get('audio_similarity') or row.get('similarity') or 0),
-                        audio_format=row.get('audio_format', '') or row.get('ext', '') or '',
-                        audio_transcribed_text=row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or '',
-                        uid=uid
-                    ))
+            with open(temp_path, 'w', encoding='utf-8', newline='') as f:
+                fieldnames = [
+                    'original_text', 'text', 'tts_text', 'audio_duration',
+                    'audio_similarity', 'audio_format', 'audio_filename',
+                    'audio_transcribed_text', 'audio_hallucination', 'uid'
+                ]
+                writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+                writer.writeheader()
 
-        if 0 <= line_index < len(all_lines):
-            all_lines[line_index] = line
+                saved_count = 0
+                rows_for_cache = []
+                for item in lines:
+                    if isinstance(item, Line):
+                        text_value, tts_value = _normalize_text_fields(item)
+                        row_dict = {
+                            'original_text': item.original_text,
+                            'text': text_value,
+                            'tts_text': tts_value,
+                            'audio_duration': item.audio_duration,
+                            'audio_similarity': item.audio_similarity,
+                            'audio_format': item.audio_format,
+                            'audio_filename': item.audio_filename, 
+                            'audio_transcribed_text': item.audio_transcribed_text,
+                            'audio_hallucination': item.audio_hallucination,
+                            'uid': _cleanup_uid_field(item.uid)  
+                        }
+                        if not row_dict['uid']:
+                            row_dict['uid'] = uuid.uuid4().hex[:8]
+                        writer.writerow(row_dict)
+                        rows_for_cache.append(row_dict)
+                        saved_count += 1
+                    else:
+                        writer.writerow({'original_text': item, 'text': item, 'tts_text': item})
 
-        with open(p, 'w', encoding='utf-8', newline='') as f:
-            fieldnames = [
-                'original_text', 'text', 'tts_text', 'audio_duration',
-                'audio_similarity', 'audio_format',
-                'audio_transcribed_text', 'uid'
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
-            writer.writeheader()
-            for idx, item in enumerate(all_lines):
-                text_value, tts_value = _normalize_text_fields(item)
-                row_dict = {
-                    'original_text': item.original_text,
-                    'text': text_value,
-                    'tts_text': tts_value,
-                    'audio_duration': item.audio_duration,
-                    'audio_similarity': item.audio_similarity,
-                    'audio_format': item.audio_format,
-                    'audio_transcribed_text': getattr(item, 'audio_transcribed_text', ''),
-                    'uid': _cleanup_uid_field(getattr(item, 'uid', '')) or uuid.uuid4().hex[:8]
-                }
-                writer.writerow(row_dict)
+            # Atomowa zamiana plików
+            temp_path.replace(p)
+            
+            # Aktualizacja cache
+            _csv_cache_data = rows_for_cache
+            _csv_cache_path = str(p)
+            _csv_cache_mtime = p.stat().st_mtime
+            
+            print(f"[SAVE_CSV] Zapisano {saved_count} linii (posortowano po UID)")
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
+    else:
+        temp_path = p.with_suffix(p.suffix + ".txt.tmp")
+        try:
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                if isinstance(lines, list) and lines and isinstance(lines[0], Line):
+                    f.write('\n'.join([l.text for l in lines]))
+                else:
+                    f.write('\n'.join(lines))
+            temp_path.replace(p)
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
+
+
+
+def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = None) -> int:
+    """
+    Aktualizuje wiersze w pliku CSV na podstawie UID (używa cache).
+    Jeśli UID istnieje - nadpisuje, jeśli nie - dodaje. Wynik jest sortowany po UID.
+    """
+    global _csv_cache_data, _csv_cache_mtime
+    path = _get_effective_csv_path(csv_path)
+    if not path:
+        return 0
+        
+    p = Path(path)
+    if not p.exists():
+        save_lines_to_file(str(p), lines_to_update)
+        return len(lines_to_update)
+
+    _ensure_csv_cache(str(p))
+    
+    updates_dict = {str(l.uid): l for l in lines_to_update}
+    updated_count = 0
+    new_cache = []
+    seen_uids = set()
+    
+    # 1. Aktualizacja istniejących w cache
+    for row in _csv_cache_data:
+        uid = row.get('uid', '')
+        if uid in updates_dict:
+            line = updates_dict[uid]
+            text_value, tts_value = _normalize_text_fields(line)
+            new_row = {
+                'original_text': line.original_text,
+                'text': text_value,
+                'tts_text': tts_value,
+                'audio_duration': line.audio_duration,
+                'audio_similarity': line.audio_similarity,
+                'audio_format': line.audio_format,
+                'audio_filename': line.audio_filename,
+                'audio_transcribed_text': line.audio_transcribed_text,
+                'audio_hallucination': line.audio_hallucination,
+                'uid': uid
+            }
+            new_cache.append(new_row)
+            seen_uids.add(uid)
+            updated_count += 1
+        else:
+            new_cache.append(row)
+            seen_uids.add(uid)
+
+    # 2. Dodanie nowych
+    for uid, line in updates_dict.items():
+        if uid not in seen_uids:
+            text_value, tts_value = _normalize_text_fields(line)
+            new_row = {
+                'original_text': line.original_text,
+                'text': text_value,
+                'tts_text': tts_value,
+                'audio_duration': line.audio_duration,
+                'audio_similarity': line.audio_similarity,
+                'audio_format': line.audio_format,
+                'audio_filename': line.audio_filename,
+                'audio_transcribed_text': line.audio_transcribed_text,
+                'audio_hallucination': line.audio_hallucination,
+                'uid': uid
+            }
+            new_cache.append(new_row)
+            updated_count += 1
+
+    # Sortowanie po UID dla zachowania spójności
+    new_cache.sort(key=lambda x: str(x.get('uid', '')))
+    
+    fieldnames = [
+        'original_text', 'text', 'tts_text', 'audio_duration',
+        'audio_similarity', 'audio_format', 'audio_filename',
+        'audio_transcribed_text', 'audio_hallucination', 'uid'
+    ]
+    
+    try:
+        temp_path = p.with_suffix(p.suffix + ".upd.tmp")
+        try:
+            with open(temp_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+                writer.writeheader()
+                writer.writerows(new_cache)
+            temp_path.replace(p)
+            
+            _csv_cache_data = new_cache
+            _csv_cache_mtime = p.stat().st_mtime
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
+                
+        return updated_count
     except Exception as e:
-        print(f"Blad aktualizacji linii w CSV: {e}")
+        print(f"[UPDATE_CSV_ERR] {e}")
+        return 0
+
+
+def update_line_in_csv(line: Line, csv_path: Optional[str] = None) -> bool:
+    """Aktualizuje pojedynczą linię w pliku CSV (alias dla update_lines_in_csv)."""
+    return update_lines_in_csv([line], csv_path) > 0

@@ -4,6 +4,7 @@ from tkinter import ttk
 import threading
 import time
 from pathlib import Path
+from dataclasses import asdict
 
 from audio.verification_manager import VerificationManager
 from app.tooltip import CreateToolTip
@@ -17,7 +18,7 @@ class VerificationWindow(ctk.CTkToplevel):
         self.master_app = master_app
         self.subtitle_panel = getattr(master_app, 'subtitle_panel', None)
         self.title('Weryfikacja audio')
-        self.geometry('420x160')
+        self.geometry('550x300')
         self.transient(master_app)
 
         self.force_refresh = tk.BooleanVar(value=False)
@@ -37,8 +38,6 @@ class VerificationWindow(ctk.CTkToplevel):
         self.start_btn.pack(side='left', padx=6)
         self.stop_btn = ctk.CTkButton(btn_frame, text='Stop', width=80, command=self._on_stop)
         self.stop_btn.pack(side='left', padx=6)
-        self.ignore_cb = ctk.CTkCheckBox(btn_frame, text='Ignoruj cache', variable=self.force_refresh)
-        self.ignore_cb.pack(side='left', padx=12)
 
         # Progress
         prog_frame = ctk.CTkFrame(frm)
@@ -49,23 +48,45 @@ class VerificationWindow(ctk.CTkToplevel):
         self.status_label = ctk.CTkLabel(frm, text='Status: idle')
         self.status_label.pack(anchor='w', padx=6)
 
-        # Options: verify duration and verify similarity
+        # Options: list of checkboxes
         opts_frame = ctk.CTkFrame(frm, fg_color='transparent')
-        opts_frame.pack(fill='x', padx=6, pady=(4,0))
+        opts_frame.pack(fill='x', padx=6, pady=(10,0))
 
+        # Row 0: Ignore cache
+        row_ignore = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row_ignore.pack(fill='x', pady=2)
+        self.ignore_cb = ctk.CTkCheckBox(row_ignore, text='Ignoruj cache (wymuś ponowną weryfikację)', variable=self.force_refresh)
+        self.ignore_cb.pack(side='left', padx=(0,8))
+
+        # Row 1: Duration
+        row1 = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row1.pack(fill='x', pady=2)
         self.verify_duration_var = tk.BooleanVar(value=True)
-        cb_dur = ctk.CTkCheckBox(opts_frame, text='Weryfikuj długość audio', variable=self.verify_duration_var)
+        cb_dur = ctk.CTkCheckBox(row1, text='Weryfikuj długość audio', variable=self.verify_duration_var)
         cb_dur.pack(side='left', padx=(0,8))
-        lbl_dur_i = ctk.CTkLabel(opts_frame, text='(i)')
+        lbl_dur_i = ctk.CTkLabel(row1, text='(i)', cursor='hand2')
         lbl_dur_i.pack(side='left')
         CreateToolTip(lbl_dur_i, text='Sprawdza długość pliku audio i oblicza CPS (znaki na sekundę).')
 
+        # Row 2: Similarity
+        row2 = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row2.pack(fill='x', pady=2)
         self.verify_similarity_var = tk.BooleanVar(value=False)
-        cb_sim = ctk.CTkCheckBox(opts_frame, text='Weryfikuj podobieństwo', variable=self.verify_similarity_var)
-        cb_sim.pack(side='left', padx=(12,8))
-        lbl_sim_i = ctk.CTkLabel(opts_frame, text='(i)')
+        cb_sim = ctk.CTkCheckBox(row2, text='Weryfikuj podobieństwo', variable=self.verify_similarity_var)
+        cb_sim.pack(side='left', padx=(0,8))
+        lbl_sim_i = ctk.CTkLabel(row2, text='(i)', cursor='hand2')
         lbl_sim_i.pack(side='left')
         CreateToolTip(lbl_sim_i, text='Uruchamia rozpoznawanie mowy (Whisper) i porównanie tekstu. Proces jest powolny.')
+
+        # Row 3: Hallucination
+        row3 = ctk.CTkFrame(opts_frame, fg_color='transparent')
+        row3.pack(fill='x', pady=2)
+        self.verify_hallucination_var = tk.BooleanVar(value=True)
+        cb_hal = ctk.CTkCheckBox(row3, text='Weryfikuj halucynacje', variable=self.verify_hallucination_var)
+        cb_hal.pack(side='left', padx=(0,8))
+        lbl_hal_i = ctk.CTkLabel(row3, text='(i)', cursor='hand2')
+        lbl_hal_i.pack(side='left')
+        CreateToolTip(lbl_hal_i, text='Wykrywa ciszę lub zawieszenia modelu TTS (wymaga ffmpeg).')
 
     def _on_start(self):
         if not self.subtitle_panel:
@@ -79,159 +100,79 @@ class VerificationWindow(ctk.CTkToplevel):
                 panel.ver_stop_event.clear()
                 force = self.force_refresh.get()
 
-                if force:
-                    panel.ver_analysis_results = []
-                    panel.ver_processed_indices = set()
-                    panel.ver_cache = {}
-
                 lines = getattr(self.master_app, 'lines', [])
                 total = len(lines)
-                panel.ver_analysis_results = [{} for _ in range(total)]
                 
-                # Diagnostyka: sprawdź ile linii ma audio_transcribed_text
+                # Diagnostyka
                 with_transcribed = sum(1 for line in lines if getattr(line, 'audio_transcribed_text', ''))
-                with_filename = sum(1 for line in lines if getattr(line, 'audio_filename', ''))
-                with_similarity = sum(1 for line in lines if getattr(line, 'audio_similarity', 0))
-                print(f"[DIAGNOSTICS] Linie wczytane: {total}, z transkrypcją: {with_transcribed}, z audio: {with_filename}, z similarity: {with_similarity}")
+                print(f"[VERIFY_START] Linie: {total}, z transkrypcją: {with_transcribed}")
                 
-                # Pokaż pierwsze 3 linie z ich danymi
-                for idx in range(min(3, total)):
-                    line = lines[idx]
-                    print(f"[SAMPLE] Linia {idx+1}: audio_filename={repr(getattr(line, 'audio_filename', ''))}, audio_transcribed_text={repr(getattr(line, 'audio_transcribed_text', '')[:50])}, audio_similarity={getattr(line, 'audio_similarity', 0)}")
-
-                # Counter for UI refresh throttling (update every 20 files)
+                # Counter for UI refresh throttling
+                self._processed_count = 0
                 update_counter = 0
-                update_interval = 20
+                update_interval = 10
+                
+                modified_buffer = []
 
                 for i, line in enumerate(lines):
                     if panel.ver_stop_event.is_set():
                         break
-
-                    # If not forcing refresh and line already has audio_filename or transcribed text, skip verification
-                    force = self.force_refresh.get()
-                    has_audio_filename = getattr(line, 'audio_filename', '')
-                    has_transcribed_text = getattr(line, 'audio_transcribed_text', '')
-                    has_audio_duration = getattr(line, 'audio_duration', 0)
-                    has_audio_similarity = getattr(line, 'audio_similarity', 0)
                     
-                    print(f"[CHECK] Linia {i+1}: filename={repr(has_audio_filename)}, transcribed={repr(has_transcribed_text[:30] if has_transcribed_text else '')}, duration={has_audio_duration}, similarity={has_audio_similarity}, force={force}")
-                    
-                    # Flaga czy linia została zmodyfikowana (do zapisania do CSV)
-                    line_was_modified = False
-                    
-                    # Jeśli już ma transkrybowany tekst, całkowite pominięcie
-                    if not force and has_transcribed_text:
-                        print(f"[SKIP_FULL] Linia {i+1}: już zweryfikowana (audio_transcribed_text={repr(has_transcribed_text[:50])})")
-                        # Szybkie pominięcie - tylko skopiuj dane z Line
-                        res = {
-                            'id': i + 1,
-                            'text': line.tts_text or '',
-                            'duration': float(getattr(line, 'audio_duration', 0) or 0.0),
-                            'raw_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
-                            'path': str(Path(getattr(self.master_app, 'audio_dir', Path('.'))) / has_audio_filename) if has_audio_filename else None,
-                            'ext': getattr(line, 'audio_format', '') or (Path(has_audio_filename).suffix.lstrip('.') if has_audio_filename else ''),
-                            'display_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
-                            'similarity': getattr(line, 'audio_similarity', 0.0),
-                            'transcribed_text': has_transcribed_text
-                        }
-                        # Nie zapisuj do CSV bo nic się nie zmieniło
-                        line_was_modified = False
-                    # Jeśli ma audio_filename ale brak transkrypcji, i similarity jest włączony - pominąć verify_line, ale zweryfikować similarity
-                    elif not force and has_audio_filename and not has_transcribed_text and self.verify_similarity_var.get():
-                        print(f"[SKIP_VERIFY_LINE] Linia {i+1}: ma audio, weryfikuję tylko similarity")
-                        # Pominąć verify_line ale bezpośrednio przejść do apply_similarity_to_line
-                        path_obj = get_primary_audio_path(line.uid)
-                        res = {
-                            'id': i + 1,
-                            'text': line.tts_text or '',
-                            'duration': float(getattr(line, 'audio_duration', 0) or 0.0),
-                            'raw_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
-                            'path': str(path_obj) if path_obj else None,
-                            'ext': (path_obj.suffix.lstrip('.') if path_obj else '') or getattr(line, 'audio_format', ''),
-                            'display_status': 'OK' if getattr(line, 'audio_duration', 0) else 'MISSING',
-                            'similarity': 0.0,
-                            'transcribed_text': ''
-                        }
-                        # Będzie modyfikowana przez apply_similarity_to_line
-                        line_was_modified = True
-                    # Pełna weryfikacja
-                    else:
-                        print(f"[VERIFY] Linia {i+1}: weryfikuję verify_line")
-                        # perform verification (respect verify duration option)
-                        res = VerificationManager.verify_line(
-                            line=line,
-                            audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
-                            ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
-                            ignore_short=False,
-                            verify_duration=self.verify_duration_var.get()
-                        )
-                        res['id'] = i + 1
-                        line_was_modified = True
+                    # ... (reszta pętli)
+                    line_obj, modified = VerificationManager.verify_line(
+                        line=line,
+                        ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
+                        verify_duration=self.verify_duration_var.get(),
+                        verify_hallucination=self.verify_hallucination_var.get(),
+                        verify_similarity=self.verify_similarity_var.get(),
+                        force_refresh=self.force_refresh.get()
+                    )
+                    self._processed_count += 1
 
-                    # if OK and similarity enabled, attempt similarity (may be slow)
-                    # NIE rób similarity jeśli już ma transkrybowany tekst!
-                    if self.verify_similarity_var.get() and res.get('path') and res.get('raw_status') == 'OK' and not has_transcribed_text:
-                        try:
-                            line = VerificationManager.apply_similarity_to_line(line, res.get('path'))
-                            res['similarity'] = getattr(line, 'audio_similarity', 0.0)
-                            res['transcribed_text'] = getattr(line, 'audio_transcribed_text', '')
-                            print(f"[DEBUG] Line {i+1}: transcribed_text = {repr(res['transcribed_text'])}, line.audio_transcribed_text = {repr(getattr(line, 'audio_transcribed_text', ''))}")
-                        except Exception as e:
-                            print(f"[ERROR] apply_similarity_to_line failed for line {i+1}: {e}")
-                            res['similarity'] = 0.0
-                            res['transcribed_text'] = ''
+                    if modified:
+                        modified_buffer.append(line_obj)
+                        
+                        # Zapisuj co 100 zmodyfikowanych linii lub na końcu
+                        if len(modified_buffer) >= 100:
+                            try:
+                                from app.io import update_lines_in_csv
+                                update_lines_in_csv(modified_buffer)
+                                modified_buffer = []
+                            except Exception as e:
+                                print(f"[VERIFY_SAVE_ERROR] {e}")
 
-                    # store result and mark processed
-                    # update Line fields so they persist to main CSV
-                    if res.get('duration') is not None:
-                        line.audio_duration = round(float(res.get('duration')) * 1000, 3) / 1000
-                    if res.get('path'):
-                        line.audio_filename = Path(res.get('path')).name
-                    line.audio_format = res.get('ext', '') or ''
-                    line.audio_status = res.get('display_status') or res.get('raw_status') or ''
-                    
-                    # Update similarity and transcribed text from Line object
-                    if hasattr(line, 'audio_similarity'):
-                        res['similarity'] = line.audio_similarity
-                    if hasattr(line, 'audio_transcribed_text'):
-                        res['transcribed_text'] = line.audio_transcribed_text
-
-                    panel.ver_analysis_results[i] = res
-                    panel.ver_processed_indices.add(i)
-
-                    # Persist single-line changes to the original CSV (if loaded) - TYLKO jeśli linia była modyfikowana
-                    if line_was_modified:
-                        try:
-                            lp = getattr(self.master_app, 'loaded_path', None)
-                            if lp:
-                                update_line_in_csv(str(lp), i, line)
-                        except Exception as e:
-                            print(f"[WARNING] Failed to update CSV at line {i}: {e}")
-
-                    # Update UI every 20 files to reduce rapid status updates
+                    # Refresh UI periodically
                     update_counter += 1
                     if update_counter >= update_interval:
                         update_counter = 0
-                        # Force a UI update by calling _poll
                         try:
                             self.master_app.after(0, self._poll)
                         except Exception:
                             pass
 
-                # Podsumowanie weryfikacji
-                num_skipped = len(panel.ver_analysis_results) - len(panel.ver_processed_indices)
-                num_verified = len(panel.ver_processed_indices)
-                print(f"\n[SUMMARY] Weryfikacja zakończona: {num_verified} zweryfikowanych, {num_skipped} pominiętych (razem: {total})")
-                
-                panel.ver_running = False
+                # Zapisz pozostałe zmodyfikowane linie
+                if modified_buffer:
+                    try:
+                        from app.io import update_lines_in_csv
+                        update_lines_in_csv(modified_buffer)
+                    except Exception as e:
+                        print(f"[VERIFY_SAVE_FINAL_ERROR] {e}")
 
-                # results persisted per-line into the original CSV during processing
-            except Exception:
+                print(f"[VERIFY_DONE] Zweryfikowano: {self._processed_count} / {total}")
+                panel.ver_running = False
+                
+                # Final refresh
+                self.master_app.after(0, self.subtitle_panel.set_preview, self.master_app.lines)
+
+            except Exception as e:
+                print(f"[VERIFY_ERROR] {e}")
                 try:
+                    panel = self.subtitle_panel
                     panel.ver_running = False
                 except Exception:
                     pass
 
+        self._processed_count = 0
         threading.Thread(target=run_verification, daemon=True).start()
         self._running = True
         self._start_poll()
@@ -263,8 +204,8 @@ class VerificationWindow(ctk.CTkToplevel):
 
     def _poll(self):
         try:
-            total = len(getattr(self.subtitle_panel, 'ver_analysis_results', []))
-            processed = len(getattr(self.subtitle_panel, 'ver_processed_indices', set()))
+            total = len(getattr(self.master_app, 'lines', []))
+            processed = getattr(self, '_processed_count', 0)
             running = getattr(self.subtitle_panel, 'ver_running', False)
             pct = 0.0
             if total > 0:

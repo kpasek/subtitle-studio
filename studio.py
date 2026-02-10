@@ -23,7 +23,7 @@ from app.subtitles import SubtitlePanel
 from ui.menu import AppMenu
 
 # Refaktoryzacja IO -> app.io
-from app.io import load_subtitle_file, save_lines_to_file
+from app.io import load_subtitle_file, save_lines_to_file, set_project_path_provider
 from app.patterns import (apply_patterns as patterns_apply, BUILTIN_REMOVE, BUILTIN_REPLACE, 
                           apply_processing, _finalize_processing, open_pattern_manager,
                           open_add_remove_pattern, open_add_replace_pattern, open_edit_pattern,
@@ -89,6 +89,9 @@ class SubtitleStudioApp(ctk.CTk):
 
     def __init__(self):
         super().__init__(className="SubtitleStudio")
+        
+        set_project_path_provider(lambda: str(self.loaded_path) if self.loaded_path else None)
+
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.has_unsaved_changes = False
         self.global_config = {}
@@ -104,24 +107,20 @@ class SubtitleStudioApp(ctk.CTk):
         _load_app_config(self)
 
         self.loaded_path: Optional[Path] = None
-
         self.lines: LineList = []
 
-        # Zmienne GUI i Cache (inicjalizacja)
         self.lbl_filename: Optional[ctk.CTkLabel] = None
         self._cache_clean_base: List[str] | None = None
         self._last_remove_signature = None
         self._cache_replace_result: List[str] | None = None
         self._last_replace_signature = None
 
-        # Edycje
         self.manual_edits: dict[int, str] = {}
         self.tts_edits: dict[int, str] = {}
 
         last_view = self.global_config.get('last_view_mode', 'Napisy')
         self.view_mode = tk.StringVar(value=last_view)
 
-        # Wzorce builtin
         self.builtin_remove = [PatternItem(
             p.pattern, p.replace, p.case_sensitive, name) for p, name in BUILTIN_REMOVE]
         self.builtin_replace = [PatternItem(
@@ -151,23 +150,18 @@ class SubtitleStudioApp(ctk.CTk):
 
         self.apply_theme_settings()
 
-        # Inicjalizacja Menu
         AppMenu(self).create()
 
         self._create_widgets()
         self.check_queue()
-
         self._bind_shortcuts()
 
         threading.Thread(target=lambda: check_for_updates(self), daemon=True).start()
                 
-        # Sprawdzamy, czy w konfiguracji jest zapisany ostatni projekt i czy plik istnieje
         last_proj = self.global_config.get('last_project')
         if last_proj and os.path.exists(last_proj):
-            # Używamy 'after', aby pozwolić GUI na pełną inicjalizację przed wczytaniem ciężkiego projektu
             self.after(200, lambda: open_project(self, last_proj))
         else:
-            # Jeśli nie wczytujemy projektu, upewnijmy się, że widok jest zainicjalizowany pusty
             self.after(100, lambda: self.subtitle_panel._on_filter_apply())
 
     def _bind_shortcuts(self):

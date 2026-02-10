@@ -78,7 +78,6 @@ class SettingsWindow(ctk.CTkToplevel):
     def _create_global_tab(self, frame: ctk.CTkScrollableFrame):
         """Populates the 'Global' settings tab."""
 
-        # Sekcja 1: Ustawienia Główne Aplikacji
         ctk.CTkLabel(frame, text="Ustawienia Główne", font=("", 16, "bold")).grid(
             row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 5))
         frame_main = ctk.CTkFrame(frame)
@@ -104,7 +103,6 @@ class SettingsWindow(ctk.CTkToplevel):
             cpu_count = "?"
             default_workers = 4
 
-        # Read verification_workers with fallback to conversion_workers for compatibility
         self.verification_workers_var = tk.StringVar(
             value=self.master.global_config.get('verification_workers', self.master.global_config.get('conversion_workers', default_workers)))
         entry_workers = ctk.CTkEntry(
@@ -115,19 +113,15 @@ class SettingsWindow(ctk.CTkToplevel):
             entry_workers,
             f"Liczba procesów do weryfikacji audio (max: {cpu_count}). Więcej = szybciej, ale większe użycie CPU.",
             wraplength=300)
-        # *** Koniec nowej sekcji ***
 
-        # Sekcja 2: Modele TTS
         ctk.CTkLabel(frame, text="Modele TTS", font=("", 16, "bold")).grid(
             row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(15, 5))
         tts_tabview = ctk.CTkTabview(frame)
         tts_tabview.grid(row=3, column=0, columnspan=3,
                          sticky="ew", padx=10, pady=5)
 
-        # Zakładka XTTS
-        tab_xtts = tts_tabview.add("Local TTS (API)")  # Zmieniono nazwę
+        tab_xtts = tts_tabview.add("Local TTS (API)")
         tab_xtts.grid_columnconfigure(1, weight=1)
-        # --- NOWE POLE: XTTS API URL ---
         ctk.CTkLabel(tab_xtts, text="URL serwera API:").grid(
             row=0, column=0, sticky="w", padx=10, pady=(10, 5))
         self.local_api_url_var = tk.StringVar(value=self.master.global_config.get(
@@ -138,7 +132,6 @@ class SettingsWindow(ctk.CTkToplevel):
                             sticky="ew", padx=10, pady=(10, 5))
         CreateToolTip(
             entry_xtts_url, "Adres URL działającego serwera XTTS API.", wraplength=300)
-        # --- Koniec nowego pola ---
         ctk.CTkLabel(tab_xtts, text="Ścieżka głosu XTTS (.wav):").grid(
             row=1, column=0, sticky="w", padx=10, pady=(5, 10))
         self.xtts_voice_path_var = tk.StringVar(
@@ -151,9 +144,7 @@ class SettingsWindow(ctk.CTkToplevel):
             row=1, column=2, sticky="e", padx=10, pady=(5, 10))
         CreateToolTip(
             entry_voice, "Ścieżka do pliku .wav używanego przez XTTS API (jeśli wymagane).", wraplength=300)
-        # Usunięto wyłączanie zakładki - teraz zawsze widoczna
 
-        # Zakładka ElevenLabs
         tab_eleven = tts_tabview.add("ElevenLabs")
         tab_eleven.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(tab_eleven, text="Klucz API:").grid(
@@ -173,7 +164,6 @@ class SettingsWindow(ctk.CTkToplevel):
         CreateToolTip(
             entry_el_voice, "ID głosu z konta ElevenLabs.", wraplength=300)
 
-        # Zakładka Google Cloud TTS
         tab_google = tts_tabview.add("Google Cloud TTS")
         tab_google.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(tab_google, text="Credentials (.json):").grid(
@@ -194,7 +184,6 @@ class SettingsWindow(ctk.CTkToplevel):
                              padx=10, pady=(5, 10))
         CreateToolTip(entry_gcp_voice, "Np. pl-PL-Wavenet-B", wraplength=300)
 
-        # Zakładka Piper
         tab_piper = tts_tabview.add("Piper")
         tab_piper.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(tab_piper, text="Ścieżka modelu Piper (.onnx):").grid(
@@ -215,7 +204,6 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(theme_frame, text="Motyw aplikacji:",
                      font=("", 14, "bold")).pack(anchor="w", padx=10, pady=(5, 0))
 
-        # 3.1. Wygląd
         ctk.CTkLabel(theme_frame, text="Wygląd (Jasny/Ciemny/System):").pack(
             anchor="w", padx=10, pady=(5, 0))
         self.appearance_mode_var = ctk.StringVar(
@@ -223,7 +211,6 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkOptionMenu(theme_frame, values=["System", "Dark", "Light"],
                           variable=self.appearance_mode_var).pack(anchor="w", padx=10, pady=(0, 5))
 
-        # 3.2. Kolor
         ctk.CTkLabel(theme_frame, text="Paleta kolorów:").pack(
             anchor="w", padx=10, pady=(5, 0))
         self.color_theme_var = ctk.StringVar(
@@ -246,13 +233,13 @@ class SettingsWindow(ctk.CTkToplevel):
         format_menu.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=(0, 10))
         CreateToolTip(format_menu, "Format docelowy plików w folderze /ready.", wraplength=300)
 
-        # Sekcja 4: Filtry FFmpeg
         ctk.CTkLabel(frame, text="Filtry Audio (FFmpeg)", font=("", 16, "bold")).grid(
             row=5, column=0, columnspan=3, sticky="w", padx=10, pady=(20, 5))
         self.filters_frame = ctk.CTkFrame(frame)
         self.filters_frame.grid(
             row=6, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
         self.filters_frame.grid_columnconfigure(1, weight=1)
+
 
         self.filter_vars = {}
         current_row = 0
@@ -413,9 +400,9 @@ class SettingsWindow(ctk.CTkToplevel):
                 'appearance_mode': self.appearance_mode_var.get(),
                 'color_theme': self.color_theme_var.get()
             }
-            # *** Koniec zmiany ***
 
             self.master.save_global_config(global_data)
+
             self.master.apply_theme_settings()
 
             # Reset cached model if voice/API keys changed

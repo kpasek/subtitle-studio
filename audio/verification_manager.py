@@ -9,6 +9,8 @@ import multiprocessing
 import subprocess
 import csv
 import warnings
+import shutil
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List, Dict, Any, Tuple
@@ -40,12 +42,14 @@ except ImportError:
 class VerificationJob:
     project_path: str
     audio_dir: str
-    lines_texts: List[str]
+    lines: List[Line]
     line_uids: List[str]
     force_refresh: bool
     ignore_short: bool
     ffprobe: Optional[str]
     workers: int
+    verify_hallucination: bool = False
+    verify_similarity: bool = False
     apply_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
 
@@ -76,113 +80,172 @@ class VerificationManager:
     @staticmethod
     def verify_line(
         line: Line, 
-        audio_dir: str, 
         ffprobe_path: Optional[str] = None, 
-        ignore_short: bool = False, 
-        verify_duration: bool = True
-    ) -> Dict[str, Any]:
+        verify_duration: bool = True,
+        verify_hallucination: bool = True,
+        verify_similarity: bool = False,
+        force_refresh: bool = False
+    ) -> Tuple[Line, bool]:
         """
-        Weryfikuje pojedynczą linię audio (istnienie pliku, czas trwania, CPS, transkrypcja).
-        
-        Args:
-            line: Obiekt Line do weryfikacji.
-            audio_dir: Ścieżka do katalogu wygenerowanego audio (root/generated).
-            ffprobe_path: Opcjonalna ścieżka do ffprobe.
-            ignore_short: Czy ignorować błędy CPS dla bardzo krótkich tekstów.
-            verify_duration: Czy wykonywać pomiar czasu (wymaga ffprobe).
-            
-        Returns:
-            Dict[str, Any]: Wyniki weryfikacji w formie słownika zgodnego z GUI.
+        Weryfikuje pojedynczą linię audio i aktualizuje obiekt Line.
+        Zwraca (Line, czy_zmodyfikowano).
         """
-        audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
+        # Zapamiętujemy stan przed (uproszczony snapshot)
+        old_state = (
+            line.audio_duration,
+            line.audio_status,
+            line.audio_similarity,
+            line.audio_transcribed_text,
+            line.audio_hallucination,
+            line.audio_filename
+        )
+
         uid = line.uid
         text = line.get_tts_text().strip()
         
-        # Inicjalizacja wyniku (id to numer porządkowy dla GUI oparty na uid lub line_id jeśli numeryczne)
-        # UWAGA: GUI w subtitles.py używa int(k), gdzie k to klucz z rezultatu workera (str(i+1)).
-        # Zostawiamy 'id' w słowniku, ale pobieramy go z line.uid jeśli jest numerem, lub opcjonalnie.
-        # W nowym systemie UID = numer linii (1, 2, 3...) podczas importu.
-        
-        try:
-            display_id = int(uid)
-        except (ValueError, TypeError):
-            display_id = 0 # fallback
-            
-        entry = {
-            'id': display_id,
-            'text': text,
-            'duration': 0.0,
-            'cps': 0.0,
-            'raw_status': 'PENDING',
-            'path': None,
-            'ext': '',
-            'display_status': 'PENDING'
-        }
-        
         if not text:
-            entry.update({'raw_status': 'EMPTY', 'display_status': 'EMPTY'})
-            return entry
+            line.audio_status = 'EMPTY'
+            # Sprawdzamy czy faktycznie coś się zmieniło
+            modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+            return line, modified
         
-        # Szukanie pliku - na podstawie UID
-        audio_file, ext = VerificationManager._find_audio_for_uid(audio_dir_p, uid)
+        # Szukanie pliku
+        audio_file = None
+        ext = ""
+        
+        # Optymalizacja: jeśli mamy już nazwę pliku, sprawdź najpierw ją
+        if line.audio_filename:
+            from app.io import get_audio_dir
+            adir = get_audio_dir()
+            if adir:
+                potential = adir / line.audio_filename
+                if potential.exists():
+                    audio_file = potential
+                    ext = audio_file.suffix.lower().lstrip('.')
         
         if not audio_file:
-            entry.update({'raw_status': 'MISSING', 'display_status': 'MISSING'})
-            return entry
+            audio_file, ext = VerificationManager._find_audio_for_uid(uid)
+        
+        if not audio_file:
+            line.audio_status = 'MISSING'
+            line.audio_duration = 0.0
+            line.audio_filename = ''
+            modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+            return line, modified
             
-        entry.update({'path': str(audio_file), 'ext': ext})
+        line.audio_filename = audio_file.name
+        line.audio_format = ext
         
-        if not verify_duration:
-            entry.update({'raw_status': 'OK', 'display_status': 'OK'})
-            return entry
-            
-        # Pobieranie długości audio
-        duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
-        
-        if duration <= 0:
-            status = 'ERROR' if duration < 0 else 'EMPTY'
-            entry.update({'duration': duration, 'raw_status': status, 'display_status': status})
-            return entry
-            
-        entry['duration'] = duration
-        
-        # Obliczenie tempa (CPS) z uwzględnieniem pauz
-        stats = Counter(text.strip('.?!'))
-        pauses = (stats[','] + stats['-']) * 0.4 + (stats['.'] + stats['!'] + stats['?']) * 0.6
-        time_net = duration - pauses
-        
-        cps = len(text) / time_net if time_net > 0 else 0.0
-        entry['cps'] = cps
-        entry['raw_status'] = 'OK'
-        
-        # Status wizualny CPS
-        if ignore_short and len(text) < 5:
-            entry['display_status'] = 'SHORT'
-        else:
-            min_cps, max_cps = 7.0, 20.0
-            if cps < min_cps:
-                entry['display_status'] = f"ZA WOLNO (<{min_cps:.1f})"
-            elif cps > max_cps:
-                entry['display_status'] = f"ZA SZYBKO (>{max_cps:.1f})"
+        # Weryfikacja Długości
+        if verify_duration:
+            # Skip if already have duration and not forced
+            if not force_refresh and line.audio_duration > 0:
+                duration = line.audio_duration
+                # Ustaw status na OK jeśli był PENDING/MISSING ale plik jest
+                if line.audio_status in ['PENDING', 'MISSING']:
+                    line.audio_status = 'OK'
             else:
-                entry['display_status'] = 'OK'
+                duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
+                
+                if duration <= 0:
+                    status = 'ERROR' if duration < 0 else 'EMPTY'
+                    line.audio_duration = 0.0
+                    line.audio_status = status
+                    modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+                    return line, modified
+                line.audio_duration = round(duration, 3)
+                line.audio_status = 'OK'
+        else:
+            duration = line.audio_duration
+            if line.audio_status in ['PENDING', 'MISSING']:
+                line.audio_status = 'OK'
         
-        # Weryfikacja similarity i transkrypcji via Whisper
-        entry['similarity'] = 0.0
-        entry['transcribed_text'] = ''
+        # 1. Weryfikacja similarity i transkrypcji via Whisper
+        if verify_similarity:
+            if not force_refresh and line.audio_transcribed_text:
+                pass 
+            else:
+                try:
+                    sim_result = VerificationManager.verify_similarity(line, audio_file)
+                    if sim_result.get('success'):
+                        line.audio_similarity = sim_result.get('similarity', 0.0)
+                        line.audio_transcribed_text = sim_result.get('transcribed_text', '')
+                except Exception:
+                    pass
+
+        # 2. Wykrywanie halucynacji (cisza / brzęczenie)
+        if verify_hallucination:
+            # Skip if already verified (not PENDING and not empty) and not forced
+            # Empty string indicates it might be from an old version or not yet processed in the new system
+            if not force_refresh and line.audio_hallucination not in ["PENDING", ""]:
+                pass
+            else:
+                hallucinations = []
+
+
+                ffmpeg_path = None
+                if ffprobe_path:
+                     potential_ffmpeg = ffprobe_path.replace('ffprobe', 'ffmpeg')
+                     if os.path.exists(potential_ffmpeg):
+                         ffmpeg_path = potential_ffmpeg
+                
+                if not ffmpeg_path:
+                    ffmpeg_path = shutil.which('ffmpeg')
+                    
+                if ffmpeg_path:
+                    silences = VerificationManager.detect_silence(audio_file, ffmpeg_path)
+                    long_silences = [s for s in silences if s['duration'] > 0.7]
+                    if long_silences:
+                        hallucinations.append("CISZA")
+                
+                if line.audio_similarity > 0 and line.audio_similarity < 0.4:
+                    if duration > (len(text) / 4.0 + 3.0):
+                        hallucinations.append("HALU?")
+                
+                cps = line.calculate_cps()
+                if cps > 0 and cps < 4.0 and duration > 5.0:
+                    if "HALU?" not in hallucinations:
+                        hallucinations.append("BARDZO WOLNO")
+
+                line.audio_hallucination = ", ".join(hallucinations) if hallucinations else "Brak"
         
-        try:
-            sim_result = VerificationManager.verify_similarity(line, audio_file)
-            if sim_result.get('success'):
-                entry['similarity'] = sim_result.get('similarity', 0.0)
-                entry['transcribed_text'] = sim_result.get('transcribed_text', '')
-        except Exception:
-            pass
-        
-        return entry
+        modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+        return line, modified
 
     @staticmethod
-    def _find_audio_for_uid(audio_dir: Path, uid: str) -> Tuple[Optional[Path], str]:
+    def detect_silence(file_path: Path, ffmpeg_path: str) -> List[Dict[str, float]]:
+        """
+        Używa ffmpeg do wykrycia fragmentów ciszy.
+        """
+        try:
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            # silencedetect: n = noise threshold (-40dB), d = duration threshold (1s)
+            cmd = [ffmpeg_path, "-i", str(file_path), "-af", "silencedetect=n=-40dB:d=1", "-f", "null", "-"]
+            
+            res = subprocess.run(cmd, stderr=subprocess.PIPE, text=True, startupinfo=startupinfo, timeout=15)
+            output = res.stderr
+            
+            silences = []
+            starts = re.findall(r"silence_start: ([\d.]+)", output)
+            ends = re.findall(r"silence_end: ([\d.]+) \| silence_duration: ([\d.]+)", output)
+            
+            for i in range(min(len(starts), len(ends))):
+                silences.append({
+                    'start': float(starts[i]),
+                    'end': float(ends[i][0]),
+                    'duration': float(ends[i][1])
+                })
+            return silences
+        except Exception as e:
+            print(f"[DEBUG] detect_silence error: {e}")
+            return []
+
+    @staticmethod
+    def _find_audio_for_uid(uid: str) -> Tuple[Optional[Path], str]:
         """Pomocnicza metoda do znajdowania pliku audio po UID."""
         candidates = get_audio_candidates(uid)
         if candidates:
@@ -371,7 +434,6 @@ class VerificationManager:
         
         # Porównanie z oryginalnym tekstem
         try:
-            original_text = line.get_text().strip()
             tts_text = line.get_tts_text().strip()
             
             # Oczyszczenie tekstów - usunięcie znaków specjalnych, średniki, etc.
@@ -381,7 +443,7 @@ class VerificationManager:
                 text = re.sub(r'[^\w\s]', ' ', text, flags=re.UNICODE)
                 # Zamiana wielkich spacji na pojedynczą
                 text = re.sub(r'\s+', ' ', text)
-                return text.strip()
+                return text.strip().lower()
             
             cleaned_transcribed = clean_text(transcribed_text)
             cleaned_tts = clean_text(tts_text)
@@ -461,7 +523,7 @@ class VerificationManager:
             out_path = str(Path(tmpdir) / f"cps_worker_{uid}.{wi}.json")
             p = multiprocessing.Process(
                 target=_verification_process_entry,
-                args=(job.audio_dir, job.lines_texts, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers)
+                args=(job.audio_dir, job.lines, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, wi, workers, job.verify_hallucination, job.verify_similarity)
             )
             p.start()
             procs.append(p)
@@ -469,11 +531,12 @@ class VerificationManager:
 
         last_mtimes = {str(p): 0 for p in out_files}
 
-        # monitor outputs and call apply_callback with merged results
+        # monitor outputs and call apply_callback with delta results
+        # We send only NEW items to the callback to avoid re-processing and duplicates
         aggregated: Dict[str, Any] = {}
         while not self.cancel_event.is_set():
             any_alive = any(p.is_alive() for p in procs)
-            changed = False
+            delta: Dict[str, Any] = {}
             for outp in list(out_files):
                 pth = Path(outp)
                 if not pth.exists():
@@ -490,19 +553,20 @@ class VerificationManager:
                         data = json.load(f)
                 except Exception:
                     continue
-                # merge
+                
                 for k, v in data.items():
                     aggregated[k] = v
-                    changed = True
+                    delta[k] = v
 
-            if changed and job.apply_callback:
+            if delta and job.apply_callback:
                 try:
-                    job.apply_callback(aggregated.copy())
+                    job.apply_callback(delta)
                 except Exception:
                     pass
 
             if not any_alive:
                 break
+
 
             time.sleep(0.5)
 
@@ -546,7 +610,7 @@ class VerificationManager:
             if not results:
                 return False
             
-            fieldnames = ['id', 'text', 'duration', 'cps', 'raw_status', 'path', 'ext', 'display_status', 'similarity']
+            fieldnames = ['id', 'text', 'duration', 'cps', 'raw_status', 'path', 'ext', 'display_status', 'similarity', 'hallucination', 'transcribed_text']
             
             with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -562,50 +626,85 @@ class VerificationManager:
 
 
 # --- worker entry (updated to use verify_line static method) ---
-def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1):
+def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
     """
     Pracownik procesu do weryfikacji audio.
     Zapisuje wyniki do JSON.
     """
     import json
+    import os
     from pathlib import Path
     from app.entity import Line
+    from dataclasses import asdict
+    from app.io import set_audio_dir, get_audio_dir
     
-    results = {}
+    if audio_dir:
+        set_audio_dir(Path(audio_dir))
+    
+    batch = {}
+    adir = get_audio_dir()
+    modified_count = 0
+    processed_count = 0
     
     def write_atomic(dct):
+        if not dct:
+            return
         tmp = Path(out_file + '.tmp')
-        with open(tmp, 'w', encoding='utf-8') as tf:
-            json.dump(dct, tf, ensure_ascii=False)
-        tmp.replace(out_file)
-    
-    def _normalize_uid(uid: str) -> str:
-        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        return f"output1 ({uid})"
+        try:
+            with open(tmp, 'w', encoding='utf-8') as tf:
+                json.dump(dct, tf, ensure_ascii=False)
+            tmp.replace(out_file)
+            print(f"[DEBUG] Worker {worker_idx}: Zapisano batch z {len(dct)} wynikami do {out_file}")
+        except Exception:
+            pass
 
-    for i, text in enumerate(lines_texts):
+    for i, line in enumerate(lines):
         if total_workers and (i % total_workers) != worker_idx:
             continue
         
-        ident = str(i + 1)
-        uid = line_uids[i] if line_uids and i < len(line_uids) else ''
-        
-        # Tworzenie obiektu Line z poprawnym UID
-        line = Line(original_text=text, text=text, tts_text=text.strip(), uid=uid)
-        
-        # Weryfikacja linii (teraz z obiektem Line jako głównym źródłem danych)
-        result = VerificationManager.verify_line(
+        processed_count += 1
+
+        # Weryfikacja linii (zwraca czy zmodyfikowano)
+        _, modified = VerificationManager.verify_line(
             line=line,
-            audio_dir=audio_dir,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
-            ignore_short=ignore_short
+            verify_hallucination=verify_hallucination,
+            verify_similarity=verify_similarity,
+            verify_duration=True,
+            force_refresh=force_refresh
         )
         
-        # Nadpisujemy 'id' wynikiem 'i + 1', bo worker używa indeksu pętli 
-        # do komunikacji z GUI (które mapuje k-1 -> index)
-        result['id'] = i + 1
+        if modified:
+            modified_count += 1
+            
+        # Przygotowanie wyniku dla GUI
+        res = asdict(line)
+        res['id'] = i + 1
+        res['text'] = line.get_tts_text()
         
-        results[ident] = result
-        write_atomic(results)
+        # Ścieżka bezwzględna (bez ponownego szukania)
+        if line.audio_filename and adir:
+            res['path'] = str(adir / line.audio_filename)
+        else:
+            res['path'] = None
+        
+        # Kompatybilność wsteczna kluczy
+        res['duration'] = line.audio_duration
+        res['similarity'] = line.audio_similarity
+        res['transcribed_text'] = line.audio_transcribed_text
+        res['hallucination'] = line.audio_hallucination
+        res['display_status'] = line.audio_status
+        res['ext'] = line.audio_format
+        
+        ident = str(i + 1)
+        batch[ident] = res
+        
+        # Zapisujemy postęp cyklicznie (co 100 przetworzonych lub co 100 zmienionych wierszy)
+        if (modified and modified_count > 0 and modified_count % 100 == 0) or (processed_count % 100 == 0):
+            write_atomic(batch)
+            batch = {}
     
-    write_atomic(results)
+    # Finalny zapis pozostałości
+    if batch:
+        write_atomic(batch)
+
