@@ -341,17 +341,22 @@ class SubtitlePanel(ctk.CTkFrame):
             halo_val = line_obj.audio_hallucination
             status_val = line_obj.audio_status
             
-            has_halo = bool(halo_val and halo_val.lower() != "brak")
+            # Stan PENDING lub pusty oznacza, że linia nie była jeszcze weryfikowana
+            is_pending = halo_val in ["", "PENDING"]
+            has_halo = bool(halo_val and halo_val not in ["", "PENDING", "Brak"])
+
 
             if hal_f == 'Tylko halucynacje':
                 if not has_halo:
                     continue
             elif hal_f == 'Bez halucynacji':
-                if not status_val or has_halo:
+                # Pokazujemy tylko jeśli nie ma halucynacji I została już zweryfikowana (nie jest PENDING)
+                if is_pending or has_halo:
                     continue
             elif hal_f == 'Nieweryfikowane':
-                if status_val:
+                if not is_pending:
                     continue
+
 
             # Budowanie wartości dla wiersza zgodnie z self.columns_config
             row_values = []
@@ -379,12 +384,15 @@ class SubtitlePanel(ctk.CTkFrame):
                     sim_display = format_percent(sim_val)
                     row_values.append(sim_display if sim_display else '-')
                 if 'hallucination' in col_pos:
-                    if halo_val:
+                    if halo_val and halo_val != "PENDING":
                         row_values.append(halo_val)
+                    elif halo_val == "PENDING":
+                        row_values.append("?")
                     elif status_val:
                         row_values.append("Brak")
                     else:
                         row_values.append("-")
+
                 if 'format' in col_pos:
                     fmt = line_obj.audio_format
                     row_values.append((fmt or '').upper())

@@ -175,12 +175,14 @@ class VerificationManager:
 
         # 2. Wykrywanie halucynacji (cisza / brzęczenie)
         if verify_hallucination:
-            # Skip if already has result and not forced
-            already_has_hallu = line.audio_hallucination and line.audio_hallucination not in ["", "PENDING", "Brak"]
-            if not force_refresh and already_has_hallu:
+            # Skip if already verified (not PENDING and not empty) and not forced
+            # Empty string indicates it might be from an old version or not yet processed in the new system
+            if not force_refresh and line.audio_hallucination not in ["PENDING", ""]:
                 pass
             else:
                 hallucinations = []
+
+
                 ffmpeg_path = None
                 if ffprobe_path:
                      potential_ffmpeg = ffprobe_path.replace('ffprobe', 'ffmpeg')
@@ -205,7 +207,7 @@ class VerificationManager:
                     if "HALU?" not in hallucinations:
                         hallucinations.append("BARDZO WOLNO")
 
-                line.audio_hallucination = ", ".join(hallucinations) if hallucinations else ""
+                line.audio_hallucination = ", ".join(hallucinations) if hallucinations else "Brak"
         
         modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
         return line, modified
@@ -652,6 +654,7 @@ def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: li
             with open(tmp, 'w', encoding='utf-8') as tf:
                 json.dump(dct, tf, ensure_ascii=False)
             tmp.replace(out_file)
+            print(f"[DEBUG] Worker {worker_idx}: Zapisano batch z {len(dct)} wynikami do {out_file}")
         except Exception:
             pass
 

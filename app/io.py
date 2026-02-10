@@ -198,9 +198,10 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                 audio_similarity=float(row.get('audio_similarity') or 0.0),
                 audio_format=row.get('audio_format', '') or '',
                 audio_transcribed_text=transcribed,
-                audio_hallucination=row.get('audio_hallucination', '') or '',
+                audio_hallucination=row.get('audio_hallucination', 'PENDING'),
                 uid=uid
             ))
+
         return out
     
     if p.suffix.lower() == '.csv':
