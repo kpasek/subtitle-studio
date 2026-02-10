@@ -793,14 +793,13 @@ class SubtitlePanel(ctk.CTkFrame):
             if k == '__done':
                 continue
             
-            # Ignoruj wpisy niebędące słownikiem (np. lista błędów __errors) lub None
             if not isinstance(v, dict):
                 continue
                 
             batch_processed_count += 1
             
-            # Sprawdź czy to faktyczna aktualizacja
-            is_modified = v.get('__modified', True) # Domyślnie True dla kompatybilności
+            # Check if line was modified
+            is_modified = v.get('__modified', True)
             
             if not is_modified:
                 continue
@@ -808,8 +807,6 @@ class SubtitlePanel(ctk.CTkFrame):
             try:
                 line = None
                 uid = v.get('uid')
-                
-                # Bezpieczny dostęp do mapy (może być None jeśli w międzyczasie wyczyszczono)
                 uid_map = getattr(self, 'ver_uid_map', None)
                 
                 if uid and uid_map:
@@ -1270,28 +1267,18 @@ class SubtitlePanel(ctk.CTkFrame):
                  messagebox.showwarning("Weryfikacja", "Brak ustawionego katalogu audio.", parent=self)
                  return
 
-            # Jeśli weryfikacja już trwa, po prostu dodajemy zadanie do kolejki.
-            # Zmienna ver_running informuje, czy w ogóle coś się dzieje globalnie.
-            # Jeśli jest True, interfejs (pasek postępu) już działa (obliczony na inne zadanie),
-            # ale dodanie do kolejki jest bezpieczne.
-            
+            # Add to queue even if another verification is running
             was_running = self.ver_running
             self.ver_running = True
             
-            # Resetujemy licznik tylko jeśli nic nie działało, 
-            # w przeciwnym razie licznik będzie kontynuowany/zsumowany (co jest akceptowalne).
             if not was_running:
                 self.ver_processed_count = 0
                 self.ver_last_save_time = time.time()
                 self.ver_uid_map = {}
                 self.ver_uid_to_index_map = {}
             
-            # --- Odświeżenie/Uzupełnienie Mapowania UID ---
-            # Zawsze upewnij się, że mapa jest aktualna dla wszystkich linii,
-            # ponieważ nowe zadanie odwoła się do istniejących linii.
+            # Map UIDs for UI updates
             try:
-                # Jeśli mapa nie istnieje, stwórz ją.
-                # Jeśli istnieje, nadpisujemy ją nową iteracją (bezpieczne, bo app.lines to źródło prawdy)
                 new_uid_map = {l.uid: l for l in self.app.lines if hasattr(l, 'uid')}
                 new_uid_to_idx = {}
                 for i, l in enumerate(self.app.lines):
@@ -1299,7 +1286,6 @@ class SubtitlePanel(ctk.CTkFrame):
                     if uid:
                         new_uid_to_idx[uid] = i
                 
-                # Przypisz do zmiennych instancji
                 self.ver_uid_map = new_uid_map
                 self.ver_uid_to_index_map = new_uid_to_idx
                 
@@ -1309,9 +1295,9 @@ class SubtitlePanel(ctk.CTkFrame):
             if not was_running:
                 self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
             else:
-                 self.app.set_status(f"Dodano do kolejki weryfikacji ({len(self.selected_line_indices)} linii)...")
+                 self.app.set_status(f"Dodano do kolejki ({len(self.selected_line_indices)} linii)...")
 
-            # Przygotowanie podzbioru linii
+            # Prepare subset
             subset_lines = []
             subset_uids = []
             for idx in self.selected_line_indices:
@@ -1323,7 +1309,6 @@ class SubtitlePanel(ctk.CTkFrame):
 
             ffprobe = shutil.which('ffprobe')
             
-            # Callback wrapper
             def apply_cb(results: dict):
                 try:
                     self.after(0, lambda r=results: self._apply_verification_results(r))
@@ -1346,7 +1331,6 @@ class SubtitlePanel(ctk.CTkFrame):
                 apply_callback=apply_cb
             )
             
-            # Dodaj z wysokim priorytetem (0), aby wskoczyło przed inne oczekujące zadania (ale po obecnym)
             manager.add_job(job, priority=0)
             
         except Exception as e:

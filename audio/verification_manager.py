@@ -76,7 +76,7 @@ class VerificationManager:
         self.manager_thread: Optional[threading.Thread] = None
         self.cancel_event = threading.Event()
         self.worker: Optional[Worker] = None
-        self.counter = 0 # Counter for stable priority queue
+        self.counter = 0
 
     @classmethod
     def get_instance(cls) -> 'VerificationManager':
@@ -493,7 +493,6 @@ class VerificationManager:
     def _process_queue(self):
         while not self.job_queue.empty():
             try:
-                # Unpack tuple from PriorityQueue
                 _, _, job = self.job_queue.get()
                 
                 self.cancel_event.clear()
@@ -504,7 +503,6 @@ class VerificationManager:
 
     @staticmethod
     def _worker_verify_task(line: Line, index: int, ident: str, ffprobe_path: str, verify_hallucination: bool, verify_similarity: bool, force_refresh: bool, adir: Path):
-        """Metoda wykonywana przez workera."""
         _, modified = VerificationManager.verify_line(
             line=line,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
@@ -514,7 +512,7 @@ class VerificationManager:
             force_refresh=force_refresh
         )
         
-        # Przygotowanie wyniku
+        # Prepare result data
         res = asdict(line)
         res['id'] = index
         res['text'] = line.get_tts_text()
@@ -530,8 +528,6 @@ class VerificationManager:
         res['hallucination'] = line.audio_hallucination
         res['display_status'] = line.audio_status
         res['ext'] = line.audio_format
-        
-        # Dodajemy flagę modyfikacji dla UI
         res['__modified'] = modified
         res['uid'] = ident
         
@@ -540,7 +536,6 @@ class VerificationManager:
     def _run_verification_job(self, job: VerificationJob):
         num_workers = max(1, job.workers)
         
-        # Konfiguracja workera - zawsze restartujemy dla pewności (czyszczenie kontekstu)
         if self.worker:
             self.worker.stop(clear_queue=True)
             
@@ -559,12 +554,7 @@ class VerificationManager:
             if self.cancel_event.is_set():
                 break
                 
-            # Ustalanie identyfikatora zadania
-            # Jeśli przekazano line_uids użyj ich, w przeciwnym razie użyj indeksu
-            if i < len(uids_map):
-                task_ident = uids_map[i]
-            else:
-                task_ident = str(i + 1)
+            task_ident = uids_map[i] if i < len(uids_map) else str(i + 1)
                 
             def on_task_done(result):
                 ident, data, modified = result
