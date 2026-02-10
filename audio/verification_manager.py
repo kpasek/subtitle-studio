@@ -83,7 +83,8 @@ class VerificationManager:
         ffprobe_path: Optional[str] = None, 
         verify_duration: bool = True,
         verify_hallucination: bool = True,
-        verify_similarity: bool = False
+        verify_similarity: bool = False,
+        force_refresh: bool = False
     ) -> Line:
         """
         Weryfikuje pojedynczą linię audio i aktualizuje obiekt Line.
@@ -117,21 +118,18 @@ class VerificationManager:
         line.audio_filename = audio_file.name
         line.audio_format = ext
         
-        if verify_duration:
+        if verify_duration and (force_refresh or not line.audio_duration):
             duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
-            
+                
             if duration <= 0:
                 status = 'ERROR' if duration < 0 else 'EMPTY'
                 line.audio_duration = 0.0
                 line.audio_status = status
                 return line
             line.audio_duration = round(duration, 3)
-        else:
-            line.audio_status = 'OK'
-            
         
         # 1. Weryfikacja similarity i transkrypcji via Whisper
-        if verify_similarity:
+        if verify_similarity and (force_refresh or not line.audio_similarity):
             try:
                 sim_result = VerificationManager.verify_similarity(line, audio_file)
                 if sim_result.get('success'):
@@ -141,7 +139,7 @@ class VerificationManager:
                 pass
 
         # 2. Wykrywanie halucynacji (cisza / brzęczenie)
-        if verify_hallucination:
+        if verify_hallucination and (force_refresh or not line.audio_hallucination):
             hallucinations = []
             
             # Detekcja ciszy przez ffmpeg
@@ -619,9 +617,10 @@ def _verification_process_entry(lines: List[Line], line_uids: list, out_file: st
         VerificationManager.verify_line(
             line=line,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
-            verify_hallucination=force_refresh or verify_hallucination,
-            verify_similarity=force_refresh or verify_similarity,
-            verify_duration=force_refresh or True
+            verify_hallucination=verify_hallucination,
+            verify_similarity=verify_similarity,
+            verify_duration=True,
+            force_refresh=force_refresh
         )
         
         # Przygotowanie wyniku dla GUI (JSON)

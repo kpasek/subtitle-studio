@@ -121,9 +121,10 @@ class VerificationWindow(ctk.CTkToplevel):
                     VerificationManager.verify_line(
                         line=line,
                         ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
-                        verify_duration=force or self.verify_duration_var.get(),
-                        verify_hallucination=force or self.verify_hallucination_var.get(),
-                        verify_similarity=force or self.verify_similarity_var.get()
+                        verify_duration=self.verify_duration_var.get(),
+                        verify_hallucination=self.verify_hallucination_var.get(),
+                        verify_similarity=self.verify_similarity_var.get(),
+                        force_refresh=force
                     )
                     self._processed_count += 1
 

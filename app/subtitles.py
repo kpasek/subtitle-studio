@@ -1153,9 +1153,7 @@ class SubtitlePanel(ctk.CTkFrame):
                     VerificationManager.verify_line(
                         line=line,
                         ffprobe_path=ffprobe,
-                        verify_duration=True,
-                        verify_similarity=True,
-                        verify_hallucination=True
+                        force_refresh=True
                     )
                     
                     # Przygotowanie wyniku dla apply (JSON/dict format)
