@@ -63,6 +63,7 @@ class SubtitlePanel(ctk.CTkFrame):
         self.ver_running = False
         self.ver_stop_event = threading.Event()
         self.ver_ffprobe_path = shutil.which('ffprobe')
+        self.ver_modified_buffer = []
 
         self._create_widgets()
 
@@ -798,7 +799,8 @@ class SubtitlePanel(ctk.CTkFrame):
         Apply merged verification results (called on main thread).
         `data` is a dict mapping string id -> entry dict produced by worker.
         """
-        updates_since_save = 0
+        from app.io import update_lines_in_csv
+
         any_changes = False
         
         for k, v in data.items():
@@ -808,17 +810,42 @@ class SubtitlePanel(ctk.CTkFrame):
                 idx = int(k) - 1
                 if idx < 0 or idx >= len(self.app.lines):
                     continue
+                    
                 line = self.app.lines[idx]
-                print(f"[VERIFY_SUMMARY] line {idx + 1}: duration={line.audio_duration:.2f}s cps={line.calculate_cps():.1f} similarity={line.audio_similarity:.3f}")
+                
+                # Aktualizacja pól obiektu Line z danych otrzymanych od pracownika
+                line.audio_duration = v.get('audio_duration', line.audio_duration)
+                line.audio_status = v.get('audio_status', line.audio_status)
+                line.audio_similarity = v.get('audio_similarity', line.audio_similarity)
+                line.audio_transcribed_text = v.get('audio_transcribed_text', line.audio_transcribed_text)
+                line.audio_hallucination = v.get('audio_hallucination', line.audio_hallucination)
+                line.audio_filename = v.get('audio_filename', line.audio_filename)
+                line.audio_format = v.get('audio_format', line.audio_format)
 
-                updates_since_save += 1
+                # Dodaj do bufora zapisu
+                self.ver_modified_buffer.append(line)
                 any_changes = True
-            except Exception:
+
+                # Jeśli bufor przekroczył 100, zapisz do CSV
+                if len(self.ver_modified_buffer) >= 100:
+                    lp = getattr(self.app, 'loaded_path', None)
+                    if lp:
+                        update_lines_in_csv(str(lp), self.ver_modified_buffer)
+                        self.ver_modified_buffer = []
+
+            except Exception as e:
+                print(f"[VERIFY_APPLY_ERROR] {e}")
                 continue
 
         # handle special flags
         if '__done' in data or data.get('__done') is True:
-            # finalization
+            # Finalny zapis bufora
+            if self.ver_modified_buffer:
+                lp = getattr(self.app, 'loaded_path', None)
+                if lp:
+                    update_lines_in_csv(str(lp), self.ver_modified_buffer)
+                self.ver_modified_buffer = []
+
             self.ver_running = False
             try:
                 self.after(0, lambda: self.app.set_status('Weryfikacja zakończona'))
@@ -826,20 +853,11 @@ class SubtitlePanel(ctk.CTkFrame):
                 pass
 
         if any_changes:
-            # ZAMIAST set_preview() który resetuje całą tabelę - używamy targeted refresh!
-            # Spróbuj najpierw targeted refresh (dla już widocznych wierszy)
+            # Odśwież widok
             try:
                 self.set_preview(self.app.lines)
             except Exception as e:
-                print(f"[APPLY_RESULTS] BŁĄD w _refresh_verification_view: {e}")
-
-            # autosave lines to CSV; perform best-effort
-            try:
-                if getattr(self.app, 'loaded_path', None):
-                    from app.io import save_lines_to_file
-                    save_lines_to_file(str(self.app.loaded_path), self.app.lines)
-            except Exception as e:
-                print(f"[APPLY_RESULTS] BŁĄD CSV: {e}")
+                print(f"[APPLY_RESULTS] BŁĄD w set_preview: {e}")
 
     def stop_verification(self):
         """Stop currently running verification via manager"""
@@ -1150,7 +1168,7 @@ class SubtitlePanel(ctk.CTkFrame):
                     line_id = line_idx + 1
                     
                     # Weryfikuj pojedynczą linię
-                    VerificationManager.verify_line(
+                    _, modified = VerificationManager.verify_line(
                         line=line,
                         ffprobe_path=ffprobe,
                         force_refresh=True

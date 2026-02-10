@@ -85,95 +85,130 @@ class VerificationManager:
         verify_hallucination: bool = True,
         verify_similarity: bool = False,
         force_refresh: bool = False
-    ) -> Line:
+    ) -> Tuple[Line, bool]:
         """
         Weryfikuje pojedynczą linię audio i aktualizuje obiekt Line.
-        
-        Args:
-            line: Obiekt Line do weryfikacji (zostanie zmodyfikowany).
-            audio_dir: Ścieżka do katalogu wygenerowanego audio (root/generated).
-            ffprobe_path: Opcjonalna ścieżka do ffprobe.
-            ignore_short: Czy ignorować błędy CPS dla bardzo krótkich tekstów.
-            verify_duration: Czy wykonywać pomiar czasu (wymaga ffprobe).
-            verify_hallucination: Czy weryfikować halucynacje.
-            verify_similarity: Czy weryfikować podobieństwo (Whisper).
-            
-        Returns:
-            Line: Zaktualizowany obiekt Line.
+        Zwraca (Line, czy_zmodyfikowano).
         """
+        # Zapamiętujemy stan przed (uproszczony snapshot)
+        old_state = (
+            line.audio_duration,
+            line.audio_status,
+            line.audio_similarity,
+            line.audio_transcribed_text,
+            line.audio_hallucination,
+            line.audio_filename
+        )
+
         uid = line.uid
         text = line.get_tts_text().strip()
         
         if not text:
             line.audio_status = 'EMPTY'
-            return line
+            # Sprawdzamy czy faktycznie coś się zmieniło
+            modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+            return line, modified
         
-        # Szukanie pliku - na podstawie UID
-        audio_file, ext = VerificationManager._find_audio_for_uid(uid)
+        # Szukanie pliku
+        audio_file = None
+        ext = ""
+        
+        # Optymalizacja: jeśli mamy już nazwę pliku, sprawdź najpierw ją
+        if line.audio_filename:
+            from app.io import get_audio_dir
+            adir = get_audio_dir()
+            if adir:
+                potential = adir / line.audio_filename
+                if potential.exists():
+                    audio_file = potential
+                    ext = audio_file.suffix.lower().lstrip('.')
+        
+        if not audio_file:
+            audio_file, ext = VerificationManager._find_audio_for_uid(uid)
         
         if not audio_file:
             line.audio_status = 'MISSING'
-            return line
+            line.audio_duration = 0.0
+            line.audio_filename = ''
+            modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+            return line, modified
             
         line.audio_filename = audio_file.name
         line.audio_format = ext
         
-        if verify_duration and (force_refresh or not line.audio_duration):
-            duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
+        # Weryfikacja Długości
+        if verify_duration:
+            # Skip if already have duration and not forced
+            if not force_refresh and line.audio_duration > 0:
+                duration = line.audio_duration
+                # Ustaw status na OK jeśli był PENDING/MISSING ale plik jest
+                if line.audio_status in ['PENDING', 'MISSING']:
+                    line.audio_status = 'OK'
+            else:
+                duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
                 
-            if duration <= 0:
-                status = 'ERROR' if duration < 0 else 'EMPTY'
-                line.audio_duration = 0.0
-                line.audio_status = status
-                return line
-            line.audio_duration = round(duration, 3)
+                if duration <= 0:
+                    status = 'ERROR' if duration < 0 else 'EMPTY'
+                    line.audio_duration = 0.0
+                    line.audio_status = status
+                    modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+                    return line, modified
+                line.audio_duration = round(duration, 3)
+                line.audio_status = 'OK'
+        else:
+            duration = line.audio_duration
+            if line.audio_status in ['PENDING', 'MISSING']:
+                line.audio_status = 'OK'
         
         # 1. Weryfikacja similarity i transkrypcji via Whisper
-        if verify_similarity and (force_refresh or not line.audio_similarity):
-            try:
-                sim_result = VerificationManager.verify_similarity(line, audio_file)
-                if sim_result.get('success'):
-                    line.audio_similarity = sim_result.get('similarity', 0.0)
-                    line.audio_transcribed_text = sim_result.get('transcribed_text', '')
-            except Exception:
-                pass
+        if verify_similarity:
+            if not force_refresh and line.audio_transcribed_text:
+                pass 
+            else:
+                try:
+                    sim_result = VerificationManager.verify_similarity(line, audio_file)
+                    if sim_result.get('success'):
+                        line.audio_similarity = sim_result.get('similarity', 0.0)
+                        line.audio_transcribed_text = sim_result.get('transcribed_text', '')
+                except Exception:
+                    pass
 
         # 2. Wykrywanie halucynacji (cisza / brzęczenie)
-        if verify_hallucination and (force_refresh or not line.audio_hallucination):
-            hallucinations = []
-            
-            # Detekcja ciszy przez ffmpeg
-            ffmpeg_path = None
-            if ffprobe_path:
-                 potential_ffmpeg = ffprobe_path.replace('ffprobe', 'ffmpeg')
-                 if os.path.exists(potential_ffmpeg):
-                     ffmpeg_path = potential_ffmpeg
-            
-            if not ffmpeg_path:
-                ffmpeg_path = shutil.which('ffmpeg')
-                
-            if ffmpeg_path:
-                silences = VerificationManager.detect_silence(audio_file, ffmpeg_path)
-                long_silences = [s for s in silences if s['duration'] > 1.0]
-                if long_silences:
-                    hallucinations.append("CISZA")
-            
-            # Detekcja brzęczenia / "zawieszenia"
-            if line.audio_similarity > 0 and line.audio_similarity < 0.4:
-                if duration > (len(text) / 4.0 + 3.0):
-                    hallucinations.append("HALU?")
-            cps = line.calculate_cps()
-            # Ekstremalnie niski CPS
-            if cps > 0 and cps < 4.0 and duration > 5.0:
-                if "HALU?" not in hallucinations:
-                    hallucinations.append("BARDZO WOLNO")
-
-            if hallucinations:
-                line.audio_hallucination = ", ".join(hallucinations)
+        if verify_hallucination:
+            # Skip if already has result and not forced
+            already_has_hallu = line.audio_hallucination and line.audio_hallucination not in ["", "PENDING", "Brak"]
+            if not force_refresh and already_has_hallu:
+                pass
             else:
-                line.audio_hallucination = "Brak"
+                hallucinations = []
+                ffmpeg_path = None
+                if ffprobe_path:
+                     potential_ffmpeg = ffprobe_path.replace('ffprobe', 'ffmpeg')
+                     if os.path.exists(potential_ffmpeg):
+                         ffmpeg_path = potential_ffmpeg
+                
+                if not ffmpeg_path:
+                    ffmpeg_path = shutil.which('ffmpeg')
+                    
+                if ffmpeg_path:
+                    silences = VerificationManager.detect_silence(audio_file, ffmpeg_path)
+                    long_silences = [s for s in silences if s['duration'] > 1.0]
+                    if long_silences:
+                        hallucinations.append("CISZA")
+                
+                if line.audio_similarity > 0 and line.audio_similarity < 0.4:
+                    if duration > (len(text) / 4.0 + 3.0):
+                        hallucinations.append("HALU?")
+                
+                cps = line.calculate_cps()
+                if cps > 0 and cps < 4.0 and duration > 5.0:
+                    if "HALU?" not in hallucinations:
+                        hallucinations.append("BARDZO WOLNO")
+
+                line.audio_hallucination = ", ".join(hallucinations) if hallucinations else "Brak"
         
-        return line
+        modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
+        return line, modified
 
     @staticmethod
     def detect_silence(file_path: Path, ffmpeg_path: str) -> List[Dict[str, float]]:
@@ -486,7 +521,7 @@ class VerificationManager:
             out_path = str(Path(tmpdir) / f"cps_worker_{uid}.{wi}.json")
             p = multiprocessing.Process(
                 target=_verification_process_entry,
-                args=(job.lines, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, wi, workers, job.verify_hallucination, job.verify_similarity)
+                args=(job.audio_dir, job.lines, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, wi, workers, job.verify_hallucination, job.verify_similarity)
             )
             p.start()
             procs.append(p)
@@ -587,34 +622,42 @@ class VerificationManager:
 
 
 # --- worker entry (updated to use verify_line static method) ---
-def _verification_process_entry(lines: List[Line], line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
+def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
     """
     Pracownik procesu do weryfikacji audio.
     Zapisuje wyniki do JSON.
     """
     import json
+    import os
     from pathlib import Path
     from app.entity import Line
     from dataclasses import asdict
+    from app.io import set_audio_dir, get_audio_dir
     
-    results = {}
+    if audio_dir:
+        set_audio_dir(Path(audio_dir))
+    
+    batch = {}
+    adir = get_audio_dir()
+    modified_count = 0
     
     def write_atomic(dct):
+        if not dct:
+            return
         tmp = Path(out_file + '.tmp')
-        with open(tmp, 'w', encoding='utf-8') as tf:
-            json.dump(dct, tf, ensure_ascii=False)
-        tmp.replace(out_file)
-    
+        try:
+            with open(tmp, 'w', encoding='utf-8') as tf:
+                json.dump(dct, tf, ensure_ascii=False)
+            tmp.replace(out_file)
+        except Exception:
+            pass
 
     for i, line in enumerate(lines):
         if total_workers and (i % total_workers) != worker_idx:
             continue
         
-        ident = str(i + 1)
-        uid = line_uids[i] if line_uids and i < len(line_uids) else ''
-        
-        # Weryfikacja linii (teraz z obiektem Line jako głównym źródłem danych)
-        VerificationManager.verify_line(
+        # Weryfikacja linii (zwraca czy zmodyfikowano)
+        _, modified = VerificationManager.verify_line(
             line=line,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
             verify_hallucination=verify_hallucination,
@@ -623,15 +666,19 @@ def _verification_process_entry(lines: List[Line], line_uids: list, out_file: st
             force_refresh=force_refresh
         )
         
-        # Przygotowanie wyniku dla GUI (JSON)
-        # GUI oczekuje pewnych pól do sprawnego odświeżania tabeli
+        if modified:
+            modified_count += 1
+            
+        # Przygotowanie wyniku dla GUI
         res = asdict(line)
         res['id'] = i + 1
         res['text'] = line.get_tts_text()
         
-        # Ścieżka bezwzględna (pomocna dla GUI)
-        audio_file, _ = VerificationManager._find_audio_for_uid(uid)
-        res['path'] = str(audio_file) if audio_file else None
+        # Ścieżka bezwzględna (bez ponownego szukania)
+        if line.audio_filename and adir:
+            res['path'] = str(adir / line.audio_filename)
+        else:
+            res['path'] = None
         
         # Kompatybilność wsteczna kluczy
         res['duration'] = line.audio_duration
@@ -641,7 +688,14 @@ def _verification_process_entry(lines: List[Line], line_uids: list, out_file: st
         res['display_status'] = line.audio_status
         res['ext'] = line.audio_format
         
-        results[ident] = res
-        write_atomic(results)
+        ident = str(i + 1)
+        batch[ident] = res
+        
+        # Zapisujemy postęp jeśli zaszły zmiany (co 20 zmian lub co 100 sprawdzonych linii)
+        if (modified and modified_count % 20 == 0) or (i % 100 == 0):
+            write_atomic(batch)
+            batch = {}
     
-    write_atomic(results)
+    # Finalny zapis pozostałości
+    if batch:
+        write_atomic(batch)

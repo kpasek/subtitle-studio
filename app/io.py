@@ -318,6 +318,89 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                 f.write('\n'.join(lines))
 
 
+def update_lines_in_csv(csv_path: str, lines_to_update: List[Line]) -> int:
+    """
+    Aktualizuje wiersze w pliku CSV na podstawie UID.
+    Jeśli UID istnieje - nadpisuje, jeśli nie - dodaje na końcu.
+    """
+    p = Path(csv_path)
+    if not p.exists():
+        # Jeśli plik nie istnieje, po prostu zapisujemy te linie
+        save_lines_to_file(csv_path, lines_to_update)
+        return len(lines_to_update)
+
+    updated_count = 0
+    updates_dict = {str(l.uid): l for l in lines_to_update}
+    
+    # 1. Odczytujemy wszystkie obecne linie
+    all_rows = []
+    fieldnames = [
+        'original_text', 'text', 'tts_text', 'audio_duration',
+        'audio_similarity', 'audio_format', 'audio_filename',
+        'audio_transcribed_text', 'audio_hallucination', 'uid'
+    ]
+    
+    seen_uids = set()
+    
+    try:
+        with open(p, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                uid = row.get('uid', '')
+                if uid in updates_dict:
+                    # Zamiana na nową wersję
+                    line = updates_dict[uid]
+                    text_value, tts_value = _normalize_text_fields(line)
+                    row_dict = {
+                        'original_text': line.original_text,
+                        'text': text_value,
+                        'tts_text': tts_value,
+                        'audio_duration': line.audio_duration,
+                        'audio_similarity': line.audio_similarity,
+                        'audio_format': line.audio_format,
+                        'audio_filename': getattr(line, 'audio_filename', ''),
+                        'audio_transcribed_text': getattr(line, 'audio_transcribed_text', ''),
+                        'audio_hallucination': getattr(line, 'audio_hallucination', ''),
+                        'uid': uid
+                    }
+                    all_rows.append(row_dict)
+                    seen_uids.add(uid)
+                    updated_count += 1
+                else:
+                    all_rows.append(row)
+                    seen_uids.add(uid)
+
+        # 2. Dodajemy te, których nie było w pliku
+        for uid, line in updates_dict.items():
+            if uid not in seen_uids:
+                text_value, tts_value = _normalize_text_fields(line)
+                row_dict = {
+                    'original_text': line.original_text,
+                    'text': text_value,
+                    'tts_text': tts_value,
+                    'audio_duration': line.audio_duration,
+                    'audio_similarity': line.audio_similarity,
+                    'audio_format': line.audio_format,
+                    'audio_filename': getattr(line, 'audio_filename', ''),
+                    'audio_transcribed_text': getattr(line, 'audio_transcribed_text', ''),
+                    'audio_hallucination': getattr(line, 'audio_hallucination', ''),
+                    'uid': uid
+                }
+                all_rows.append(row_dict)
+                updated_count += 1
+
+        # 3. Zapisujemy całość
+        with open(p, 'w', encoding='utf-8', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+            writer.writeheader()
+            writer.writerows(all_rows)
+            
+        return updated_count
+    except Exception as e:
+        print(f"[ERROR] update_lines_in_csv: {e}")
+        return 0
+
+
 def update_line_in_csv(csv_path: str, line_index: int, line: Line) -> None:
     """Aktualizuje pojedyncza linie w pliku CSV z danymi audio.
     Jeśli oryginalny plik to TXT, sprawdza czy już istnieje plik CSV (nie tworzy automatycznie).
