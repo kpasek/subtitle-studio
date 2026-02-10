@@ -345,11 +345,13 @@ class SubtitlePanel(ctk.CTkFrame):
             halo_val = line_obj.audio_hallucination
             status_val = line_obj.audio_status
             
+            has_halo = bool(halo_val and halo_val.lower() != "brak")
+
             if hal_f == 'Tylko halucynacje':
-                if not halo_val:
+                if not has_halo:
                     continue
             elif hal_f == 'Bez halucynacji':
-                if not status_val or halo_val:
+                if not status_val or has_halo:
                     continue
             elif hal_f == 'Nieweryfikowane':
                 if status_val:

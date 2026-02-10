@@ -192,7 +192,7 @@ class VerificationManager:
                     
                 if ffmpeg_path:
                     silences = VerificationManager.detect_silence(audio_file, ffmpeg_path)
-                    long_silences = [s for s in silences if s['duration'] > 1.0]
+                    long_silences = [s for s in silences if s['duration'] > 0.7]
                     if long_silences:
                         hallucinations.append("CISZA")
                 
@@ -205,7 +205,7 @@ class VerificationManager:
                     if "HALU?" not in hallucinations:
                         hallucinations.append("BARDZO WOLNO")
 
-                line.audio_hallucination = ", ".join(hallucinations) if hallucinations else "Brak"
+                line.audio_hallucination = ", ".join(hallucinations) if hallucinations else ""
         
         modified = old_state != (line.audio_duration, line.audio_status, line.audio_similarity, line.audio_transcribed_text, line.audio_hallucination, line.audio_filename)
         return line, modified
