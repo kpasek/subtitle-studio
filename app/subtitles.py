@@ -186,8 +186,10 @@ class SubtitlePanel(ctk.CTkFrame):
         self.tree.bind("<F2>", self._start_inline_edit)
         self.tree.bind("<Return>", self._start_inline_edit)
         self.tree.bind("<space>", self.play_selected_audio)
+        self.tree.bind("<Control-a>", self.select_all_visible)
 
         # Zmienne do edycji inline
+
         self.inline_edit_entry = None
         self.inline_edit_item = None
 
@@ -457,7 +459,24 @@ class SubtitlePanel(ctk.CTkFrame):
 
         self.update_audio_buttons_state()
 
+    def select_all_visible(self, event=None):
+        """Zaznacza wszystkie widoczne wiersze (limit 100)."""
+        items = self.tree.get_children()
+        if not items:
+            return "break"
+
+        limit = 100
+        to_select = items[:limit]
+
+        self.tree.selection_set(*to_select)
+        if to_select:
+            self.tree.see(to_select[0])
+
+        self.on_tree_select(None)
+        return "break"
+
     def _start_inline_edit(self, event):
+
         """Uruchamia edycję inline tekstu w tabeli."""
         # Sprawdzenie czy jesteśmy w edytowalnym trybie
         mode = self.app.view_mode.get()

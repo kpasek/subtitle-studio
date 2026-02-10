@@ -691,11 +691,12 @@ def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: li
         ident = str(i + 1)
         batch[ident] = res
         
-        # Zapisujemy postęp jeśli zaszły zmiany (co 20 zmian lub co 100 sprawdzonych linii)
-        if (modified and modified_count % 20 == 0) or (i % 100 == 0):
+        # Zapisujemy postęp cyklicznie (co 100 przetworzonych lub co 100 zmienionych wierszy)
+        if (modified and modified_count > 0 and modified_count % 100 == 0) or (i % 100 == 0):
             write_atomic(batch)
             batch = {}
     
     # Finalny zapis pozostałości
     if batch:
         write_atomic(batch)
+
