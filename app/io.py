@@ -17,68 +17,6 @@ else:
 
 APP_CONFIG = os.path.join(application_path, "subtitle-studio.json")
 
-
-def get_edits_file_path(loaded_path: Optional[Path]) -> Optional[Path]:
-    """Sciezka dla edycji napisow (clean layer)."""
-    if not loaded_path:
-        return None
-    return loaded_path.with_suffix(".edits.json")
-
-
-def get_tts_edits_file_path(loaded_path: Optional[Path]) -> Optional[Path]:
-    """Sciezka dla edycji TTS (replace layer)."""
-    if not loaded_path:
-        return None
-    return loaded_path.with_name(loaded_path.stem + ".tts_edits.json")
-
-
-def load_manual_edits(loaded_path: Optional[Path]) -> Dict[int, str]:
-    edits: Dict[int, str] = {}
-    path = get_edits_file_path(loaded_path)
-    if path and path.exists():
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                edits = {int(k): v for k, v in data.items()}
-        except Exception as e:
-            print(f"Blad edycji (Napisy): {e}")
-    return edits
-
-
-def save_manual_edits(loaded_path: Optional[Path], edits: Dict[int, str]) -> None:
-    path = get_edits_file_path(loaded_path)
-    if path:
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(edits, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Blad zapisu edycji (Napisy): {e}")
-
-
-def load_tts_edits(loaded_path: Optional[Path]) -> Dict[int, str]:
-    edits: Dict[int, str] = {}
-    path = get_tts_edits_file_path(loaded_path)
-    if path and path.exists():
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                edits = {int(k): v for k, v in data.items()}
-        except Exception as e:
-            print(f"Blad edycji (TTS): {e}")
-    return edits
-
-
-def save_tts_edits(loaded_path: Optional[Path], edits: Dict[int, str]) -> None:
-    path = get_tts_edits_file_path(loaded_path)
-    if path:
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(edits, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Blad zapisu edycji (TTS): {e}")
-
-
-# --- Globalny stan i cache dla CSV ---
 _csv_cache_data: List[Dict] = []
 _csv_cache_path: Optional[str] = None
 _csv_cache_mtime: float = 0
@@ -145,7 +83,6 @@ def _cleanup_uid_field(raw_uid: Optional[str]) -> str:
     return normalized or candidate
 
 
-# --- Globalny stan katalogu audio ---
 _current_audio_dir: Optional[Path] = None
 
 def set_audio_dir(path: Optional[Union[str, Path]]):
@@ -161,14 +98,10 @@ def get_audio_dir() -> Optional[Path]:
     return _current_audio_dir
 
 def get_primary_audio_path(uid: str) -> Optional[Path]:
-    """
-    Zwraca ścieżkę do podstawowego pliku audio (generated/output1 (uid).wav).
-    Jeśli plik nie istnieje jako .wav, próbuje też .mp3.
-    """
+    """Zwraca ścieżkę do podstawowego pliku audio."""
     if not uid or not _current_audio_dir:
         return None
     
-    # Podstawowy format to WAV (generowany przez TTS)
     p_wav = _current_audio_dir / f"output1 ({uid}).wav"
     if p_wav.exists():
         return p_wav
@@ -177,13 +110,10 @@ def get_primary_audio_path(uid: str) -> Optional[Path]:
     if p_mp3.exists():
         return p_mp3
         
-    return p_wav # Zwróć ścieżkę .wav nawet jeśli nie istnieje jako domyślną
+    return p_wav
 
 def get_audio_candidates(uid: str) -> List[Tuple[Path, bool]]:
-    """
-    Zwraca wszystkie możliwe pliki audio dla danego UID w generated/ i ready/.
-    Zwraca listę krotek (ścieżka, czy_jest_w_ready).
-    """
+    """Zwraca wszystkie możliwe pliki audio dla danego UID."""
     if not uid or not _current_audio_dir:
         return []
         
@@ -194,19 +124,15 @@ def get_audio_candidates(uid: str) -> List[Tuple[Path, bool]]:
     ready_dir = gen_dir.parent / "ready"
     
     found = []
-    # Sprawdzamy popularne rozszerzenia, także wielkimi literami
     extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
     
     for base in bases:
-        # 1. Szukaj w generated (is_ready=False)
         for ext in extensions:
             p = gen_dir / f"{base}.{ext}"
             if p.exists():
-                # Unikaj duplikatów ścieżek
                 if not any(f[0].resolve() == p.resolve() for f in found):
                     found.append((p, False))
         
-        # 2. Szukaj w ready (is_ready=True)
         for ext in extensions:
             p = ready_dir / f"{base}.{ext}"
             if p.exists():
@@ -228,20 +154,10 @@ def _normalize_text_fields(line: Line) -> Tuple[str, str]:
 
 
 def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line]:
-    """Wczytuje plik napisow.
-    - CSV: wiersze jako Line z metadanymi, w tym uid
-    - TXT (stara wersja): Line z uid zgodnym z plikami audio, jesli istnieja
-    """
+    """Wczytuje plik napisów (CSV lub TXT)."""
     p = Path(path)
 
     def _ensure_uid(value: str, idx: int, audio_dir_path: Optional[Path], audio_filename: str) -> str:
-        
-        """Inteligentna rezolucja UID:
-        1. Jeśli już podany - zwróć (po oczyszczeniu)
-        2. Jeśli nazwa audio zawiera UID - wyodrębnij
-        3. Jeśli plik istnieje w audio_dir - użyj numeru linii
-        4. Wygeneruj nowy UUID
-        """
         normalized_value = _cleanup_uid_field(value)
         if normalized_value:
             return normalized_value
@@ -251,7 +167,6 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
             return inferred
 
         if audio_dir_path and audio_dir_path.is_dir():
-            # Optymalizacja: Sprawdzamy tylko najczęstsze wzorce
             pattern_candidates = [f"output1 ({idx})", str(idx)]
             for pattern in pattern_candidates:
                 for ext in ['.wav', '.mp3']:

@@ -68,8 +68,6 @@ class SubtitlePanel(ctk.CTkFrame):
         self._create_widgets()
 
     def _create_widgets(self):
-
-        # --- Górny pasek stats_frame - Row 0 ---
         stats_frame = ctk.CTkFrame(self)
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
@@ -96,7 +94,6 @@ class SubtitlePanel(ctk.CTkFrame):
         self.app.lbl_filename = ctk.CTkLabel(stats_frame, text="Brak wczytanego pliku")
         self.app.lbl_filename.pack(side="left", anchor="w", padx=5)
 
-        # --- Audio/Action buttons + Pasek Wyszukiwania - Row 1 ---
         audio_btn_frame = ctk.CTkFrame(self)
         audio_btn_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
 
@@ -117,10 +114,8 @@ class SubtitlePanel(ctk.CTkFrame):
                                                fg_color="#C51616", hover_color="#920F0F")
         self.delete_all_button.grid(row=0, column=2, padx=4)
 
-        # --- Pasek Wyszukiwania ---
         ctk.CTkLabel(audio_btn_frame, text="Szukaj").grid(row=0, column=3, padx=(15, 5))
 
-        # Pole do wyszukiwania tekstu
         self.search_entry = ctk.CTkEntry(audio_btn_frame, placeholder_text="Tekst")
         self.search_entry.grid(row=0, column=4, sticky="ew")
         self.search_entry.bind("<Return>", lambda event: apply_patterns(self.app))
@@ -131,12 +126,11 @@ class SubtitlePanel(ctk.CTkFrame):
         self.filter_button = ctk.CTkButton(audio_btn_frame, text="Filtruj", command=self.open_filter_window, width=80)
         self.filter_button.grid(row=0, column=6, padx=(6, 0))
 
-        # --- Preview Table (Lista napisów jako Tabela) - Row 2 ---
-        # Kontener dla tabeli i paska przewijania
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
         table_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
+
 
         # Stylizacja Treeview (aby pasowało do ciemnego motywu CustomTkinter)
         style = ttk.Style()
@@ -601,25 +595,18 @@ class SubtitlePanel(ctk.CTkFrame):
             self.inline_edit_item = None
 
     def _show_context_menu(self, event):
-        # W Treeview zaznaczenie pod prawym przyciskiem myszy nie dzieje się automatycznie w każdym OS
-        # Wymuszamy zaznaczenie wiersza pod kursorem
         item_id = self.tree.identify_row(event.y)
         if item_id:
             self.tree.selection_set(item_id)
 
-        # Pobieramy aktualne zaznaczenie (powinno być ustawione wyżej lub wcześniej)
-        if not self.tree.selection():
-            return
-
-        if self.app.selected_line_index is None:
+        if not self.tree.selection() or self.app.selected_line_index is None:
             return
 
         menu = tk.Menu(self, tearoff=0)
-
         can_gen = self.generate_button.cget("state") == "normal"
         can_verify = self.verify_button.cget("state") == "normal"
         can_del = self.delete_all_button.cget("state") == "normal"
-        can_edit = self.app.view_mode.get() != "Oryginał"  # Edycja możliwa tylko w trybach Napisy/TTS
+        can_edit = self.app.view_mode.get() != "Oryginał"
 
         menu.add_command(label="⚙️ Generuj audio (Ctrl+G)", command=self.generate_selected_dialogs,
                          state=tk.NORMAL if can_gen else tk.DISABLED)
@@ -636,16 +623,14 @@ class SubtitlePanel(ctk.CTkFrame):
         menu.add_command(label="➕ Dodaj wzorzec zamieniający (Ctrl+Klik)",
                          command=lambda: add_replace_pattern_from_selection(self.app, from_menu=True), state=tk.NORMAL)
 
-        # Obliczamy ID. current_line_index jest liczony od 0, a pliki od 1.
-        current_id = self.app.selected_line_index + 1
-
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
 
     # --- Weryfikacja audio (zintegrowana) ---
-    def start_verification(self, force_refresh=False, stop_on_error=False, auto_sync=False, ignore_short=True):
+    def start_verification(self, force_refresh=False, ignore_short=True):
+        """Uruchamia proces weryfikacji audio."""
         if not self.app.audio_dir:
             messagebox.showwarning("Brak audio", "Najpierw wybierz katalog audio.", parent=self)
             return
@@ -653,15 +638,11 @@ class SubtitlePanel(ctk.CTkFrame):
             messagebox.showwarning("Brak tekstu", "Brak napisów do weryfikacji.", parent=self)
             return
 
-        # Use VerificationManager (non-blocking) if available
         if self.ver_running:
             return
 
         self.ver_running = True
         self.ver_stop_event.clear()
-
-        if force_refresh:
-            pass
 
         try:
             cpu_count = os.cpu_count() or 4
@@ -685,7 +666,6 @@ class SubtitlePanel(ctk.CTkFrame):
         manager = VerificationManager.get_instance()
 
         def apply_cb(results: dict):
-            # this is called in manager thread; schedule work on main thread
             try:
                 self.after(0, lambda r=results: self._apply_verification_results(r))
             except Exception:
@@ -709,31 +689,10 @@ class SubtitlePanel(ctk.CTkFrame):
         except Exception:
             pass
         return
-    def _get_audio_duration(self, file_path, ext):
-        file_path = str(file_path)
-        # Try ffprobe
-        if self.ver_ffprobe_path:
-            try:
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                cmd = [self.ver_ffprobe_path, "-v", "error", "-show_entries", "format=duration",
-                       "-of", "default=noprint_wrappers=1:nokey=1", file_path]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, startupinfo=startupinfo)
-                if res.returncode == 0 and res.stdout.strip():
-                    return float(res.stdout.strip()), None
-                return -1.0, res.stderr
-            except Exception as e:
-                return -1.0, str(e)
-        return -1.0, 'Brak ffprobe'
 
     def _refresh_verification_view(self):
-        # Odśwież TYLKO zweryfikowane wiersze zamiast całej tabeli
-        # Mapowanie UID -> item_id w tabeli dla szybkiego dostępu
+        """Odświeża widok weryfikacji dla zaznaczonych wierszy."""
         uid_to_item = {getattr(ln, 'uid', id(ln)): iid for iid, ln in self.item_line_map.items()}
-        
-        # Aktualizuj wartości dla każdego zaznaczonego wiersza (lub tych które mogły ulec zmianie)
         col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
         
         updated_count = 0
@@ -747,18 +706,13 @@ class SubtitlePanel(ctk.CTkFrame):
                 row_values = list(self.tree.item(item_id, "values"))
                 
                 try:
-                    # Update duration
                     if 'duration' in col_pos:
                         duration_val = float(getattr(line_obj, 'audio_duration', 0.0) or 0.0)
                         row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
                     
-                    # Update CPS
                     if 'cps' in col_pos:
                         try:
-                            if hasattr(line_obj, 'get_tts_text'):
-                                txt_source = line_obj.get_tts_text()
-                            else:
-                                txt_source = getattr(line_obj, 'tts_text', '')
+                            txt_source = line_obj.get_tts_text() if hasattr(line_obj, 'get_tts_text') else getattr(line_obj, 'tts_text', '')
                             txt = (txt_source or '').strip('.?!')
                             from collections import Counter
                             stats = Counter(txt)
@@ -771,28 +725,23 @@ class SubtitlePanel(ctk.CTkFrame):
                             cps_val = 0.0
                         row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
                     
-                    # Update similarity
                     if 'similarity' in col_pos:
                         similarity_val = float(getattr(line_obj, 'audio_similarity', 0.0) or 0.0)
                         sim_display = format_percent(similarity_val)
                         row_values[col_pos['similarity']] = sim_display if sim_display else '-'
                     
-                    # Update format
                     if 'format' in col_pos:
                         fmt = (getattr(line_obj, 'audio_format', '') or '')
                         row_values[col_pos['format']] = (fmt or '').upper()
                     
-                    # Update audio file
                     if 'audio_file' in col_pos:
                         path = None
                         if getattr(line_obj, 'audio_filename', ''):
                             path = str(Path(getattr(self, 'app').audio_dir or Path('.')) / line_obj.audio_filename)
                         row_values[col_pos['audio_file']] = Path(path).name if path else ''
                     
-                    # Zaktualizuj wiersz w tabeli
                     self.tree.item(item_id, values=tuple(row_values))
                     updated_count += 1
-                    
                 except Exception:
                     pass
     
@@ -1242,114 +1191,3 @@ class SubtitlePanel(ctk.CTkFrame):
         self.update_audio_buttons_state()
         if deleted and hasattr(self.app, 'set_status'):
             self.app.set_status(f"Usunięto {deleted} plików audio.")
-
-
-# --- Process entry function (runs in separate process) ---
-def _verification_process_entry(audio_dir: str, lines_texts: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1, line_uids: Optional[list] = None):
-    import json
-    import subprocess
-    from pathlib import Path
-    from collections import Counter
-
-    audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
-    results = {}
-
-    def write_atomic(dct):
-        tmp = Path(out_file + '.tmp')
-        with open(tmp, 'w', encoding='utf-8') as tf:
-            json.dump(dct, tf, ensure_ascii=False)
-        tmp.replace(out_file)
-
-    def _normalize_uid(uid: str) -> str:
-        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        return f"output1 ({uid})"
-
-    for i, text in enumerate(lines_texts):
-        # distribute work among workers: only process indices matching this worker
-        if total_workers and (i % total_workers) != worker_idx:
-            continue
-        ident = str(i + 1)
-        uid = None
-        if line_uids and i < len(line_uids):
-            uid = line_uids[i]
-        tts = (text or '').strip()
-        entry = {'id': i+1, 'text': tts, 'duration': 0.0, 'cps': 0.0, 'raw_status': 'PENDING', 'path': None, 'ext': '', 'display_status': 'PENDING'}
-        if not tts:
-            results[ident] = entry
-            write_atomic(results)
-            continue
-
-        # find file
-        audio_file = None
-        found_ext = ''
-        if uid:
-            base = _normalize_uid(uid)
-        else:
-            base = f"output1 ({ident})"
-            
-        ready_dir = audio_dir_p.parent / "ready"
-        candidates = [
-            (audio_dir_p / f"{base}.wav", 'wav'),
-            (audio_dir_p / f"{base}.mp3", 'mp3'),
-            (ready_dir / f"{base}.ogg", 'ogg'),
-            (ready_dir / f"{base}.mp3", 'mp3'),
-            (ready_dir / f"{base}.wav", 'wav')
-        ]
-        for p, ext in candidates:
-            if p.exists():
-                audio_file = p
-                found_ext = ext
-                break
-
-
-        duration = 0.0
-        if audio_file and ffprobe_path:
-            try:
-                res = subprocess.run([ffprobe_path, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', str(audio_file)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                if res.returncode == 0 and res.stdout.strip():
-                    duration = float(res.stdout.strip())
-                else:
-                    duration = -1.0
-            except Exception:
-                duration = -1.0
-
-        raw_status = 'OK'
-        cps = 0.0
-        if not audio_file:
-            raw_status = 'MISSING'
-        elif duration < 0:
-            raw_status = 'ERROR'
-        elif duration == 0:
-            raw_status = 'EMPTY'
-        else:
-            stats = Counter(tts.strip('.?!'))
-            short = stats[','] + stats['-']
-            long = stats['.'] + stats['!'] + stats['?']
-            pauses = (short * 0.4) + (long * 0.6)
-            try:
-                cps = len(tts) / (duration - pauses)
-            except Exception:
-                cps = 0.0
-
-        entry.update({'duration': duration, 'cps': cps, 'raw_status': raw_status, 'path': str(audio_file) if audio_file else None, 'ext': found_ext})
-
-        # display status
-        if raw_status != 'OK':
-            entry['display_status'] = raw_status
-        else:
-            if ignore_short and len(tts) < 5:
-                entry['display_status'] = 'SHORT'
-            else:
-                min_cps = 7.0
-                max_cps = 20.0
-                if cps < min_cps:
-                    entry['display_status'] = f"ZA WOLNO (<{min_cps:.1f})"
-                elif cps > max_cps:
-                    entry['display_status'] = f"ZA SZYBKO (>{max_cps:.1f})"
-                else:
-                    entry['display_status'] = 'OK'
-
-        results[ident] = entry
-        write_atomic(results)
-    # final write
-    write_atomic(results)
