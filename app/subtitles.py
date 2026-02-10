@@ -1139,7 +1139,6 @@ class SubtitlePanel(ctk.CTkFrame):
         from dataclasses import asdict
         try:
             ffprobe = shutil.which('ffprobe')
-            audio_dir = str(self.app.audio_dir)
             results = {}
 
             for line_idx in selected_indices:
@@ -1148,13 +1147,11 @@ class SubtitlePanel(ctk.CTkFrame):
 
                 try:
                     line = self.app.lines[line_idx]
-                    line_id = line_idx + 1  # 1-based ID
-                    line_uid = line.uid
+                    line_id = line_idx + 1
                     
                     # Weryfikuj pojedynczą linię
                     VerificationManager.verify_line(
                         line=line,
-                        audio_dir=audio_dir,
                         ffprobe_path=ffprobe,
                         verify_duration=True,
                         verify_similarity=True,

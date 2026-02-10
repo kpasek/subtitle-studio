@@ -80,10 +80,9 @@ class VerificationManager:
     @staticmethod
     def verify_line(
         line: Line, 
-        audio_dir: str, 
         ffprobe_path: Optional[str] = None, 
         verify_duration: bool = True,
-        verify_hallucination: bool = False,
+        verify_hallucination: bool = True,
         verify_similarity: bool = False
     ) -> Line:
         """
@@ -101,7 +100,6 @@ class VerificationManager:
         Returns:
             Line: Zaktualizowany obiekt Line.
         """
-        audio_dir_p = Path(audio_dir) if audio_dir else Path('.')
         uid = line.uid
         text = line.get_tts_text().strip()
         
@@ -119,21 +117,18 @@ class VerificationManager:
         line.audio_filename = audio_file.name
         line.audio_format = ext
         
-        if not verify_duration:
+        if verify_duration:
+            duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
+            
+            if duration <= 0:
+                status = 'ERROR' if duration < 0 else 'EMPTY'
+                line.audio_duration = 0.0
+                line.audio_status = status
+                return line
+            line.audio_duration = round(duration, 3)
+        else:
             line.audio_status = 'OK'
-            return line
             
-        # Pobieranie długości audio
-        duration = VerificationManager._get_audio_duration(audio_file, ext, ffprobe_path)
-        
-        if duration <= 0:
-            status = 'ERROR' if duration < 0 else 'EMPTY'
-            line.audio_duration = 0.0
-            line.audio_status = status
-            return line
-            
-        line.audio_duration = round(duration, 3)
-
         
         # 1. Weryfikacja similarity i transkrypcji via Whisper
         if verify_similarity:
@@ -493,7 +488,7 @@ class VerificationManager:
             out_path = str(Path(tmpdir) / f"cps_worker_{uid}.{wi}.json")
             p = multiprocessing.Process(
                 target=_verification_process_entry,
-                args=(job.audio_dir, job.lines, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers, job.verify_hallucination, job.verify_similarity)
+                args=(job.lines, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, wi, workers, job.verify_hallucination, job.verify_similarity)
             )
             p.start()
             procs.append(p)
@@ -594,7 +589,7 @@ class VerificationManager:
 
 
 # --- worker entry (updated to use verify_line static method) ---
-def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
+def _verification_process_entry(lines: List[Line], line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
     """
     Pracownik procesu do weryfikacji audio.
     Zapisuje wyniki do JSON.
@@ -623,10 +618,10 @@ def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: li
         # Weryfikacja linii (teraz z obiektem Line jako głównym źródłem danych)
         VerificationManager.verify_line(
             line=line,
-            audio_dir=audio_dir,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
-            verify_hallucination=verify_hallucination,
-            verify_similarity=verify_similarity
+            verify_hallucination=force_refresh or verify_hallucination,
+            verify_similarity=force_refresh or verify_similarity,
+            verify_duration=force_refresh or True
         )
         
         # Przygotowanie wyniku dla GUI (JSON)
@@ -636,7 +631,7 @@ def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: li
         res['text'] = line.get_tts_text()
         
         # Ścieżka bezwzględna (pomocna dla GUI)
-        audio_file, _ = VerificationManager._find_audio_for_uid(Path(audio_dir), uid)
+        audio_file, _ = VerificationManager._find_audio_for_uid(uid)
         res['path'] = str(audio_file) if audio_file else None
         
         # Kompatybilność wsteczna kluczy

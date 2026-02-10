@@ -116,38 +116,23 @@ class VerificationWindow(ctk.CTkToplevel):
                     if panel.ver_stop_event.is_set():
                         break
 
-                    # If not forcing refresh and line already has audio_filename or transcribed text, skip verification
                     force = self.force_refresh.get()
-                    has_transcribed_text = getattr(line, 'audio_transcribed_text', '')
-                    
-                    # Flaga czy linia została zmodyfikowana
-                    line_was_modified = False
-                    
-                    # Jeśli już ma transkrybowany tekst, całkowite pominięcie
-                    if not force and has_transcribed_text:
-                        line_was_modified = False
-                    else:
-                        # Wykonaj weryfikację (bezpośrednio aktualizuje obiekt line)
-                        VerificationManager.verify_line(
-                            line=line,
-                            audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
-                            ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
-                            verify_duration=self.verify_duration_var.get(),
-                            verify_hallucination=self.verify_hallucination_var.get(),
-                            verify_similarity=self.verify_similarity_var.get()
-                        )
-                        line_was_modified = True
-
+                
+                    VerificationManager.verify_line(
+                        line=line,
+                        ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
+                        verify_duration=force or self.verify_duration_var.get(),
+                        verify_hallucination=force or self.verify_hallucination_var.get(),
+                        verify_similarity=force or self.verify_similarity_var.get()
+                    )
                     self._processed_count += 1
 
-                    # Persist single-line changes
-                    if line_was_modified:
-                        try:
-                            lp = getattr(self.master_app, 'loaded_path', None)
-                            if lp:
-                                update_line_in_csv(str(lp), i, line)
-                        except Exception:
-                            pass
+                    try:
+                        lp = getattr(self.master_app, 'loaded_path', None)
+                        if lp:
+                            update_line_in_csv(str(lp), i, line)
+                    except Exception:
+                        pass
 
                     # Refresh UI periodically
                     update_counter += 1
