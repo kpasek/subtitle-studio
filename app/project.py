@@ -227,7 +227,12 @@ def open_project(app, path: Optional[str] = None):
 
                 # apply patterns and initialize subtitle panel state
                 try:
+                    if hasattr(app, 'subtitle_panel') and app.subtitle_panel:
+                        app.subtitle_panel._suppress_refresh = True
                     app.apply_patterns()
+                    if hasattr(app, 'subtitle_panel') and app.subtitle_panel:
+                        app.subtitle_panel._suppress_refresh = False
+                        app.subtitle_panel.set_preview(app.lines)
                 except Exception:
                     pass
         

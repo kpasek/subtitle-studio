@@ -194,7 +194,6 @@ class VerificationWindow(ctk.CTkToplevel):
                             line=line,
                             audio_dir=str(getattr(self.master_app, 'audio_dir', Path('.'))),
                             ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
-                            ignore_short=False,
                             verify_duration=v_dur,
                             verify_hallucination=v_hal,
                             verify_similarity=v_sim

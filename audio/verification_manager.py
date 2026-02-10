@@ -42,7 +42,7 @@ except ImportError:
 class VerificationJob:
     project_path: str
     audio_dir: str
-    lines_texts: List[str]
+    lines: List[Line]
     line_uids: List[str]
     force_refresh: bool
     ignore_short: bool
@@ -82,7 +82,6 @@ class VerificationManager:
         line: Line, 
         audio_dir: str, 
         ffprobe_path: Optional[str] = None, 
-        ignore_short: bool = False, 
         verify_duration: bool = True,
         verify_hallucination: bool = False,
         verify_similarity: bool = False
@@ -111,7 +110,7 @@ class VerificationManager:
             return line
         
         # Szukanie pliku - na podstawie UID
-        audio_file, ext = VerificationManager._find_audio_for_uid(audio_dir_p, uid)
+        audio_file, ext = VerificationManager._find_audio_for_uid(uid)
         
         if not audio_file:
             line.audio_status = 'MISSING'
@@ -134,25 +133,7 @@ class VerificationManager:
             return line
             
         line.audio_duration = round(duration, 3)
-        
-        # Obliczenie tempa (CPS) z uwzględnieniem pauz
-        stats = Counter(text.strip('.?!'))
-        pauses = (stats[','] + stats['-']) * 0.4 + (stats['.'] + stats['!'] + stats['?']) * 0.6
-        time_net = duration - pauses
-        
-        cps = len(text) / time_net if time_net > 0 else 0.0
-        
-        # Status wizualny CPS (audio_status)
-        if ignore_short and len(text) < 5:
-            line.audio_status = 'SHORT'
-        else:
-            min_cps, max_cps = 7.0, 20.0
-            if cps < min_cps:
-                line.audio_status = f"ZA WOLNO (<{min_cps:.1f})"
-            elif cps > max_cps:
-                line.audio_status = f"ZA SZYBKO (>{max_cps:.1f})"
-            else:
-                line.audio_status = 'OK'
+
         
         # 1. Weryfikacja similarity i transkrypcji via Whisper
         if verify_similarity:
@@ -188,7 +169,7 @@ class VerificationManager:
             if line.audio_similarity > 0 and line.audio_similarity < 0.4:
                 if duration > (len(text) / 4.0 + 3.0):
                     hallucinations.append("HALU?")
-            
+            cps = line.calculate_cps()
             # Ekstremalnie niski CPS
             if cps > 0 and cps < 4.0 and duration > 5.0:
                 if "HALU?" not in hallucinations:
@@ -234,7 +215,7 @@ class VerificationManager:
             return []
 
     @staticmethod
-    def _find_audio_for_uid(audio_dir: Path, uid: str) -> Tuple[Optional[Path], str]:
+    def _find_audio_for_uid(uid: str) -> Tuple[Optional[Path], str]:
         """Pomocnicza metoda do znajdowania pliku audio po UID."""
         candidates = get_audio_candidates(uid)
         if candidates:
@@ -423,7 +404,6 @@ class VerificationManager:
         
         # Porównanie z oryginalnym tekstem
         try:
-            original_text = line.get_text().strip()
             tts_text = line.get_tts_text().strip()
             
             # Oczyszczenie tekstów - usunięcie znaków specjalnych, średniki, etc.
@@ -433,7 +413,7 @@ class VerificationManager:
                 text = re.sub(r'[^\w\s]', ' ', text, flags=re.UNICODE)
                 # Zamiana wielkich spacji na pojedynczą
                 text = re.sub(r'\s+', ' ', text)
-                return text.strip()
+                return text.strip().lower()
             
             cleaned_transcribed = clean_text(transcribed_text)
             cleaned_tts = clean_text(tts_text)
@@ -513,7 +493,7 @@ class VerificationManager:
             out_path = str(Path(tmpdir) / f"cps_worker_{uid}.{wi}.json")
             p = multiprocessing.Process(
                 target=_verification_process_entry,
-                args=(job.audio_dir, job.lines_texts, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers, job.verify_hallucination, job.verify_similarity)
+                args=(job.audio_dir, job.lines, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, job.ignore_short, wi, workers, job.verify_hallucination, job.verify_similarity)
             )
             p.start()
             procs.append(p)
@@ -614,7 +594,7 @@ class VerificationManager:
 
 
 # --- worker entry (updated to use verify_line static method) ---
-def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
+def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, ignore_short: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
     """
     Pracownik procesu do weryfikacji audio.
     Zapisuje wyniki do JSON.
@@ -632,26 +612,19 @@ def _verification_process_entry(audio_dir: str, lines_texts: list, line_uids: li
             json.dump(dct, tf, ensure_ascii=False)
         tmp.replace(out_file)
     
-    def _normalize_uid(uid: str) -> str:
-        """Konwertuje sam UUID na pełną nazwę pliku output1 (uid)"""
-        return f"output1 ({uid})"
 
-    for i, text in enumerate(lines_texts):
+    for i, line in enumerate(lines):
         if total_workers and (i % total_workers) != worker_idx:
             continue
         
         ident = str(i + 1)
         uid = line_uids[i] if line_uids and i < len(line_uids) else ''
         
-        # Tworzenie obiektu Line z poprawnym UID
-        line = Line(original_text=text, text=text, tts_text=text.strip(), uid=uid)
-        
         # Weryfikacja linii (teraz z obiektem Line jako głównym źródłem danych)
         VerificationManager.verify_line(
             line=line,
             audio_dir=audio_dir,
             ffprobe_path=ffprobe_path if ffprobe_path else None,
-            ignore_short=ignore_short,
             verify_hallucination=verify_hallucination,
             verify_similarity=verify_similarity
         )

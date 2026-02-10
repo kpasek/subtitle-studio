@@ -61,3 +61,20 @@ class Line:
             self.tts_text = ""
         else:
             self.tts_text = value
+    
+    def calculate_cps(self) -> float:
+        """
+        Oblicza ilość znaków na sekundę (CSP - Character Per Second).
+
+        Jeśli długość audio jest większa niż 0, zwraca długość tekstu podzieloną przez
+        długość audio. W przeciwnym wypadku zwraca 0.
+        """
+        if self.audio_duration > 0:
+            txt = self.get_tts_text().strip('.?!')
+            from collections import Counter
+            stats = Counter(txt)
+            short = stats[','] + stats['-']
+            long = stats['.'] + stats['!'] + stats['?']
+            pauses = (short * 0.4) + (long * 0.6)
+            return len(txt) / (self.audio_duration - pauses) if (self.audio_duration - pauses) > 0 else 0.0
+        return 0.0

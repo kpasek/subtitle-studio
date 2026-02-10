@@ -194,6 +194,7 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
     p = Path(path)
 
     def _ensure_uid(value: str, idx: int, audio_dir_path: Optional[Path], audio_filename: str) -> str:
+        
         """Inteligentna rezolucja UID:
         1. Jeśli już podany - zwróć (po oczyszczeniu)
         2. Jeśli nazwa audio zawiera UID - wyodrębnij
@@ -209,72 +210,52 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
             return inferred
 
         if audio_dir_path and audio_dir_path.is_dir():
-            pattern_candidates = [f"output1 ({idx})", f"output1({idx})", f"output1 {idx}", str(idx)]
+            # Optymalizacja: Sprawdzamy tylko najczęstsze wzorce
+            pattern_candidates = [f"output1 ({idx})", str(idx)]
             for pattern in pattern_candidates:
-                for ext in ['.wav', '.mp3', '.ogg']:
+                for ext in ['.wav', '.mp3']:
                     candidate = audio_dir_path / f"{pattern}{ext}"
                     if candidate.exists():
                         return str(idx)
 
         return uuid.uuid4().hex[:8]
 
+    
+    def _load_csv_file(f) -> List[Line]:
+        reader = csv.DictReader(f)
+        row_count = 0
+        for row in reader:
+            row_count += 1
+            try:
+                dur = round(float(row.get('audio_duration') or 0), 3)
+            except Exception:
+                dur = 0.0
+            transcribed = row.get('audio_transcribed_text', '') or ''
+            audio_filename = row.get('audio_filename', '') or ''
+            uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
+            out.append(Line(
+                original_text=row.get('original_text', '') or '',
+                text=row.get('text', '') or '',
+                tts_text=row.get('tts_text', '') or '',
+                audio_duration=dur,
+                audio_filename=audio_filename,
+                audio_similarity=float(row.get('audio_similarity') or 0.0),
+                audio_format=row.get('audio_format', '') or '',
+                audio_transcribed_text=transcribed,
+                audio_hallucination=row.get('audio_hallucination', '') or '',
+                uid=uid
+            ))
+        return out
+    
     if p.suffix.lower() == '.csv':
         out: List[Line] = []
         try:
             with open(p, 'r', encoding='utf-8', newline='') as f:
-                reader = csv.DictReader(f)
-                row_count = 0
-                for row in reader:
-                    row_count += 1
-                    try:
-                        dur = round(float(row.get('audio_duration') or 0), 3)
-                    except Exception:
-                        dur = 0.0
-                    transcribed = row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or ''
-                    audio_filename = row.get('audio_filename', '') or ''
-                    uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
-                    out.append(Line(
-                        original_text=row.get('original_text', '') or '',
-                        text=row.get('text', '') or '',
-                        tts_text=row.get('tts_text', '') or '',
-                        audio_duration=dur,
-                        audio_filename=audio_filename,
-                        audio_similarity=float(row.get('audio_similarity') or 0.0),
-                        audio_format=row.get('audio_format', '') or '',
-                        audio_transcribed_text=transcribed,
-                        audio_hallucination=row.get('audio_hallucination', '') or '',
-                        uid=uid
-                    ))
-            print(f"[LOAD_CSV] Wczytano {row_count} linii z CSV")
-            return out
+                return _load_csv_file(f)
         except UnicodeDecodeError:
             print("[LOAD_CSV] UTF-8 decode failed, probuje latin-1...")
             with open(p, 'r', encoding='latin-1', newline='') as f:
-                reader = csv.DictReader(f)
-                row_count = 0
-                for row in reader:
-                    row_count += 1
-                    try:
-                        dur = round(float(row.get('audio_duration') or 0), 3)
-                    except Exception:
-                        dur = 0.0
-                    transcribed = row.get('audio_transcribed_text', '') or row.get('transcribed_text', '') or ''
-                    audio_filename = row.get('audio_filename', '') or ''
-                    uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
-                    out.append(Line(
-                        original_text=row.get('original_text', '') or '',
-                        text=row.get('text', '') or '',
-                        tts_text=row.get('tts_text', '') or '',
-                        audio_duration=dur,
-                        audio_filename=audio_filename,
-                        audio_similarity=float(row.get('audio_similarity') or 0.0),
-                        audio_format=row.get('audio_format', '') or '',
-                        audio_transcribed_text=transcribed,
-                        audio_hallucination=row.get('audio_hallucination', '') or '',
-                        uid=uid
-                    ))
-            print(f"[LOAD_CSV] Wczytanych linii (latin-1): {row_count}")
-            return out
+                return _load_csv_file(f)        
 
     with open(p, 'r', encoding='utf-8') as f:
         lines = f.read().splitlines()
