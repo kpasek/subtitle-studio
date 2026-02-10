@@ -467,33 +467,6 @@ class VerificationManager:
         
         return result
 
-    @staticmethod
-    def apply_similarity_to_line(line: Line, audio_path: str) -> Line:
-        """
-        Weryfikuje similarity i aktualizuje obiekt Line.
-        
-        Args:
-            line: Obiekt Line do aktualizacji
-            audio_path: Ścieżka do pliku audio
-            
-        Returns:
-            Line: Zmodyfikowany obiekt Line
-        """
-        try:
-            result = VerificationManager.verify_similarity(line, audio_path)
-            
-            if result.get('success'):
-                line.audio_similarity = result.get('similarity', 0.0)
-                line.audio_transcribed_text = result.get('transcribed_text', '')
-                print(f"[DEBUG] apply_similarity_to_line: set audio_transcribed_text = {repr(line.audio_transcribed_text)}")
-            else:
-                line.audio_similarity = 0.0
-                line.audio_transcribed_text = ''
-            
-            return line
-        except Exception as e:
-            print(f"[ERROR] apply_similarity_to_line exception: {e}")
-            return line
 
     def add_job(self, job: VerificationJob):
         self.job_queue.put(job)
@@ -601,39 +574,6 @@ class VerificationManager:
         else:
             tracker.finish()
 
-
-    @staticmethod
-    def save_verification_results_to_csv(results: List[dict], csv_path: str) -> bool:
-        """
-        Zapisuje wyniki weryfikacji do pliku CSV.
-        
-        Args:
-            results: Lista słowników z wynikami
-            csv_path: Ścieżka do pliku CSV
-            
-        Returns:
-            bool: True jeśli sukces
-        """
-        try:
-            csv_path = Path(csv_path)
-            csv_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            if not results:
-                return False
-            
-            fieldnames = ['id', 'text', 'duration', 'cps', 'raw_status', 'path', 'ext', 'display_status', 'similarity', 'hallucination', 'transcribed_text']
-            
-            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                
-                for result in results:
-                    row = {field: result.get(field, '') for field in fieldnames}
-                    writer.writerow(row)
-            
-            return True
-        except Exception:
-            return False
 
 
 class BatchResultTracker:

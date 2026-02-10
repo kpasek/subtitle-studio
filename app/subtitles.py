@@ -1323,63 +1323,6 @@ class SubtitlePanel(ctk.CTkFrame):
         
         manager.add_job(job)
 
-    def _verify_selected_lines_thread(self, selected_indices: List[int]):
-        """Worker thread dla weryfikacji zaznaczonych linii."""
-        from dataclasses import asdict
-        try:
-            ffprobe = shutil.which('ffprobe')
-            results = {}
-
-            for line_idx in selected_indices:
-                if line_idx < 0 or line_idx >= len(self.app.lines):
-                    continue
-
-                try:
-                    line = self.app.lines[line_idx]
-                    line_id = line_idx + 1
-                    
-                    # Weryfikuj pojedynczą linię
-                    _, modified = VerificationManager.verify_line(
-                        line=line,
-                        ffprobe_path=ffprobe,
-                        force_refresh=True
-                    )
-                    
-                    # Przygotowanie wyniku dla apply (JSON/dict format)
-                    res = asdict(line)
-                    res['id'] = line_id
-                    res['text'] = line.get_tts_text()
-                    res['display_status'] = line.audio_status
-                    res['ext'] = line.audio_format
-                    res['path'] = str(get_primary_audio_path(line.uid)) if get_primary_audio_path(line.uid) else None
-                    res['similarity'] = line.audio_similarity
-                    res['transcribed_text'] = line.audio_transcribed_text
-                    res['duration'] = line.audio_duration
-                    res['hallucination'] = line.audio_hallucination
-
-                    results[str(line_id)] = res
-                except Exception as e:
-                    results[str(line_idx + 1)] = {
-                        'id': line_idx + 1,
-                        'text': line.get_tts_text() if line_idx < len(self.app.lines) else '',
-                        'duration': 0.0,
-                        'cps': 0.0,
-                        'raw_status': 'ERROR',
-                        'path': None,
-                        'ext': '',
-                        'display_status': f'ERROR: {str(e)[:30]}'
-                    }
-
-            # Dodaj marker końca
-            results['__done'] = True
-
-            # Zaplanuj aktualizację UI na głównym wątku
-            self.after(0, lambda r=results: self._apply_verification_results(r))
-
-        except Exception as e:
-            self.after(0, lambda: messagebox.showerror("Błąd weryfikacji", f"Błąd: {str(e)}", parent=self))
-            self.after(0, lambda: setattr(self, 'ver_running', False))
-        # Tutaj nie ustawiamy ver_running na False, bo _apply_verification_results to zrobi po otrzymaniu __done
 
     def delete_selected_dialogs(self):
         """Usuwa audio dla wszystkich zaznaczonych wierszy."""

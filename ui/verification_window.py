@@ -101,13 +101,6 @@ class VerificationWindow(ctk.CTkToplevel):
         # Uruchamiamy weryfikację przez panel (który używa VerificationManager -> Worker)
         self.subtitle_panel.start_verification(
             force_refresh=force_refresh,
-            # Przekazujemy dodatkowe opcje, jeśli start_verification je obsługuje.
-            # Jeśli nie, musimy dodać obsługę w subtitles.py.
-            # Z contextu 'start_verification' przyjmuje force_refresh i ignore_short.
-            # Musimy zmodyfikować start_verification w subtitles.py aby przyjmował te parametry
-            # lub zaktualizować ten kod po modyfikacji tamtego.
-            # Ale zaraz... VerificationJob ma te pola.
-            # Więc lepiej przekażmy je do start_verification (na razie jako kwargs lub zmodyfikujmy start_verification).
             verify_options={
                 'verify_duration': verify_duration,
                 'verify_similarity': verify_similarity,
@@ -151,31 +144,9 @@ class VerificationWindow(ctk.CTkToplevel):
 
     def _poll(self):
         try:
-            # Teraz korzystamy z worker'a w VerificationManager
-            manager = VerificationManager.get_instance()
             total = len(getattr(self.master_app, 'lines', []))
-            
-            # Pobieramy postęp z Workera jeśli istnieje
-            processed = 0
-            if manager.worker:
-                 # To jest pewne uproszczenie - worker nie udostępnia wprost licznika 'processed' dla konkretnego joba
-                 # Ale możemy policzyć ile zeszło z kolejki (total - tasks_in_queue)
-                 # Albo lepiej - sprawdzić postęp w panelu (bo apply_callback tam aktualizuje)
-                 # Niestety panel nie trzyma licznika 'processed'. 
-                 # Musimy dodać obsługę w panelu.
-                 pass
-
-            # Fallback na stary sposób (panel.ver_running)
-            running = getattr(self.subtitle_panel, 'ver_running', False)
-            
-            # W nowym podejściu _apply_verification_results jest wołane asynchronicznie.
-            # Musimy jakoś śledzić postęp w UI. 
-            # SubtitlePanel nie ma pola z liczbą przetworzonych.
-            # Zostawmy na razie 'indeterminate' albo 'running' bez licznika liczbowego,
-            # LUB dodajmy licznik w SubtitlePanel.
-            
-            # Spróbujmy odczytać z panelu, jeśli dodamy tam licznik
             processed = getattr(self.subtitle_panel, 'ver_processed_count', 0)
+            running = getattr(self.subtitle_panel, 'ver_running', False)
             
             pct = 0.0
             if total > 0:

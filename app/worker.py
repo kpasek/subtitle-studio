@@ -119,33 +119,12 @@ class Worker:
 
             # 3. Wykonanie zadania
             try:
-                # Sprytne przekazywanie funkcji raportowania postępu
-                # Jeśli funkcja przyjmuje argument 'progress_callback', wstrzykujemy go
-                # W przeciwnym razie wołamy funkcję normalnie
-                
                 # Definiujemy lokalny helper, który odwoła się do callbacka z taska (jeśli istnieje)
                 def local_progress(percent: int, message: str = ""):
                     if task.on_progress:
                         task.on_progress(percent, message)
                 
-                # Sprawdzamy czy funkcja przyjmuje `progress_callback` w kwargs
-                # Jeśli użytkownik podał go w kwargs przy add_task, to zostanie użyty ten z kwargs (nadpisany),
-                # więc wstrzykujemy tylko jeśli go nie ma.
-                # Jednak bezpieczniej jest po prostu założyć, że funkcja użytkownika
-                # musi obsługiwać ten argument jeśli chce raportować postęp.
-                # Tutaj spróbujemy go dodać do kwargs wywołania.
-                
                 call_kwargs = task.kwargs.copy()
-                
-                # Prosta heurystyka: jeśli w wywołaniu add_task nie podano 'progress_callback' w kwargs,
-                # a my mamy zdefiniowany on_progress, dodajemy go, licząc że funkcja go obsłuży.
-                # UWAGA: Jeśli funkcja nie przyjmuje **kwargs ani tego argumentu, to wywali błąd TypeError.
-                # Dlatego zrobimy bezpieczniej: użytkownik musi sam zadbać o to, żeby jego funkcja przyjmowała ten parametr,
-                # LUB używamy wrappera.
-                # Dla uproszczenia w tym rozwiązaniu: Przekazujemy `progress_callback` do funkcji
-                # TYLKO JEŚLI podano on_progress. Jeśli funkcja go nie odbierze, poleci błąd - to standardowe zachowanie.
-                # Żeby to nieco ułatwić, przekażemy go tylko jeśli jest on_progress.
-                
                 if task.on_progress and 'progress_callback' not in call_kwargs:
                     call_kwargs['progress_callback'] = local_progress
 
