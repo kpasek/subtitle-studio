@@ -529,11 +529,12 @@ class VerificationManager:
 
         last_mtimes = {str(p): 0 for p in out_files}
 
-        # monitor outputs and call apply_callback with merged results
+        # monitor outputs and call apply_callback with delta results
+        # We send only NEW items to the callback to avoid re-processing and duplicates
         aggregated: Dict[str, Any] = {}
         while not self.cancel_event.is_set():
             any_alive = any(p.is_alive() for p in procs)
-            changed = False
+            delta: Dict[str, Any] = {}
             for outp in list(out_files):
                 pth = Path(outp)
                 if not pth.exists():
@@ -550,19 +551,20 @@ class VerificationManager:
                         data = json.load(f)
                 except Exception:
                     continue
-                # merge
+                
                 for k, v in data.items():
                     aggregated[k] = v
-                    changed = True
+                    delta[k] = v
 
-            if changed and job.apply_callback:
+            if delta and job.apply_callback:
                 try:
-                    job.apply_callback(aggregated.copy())
+                    job.apply_callback(delta)
                 except Exception:
                     pass
 
             if not any_alive:
                 break
+
 
             time.sleep(0.5)
 
@@ -640,6 +642,7 @@ def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: li
     batch = {}
     adir = get_audio_dir()
     modified_count = 0
+    processed_count = 0
     
     def write_atomic(dct):
         if not dct:
@@ -656,6 +659,8 @@ def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: li
         if total_workers and (i % total_workers) != worker_idx:
             continue
         
+        processed_count += 1
+
         # Weryfikacja linii (zwraca czy zmodyfikowano)
         _, modified = VerificationManager.verify_line(
             line=line,
@@ -692,7 +697,7 @@ def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: li
         batch[ident] = res
         
         # Zapisujemy postęp cyklicznie (co 100 przetworzonych lub co 100 zmienionych wierszy)
-        if (modified and modified_count > 0 and modified_count % 100 == 0) or (i % 100 == 0):
+        if (modified and modified_count > 0 and modified_count % 100 == 0) or (processed_count % 100 == 0):
             write_atomic(batch)
             batch = {}
     

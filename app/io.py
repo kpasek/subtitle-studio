@@ -237,52 +237,69 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
         if isinstance(lines, list) and lines and isinstance(lines[0], Line):
             lines = sorted(lines, key=lambda l: str(l.uid))
 
-        with open(p, 'w', encoding='utf-8', newline='') as f:
-            fieldnames = [
-                'original_text', 'text', 'tts_text', 'audio_duration',
-                'audio_similarity', 'audio_format', 'audio_filename',
-                'audio_transcribed_text', 'audio_hallucination', 'uid'
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
-            writer.writeheader()
+        temp_path = p.with_suffix(p.suffix + ".tmp")
+        try:
+            with open(temp_path, 'w', encoding='utf-8', newline='') as f:
+                fieldnames = [
+                    'original_text', 'text', 'tts_text', 'audio_duration',
+                    'audio_similarity', 'audio_format', 'audio_filename',
+                    'audio_transcribed_text', 'audio_hallucination', 'uid'
+                ]
+                writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+                writer.writeheader()
 
-            saved_count = 0
-            rows_for_cache = []
-            for item in lines:
-                if isinstance(item, Line):
-                    text_value, tts_value = _normalize_text_fields(item)
-                    row_dict = {
-                        'original_text': item.original_text,
-                        'text': text_value,
-                        'tts_text': tts_value,
-                        'audio_duration': item.audio_duration,
-                        'audio_similarity': item.audio_similarity,
-                        'audio_format': item.audio_format,
-                        'audio_filename': item.audio_filename, 
-                        'audio_transcribed_text': item.audio_transcribed_text,
-                        'audio_hallucination': item.audio_hallucination,
-                        'uid': _cleanup_uid_field(item.uid)  
-                    }
-                    if not row_dict['uid']:
-                        row_dict['uid'] = uuid.uuid4().hex[:8]
-                    writer.writerow(row_dict)
-                    rows_for_cache.append(row_dict)
-                    saved_count += 1
-                else:
-                    writer.writerow({'original_text': item, 'text': item, 'tts_text': item})
+                saved_count = 0
+                rows_for_cache = []
+                for item in lines:
+                    if isinstance(item, Line):
+                        text_value, tts_value = _normalize_text_fields(item)
+                        row_dict = {
+                            'original_text': item.original_text,
+                            'text': text_value,
+                            'tts_text': tts_value,
+                            'audio_duration': item.audio_duration,
+                            'audio_similarity': item.audio_similarity,
+                            'audio_format': item.audio_format,
+                            'audio_filename': item.audio_filename, 
+                            'audio_transcribed_text': item.audio_transcribed_text,
+                            'audio_hallucination': item.audio_hallucination,
+                            'uid': _cleanup_uid_field(item.uid)  
+                        }
+                        if not row_dict['uid']:
+                            row_dict['uid'] = uuid.uuid4().hex[:8]
+                        writer.writerow(row_dict)
+                        rows_for_cache.append(row_dict)
+                        saved_count += 1
+                    else:
+                        writer.writerow({'original_text': item, 'text': item, 'tts_text': item})
 
+            # Atomowa zamiana plików
+            temp_path.replace(p)
+            
             # Aktualizacja cache
             _csv_cache_data = rows_for_cache
             _csv_cache_path = str(p)
             _csv_cache_mtime = p.stat().st_mtime
             
             print(f"[SAVE_CSV] Zapisano {saved_count} linii (posortowano po UID)")
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
     else:
-        with open(p, 'w', encoding='utf-8') as f:
-            if isinstance(lines, list) and lines and isinstance(lines[0], Line):
-                f.write('\n'.join([l.text for l in lines]))
-            else:
-                f.write('\n'.join(lines))
+        temp_path = p.with_suffix(p.suffix + ".txt.tmp")
+        try:
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                if isinstance(lines, list) and lines and isinstance(lines[0], Line):
+                    f.write('\n'.join([l.text for l in lines]))
+                else:
+                    f.write('\n'.join(lines))
+            temp_path.replace(p)
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
+
 
 
 def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = None) -> int:
@@ -361,13 +378,21 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
     ]
     
     try:
-        with open(p, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
-            writer.writeheader()
-            writer.writerows(new_cache)
+        temp_path = p.with_suffix(p.suffix + ".upd.tmp")
+        try:
+            with open(temp_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+                writer.writeheader()
+                writer.writerows(new_cache)
+            temp_path.replace(p)
             
-        _csv_cache_data = new_cache
-        _csv_cache_mtime = p.stat().st_mtime
+            _csv_cache_data = new_cache
+            _csv_cache_mtime = p.stat().st_mtime
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
+                
         return updated_count
     except Exception as e:
         print(f"[UPDATE_CSV_ERR] {e}")
