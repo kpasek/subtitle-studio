@@ -792,6 +792,10 @@ class SubtitlePanel(ctk.CTkFrame):
         for k, v in data.items():
             if k == '__done':
                 continue
+            
+            # Ignoruj wpisy niebędące słownikiem (np. lista błędów __errors) lub None
+            if not isinstance(v, dict):
+                continue
                 
             batch_processed_count += 1
             
@@ -804,8 +808,12 @@ class SubtitlePanel(ctk.CTkFrame):
             try:
                 line = None
                 uid = v.get('uid')
-                if uid and hasattr(self, 'ver_uid_map'):
-                    line = self.ver_uid_map.get(uid)
+                
+                # Bezpieczny dostęp do mapy (może być None jeśli w międzyczasie wyczyszczono)
+                uid_map = getattr(self, 'ver_uid_map', None)
+                
+                if uid and uid_map:
+                    line = uid_map.get(uid)
                 
                 if not line:
                     try:
@@ -868,6 +876,8 @@ class SubtitlePanel(ctk.CTkFrame):
             self.ver_running = False
             if hasattr(self, 'ver_uid_map'):
                 self.ver_uid_map = None
+            if hasattr(self, 'ver_uid_to_index_map'):
+                self.ver_uid_to_index_map = None
 
             try:
                 self.after(0, lambda: self.app.set_status('Weryfikacja zakończona'))
@@ -875,28 +885,35 @@ class SubtitlePanel(ctk.CTkFrame):
                 pass
 
         if any_changes:
-            # Odśwież widok częściowo zamiast pełnego przeładowania
+            # Odśwież widok częściowo (szukamy właściwych indeksów wierszy w UI poprzez UID)
             try:
-                # Jeśli zmian jest dużo (>50), pełne odświeżenie może być wydajniejsze niż 50 aktualizacji itemów?
-                # Ale set_preview czyści wszystko i dodaje od nowa. To zawsze jest wolne.
-                # Zróbmy 'update_view_for_batch' jeśli mamy zidentyfikowane indeksy.
-                
-                # Użyjmy _refresh_verification_view ale dla zmodyfikowanych linii.
-                # Musimy jednak znać te linie. 'data' ma klucze będące indeksami + 1.
-                
                 indices_to_refresh = []
+                
+                # Słownik: uid -> modified_flag
+                modified_uids = []
                 for k, v in data.items():
                     if k == '__done': continue
-                    # Refreshing only modified ones
-                    if not v.get('__modified', True): continue
-                    
-                    try:
-                        indices_to_refresh.append(int(k) - 1)
-                    except: pass
+                    if v.get('__modified', True):
+                        u = v.get('uid')
+                        if u:
+                             modified_uids.append(u)
                 
+                if modified_uids and hasattr(self, 'ver_uid_to_index_map') and self.ver_uid_to_index_map:
+                    for u in modified_uids:
+                        idx = self.ver_uid_to_index_map.get(u)
+                        if idx is not None:
+                            indices_to_refresh.append(idx)
+                
+                # Fallback jeśli mapy brak (np. pełna weryfikacja), wtedy k jest indeksem + 1
+                if not indices_to_refresh and not modified_uids:
+                     for k, v in data.items():
+                        if k == '__done': continue
+                        if not v.get('__modified', True): continue
+                        try:
+                            indices_to_refresh.append(int(k) - 1)
+                        except: pass
+
                 if indices_to_refresh:
-                    # Mamy metodę _refresh_verification_view ale ona bierze self.selected_line_indices
-                    # Zróbmy tymczasowe nadpisanie lub nową metodę
                     self._refresh_lines_view(indices_to_refresh)
                 
             except Exception as e:
@@ -1242,64 +1259,101 @@ class SubtitlePanel(ctk.CTkFrame):
 
     def verify_selected_dialogs(self):
         """Weryfikuje audio dla wszystkich zaznaczonych wierszy w osobnym wątku."""
-        if not self.selected_line_indices or not self.app.audio_dir:
-            return
+        try:
+            from audio.verification_manager import VerificationManager, VerificationJob
 
-        if self.ver_running:
-            messagebox.showinfo("Weryfikacja", "Weryfikacja jest już w toku.", parent=self)
-            return
+            if not self.selected_line_indices:
+                messagebox.showwarning("Weryfikacja", "Nie wybrano żadnych wierszy.", parent=self)
+                return
 
-        if VerificationManager is None:
-            messagebox.showerror("Błąd", "Brak VerificationManager.", parent=self)
-            return
+            if not self.app.audio_dir:
+                 messagebox.showwarning("Weryfikacja", "Brak ustawionego katalogu audio.", parent=self)
+                 return
 
-        self.ver_running = True
-        self.ver_processed_count = 0  # Reset counter
-        self.ver_last_save_time = time.time()
-        self.ver_uid_map = {l.uid: l for l in self.app.lines if hasattr(l, 'uid')}
-        
-        self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
-
-        # Przygotowanie podzbioru linii
-        subset_lines = []
-        subset_uids = []
-        for idx in self.selected_line_indices:
-            if idx < 0 or idx >= len(self.app.lines):
-                continue
-            line = self.app.lines[idx]
-            subset_lines.append(line)
-            subset_uids.append(getattr(line, 'uid', str(idx + 1)))
-
-        ffprobe = shutil.which('ffprobe')
-        
-        # Callback wrapper
-        def apply_cb(results: dict):
+            # Jeśli weryfikacja już trwa, po prostu dodajemy zadanie do kolejki.
+            # Zmienna ver_running informuje, czy w ogóle coś się dzieje globalnie.
+            # Jeśli jest True, interfejs (pasek postępu) już działa (obliczony na inne zadanie),
+            # ale dodanie do kolejki jest bezpieczne.
+            
+            was_running = self.ver_running
+            self.ver_running = True
+            
+            # Resetujemy licznik tylko jeśli nic nie działało, 
+            # w przeciwnym razie licznik będzie kontynuowany/zsumowany (co jest akceptowalne).
+            if not was_running:
+                self.ver_processed_count = 0
+                self.ver_last_save_time = time.time()
+                self.ver_uid_map = {}
+                self.ver_uid_to_index_map = {}
+            
+            # --- Odświeżenie/Uzupełnienie Mapowania UID ---
+            # Zawsze upewnij się, że mapa jest aktualna dla wszystkich linii,
+            # ponieważ nowe zadanie odwoła się do istniejących linii.
             try:
-                self.after(0, lambda r=results: self._apply_verification_results(r))
-            except Exception:
-                pass
+                # Jeśli mapa nie istnieje, stwórz ją.
+                # Jeśli istnieje, nadpisujemy ją nową iteracją (bezpieczne, bo app.lines to źródło prawdy)
+                new_uid_map = {l.uid: l for l in self.app.lines if hasattr(l, 'uid')}
+                new_uid_to_idx = {}
+                for i, l in enumerate(self.app.lines):
+                    uid = getattr(l, 'uid', None)
+                    if uid:
+                        new_uid_to_idx[uid] = i
+                
+                # Przypisz do zmiennych instancji
+                self.ver_uid_map = new_uid_map
+                self.ver_uid_to_index_map = new_uid_to_idx
+                
+            except Exception as e:
+                print(f"[VERIFY_INIT_ERROR] Map creation failed: {e}")
+                
+            if not was_running:
+                self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
+            else:
+                 self.app.set_status(f"Dodano do kolejki weryfikacji ({len(self.selected_line_indices)} linii)...")
 
-        # Jeśli Worker bazuje na indexach, to mamy problem z podzbiorem.
-        # Dlatego polegamy na mechanizmie UID zaimplementowanym w _apply_verification_results
-        
-        from audio.verification_manager import VerificationManager, VerificationJob
-        manager = VerificationManager.get_instance()
-        
-        job = VerificationJob(
-            project_path=str(getattr(self.app, 'current_project_path', '')),
-            audio_dir=str(self.app.audio_dir),
-            lines=subset_lines,
-            line_uids=subset_uids,
-            force_refresh=True, # Zaznaczone zwykle chcemy wymusić
-            ignore_short=True,
-            ffprobe=ffprobe,
-            workers=4,
-            verify_hallucination=False, # Domyślnie dla wybranych
-            verify_similarity=False,
-            apply_callback=apply_cb
-        )
-        
-        manager.add_job(job)
+            # Przygotowanie podzbioru linii
+            subset_lines = []
+            subset_uids = []
+            for idx in self.selected_line_indices:
+                if idx < 0 or idx >= len(self.app.lines):
+                    continue
+                line = self.app.lines[idx]
+                subset_lines.append(line)
+                subset_uids.append(getattr(line, 'uid', str(idx + 1)))
+
+            ffprobe = shutil.which('ffprobe')
+            
+            # Callback wrapper
+            def apply_cb(results: dict):
+                try:
+                    self.after(0, lambda r=results: self._apply_verification_results(r))
+                except Exception:
+                    pass
+
+            manager = VerificationManager.get_instance()
+            
+            job = VerificationJob(
+                project_path=str(getattr(self.app, 'current_project_path', '')),
+                audio_dir=str(self.app.audio_dir),
+                lines=subset_lines,
+                line_uids=subset_uids,
+                force_refresh=True,
+                ignore_short=True,
+                ffprobe=ffprobe,
+                workers=4,
+                verify_hallucination=False,
+                verify_similarity=False,
+                apply_callback=apply_cb
+            )
+            
+            # Dodaj z wysokim priorytetem (0), aby wskoczyło przed inne oczekujące zadania (ale po obecnym)
+            manager.add_job(job, priority=0)
+            
+        except Exception as e:
+            self.ver_running = False
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Błąd Weryfikacji", f"Wystąpił błąd: {e}", parent=self)
 
 
     def delete_selected_dialogs(self):

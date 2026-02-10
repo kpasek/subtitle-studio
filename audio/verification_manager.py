@@ -72,10 +72,11 @@ class VerificationManager:
         if hasattr(self, '_initialized'):
             return
         self._initialized = True
-        self.job_queue = queue.Queue()
+        self.job_queue = queue.PriorityQueue()
         self.manager_thread: Optional[threading.Thread] = None
         self.cancel_event = threading.Event()
         self.worker: Optional[Worker] = None
+        self.counter = 0 # Counter for stable priority queue
 
     @classmethod
     def get_instance(cls) -> 'VerificationManager':
@@ -468,8 +469,14 @@ class VerificationManager:
         return result
 
 
-    def add_job(self, job: VerificationJob):
-        self.job_queue.put(job)
+    def add_job(self, job: VerificationJob, priority: int = 10):
+        """
+        Adds a verification job to the queue.
+        priority: Lower value means higher priority. Default 10. 
+                  Use 0 for urgent user requests.
+        """
+        self.counter += 1
+        self.job_queue.put((priority, self.counter, job))
         self._start_thread_if_needed()
 
     def _start_thread_if_needed(self):
@@ -485,16 +492,18 @@ class VerificationManager:
 
     def _process_queue(self):
         while not self.job_queue.empty():
-            job: VerificationJob = self.job_queue.get()
-            self.cancel_event.clear()
             try:
+                # Unpack tuple from PriorityQueue
+                _, _, job = self.job_queue.get()
+                
+                self.cancel_event.clear()
                 self._run_verification_job(job)
             except Exception:
                 pass
         self.manager_thread = None
 
     @staticmethod
-    def _worker_verify_task(line: Line, index: int, ffprobe_path: str, verify_hallucination: bool, verify_similarity: bool, force_refresh: bool, adir: Path):
+    def _worker_verify_task(line: Line, index: int, ident: str, ffprobe_path: str, verify_hallucination: bool, verify_similarity: bool, force_refresh: bool, adir: Path):
         """Metoda wykonywana przez workera."""
         _, modified = VerificationManager.verify_line(
             line=line,
@@ -524,8 +533,9 @@ class VerificationManager:
         
         # Dodajemy flagę modyfikacji dla UI
         res['__modified'] = modified
+        res['uid'] = ident
         
-        return str(index), res, modified
+        return str(ident), res, modified
 
     def _run_verification_job(self, job: VerificationJob):
         num_workers = max(1, job.workers)
@@ -543,9 +553,18 @@ class VerificationManager:
         
         tracker = BatchResultTracker(len(job.lines), job.apply_callback)
         
+        uids_map = job.line_uids if job.line_uids else []
+        
         for i, line in enumerate(job.lines):
             if self.cancel_event.is_set():
                 break
+                
+            # Ustalanie identyfikatora zadania
+            # Jeśli przekazano line_uids użyj ich, w przeciwnym razie użyj indeksu
+            if i < len(uids_map):
+                task_ident = uids_map[i]
+            else:
+                task_ident = str(i + 1)
                 
             def on_task_done(result):
                 ident, data, modified = result
@@ -555,6 +574,7 @@ class VerificationManager:
                 VerificationManager._worker_verify_task,
                 line=line,
                 index=i+1,
+                ident=task_ident,
                 ffprobe_path=job.ffprobe or '',
                 verify_hallucination=job.verify_hallucination,
                 verify_similarity=job.verify_similarity,

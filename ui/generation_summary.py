@@ -98,12 +98,6 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
         )
         self.btn_stop.grid(row=0, column=1, padx=10)
         
-        self.btn_close_progress = ctk.CTkButton(
-            self.progress_frame, text="Zamknij", command=self.destroy,
-            fg_color="gray", state="disabled", width=100
-        )
-        self.btn_close_progress.pack(side="bottom", pady=10)
-
         # Inicjalny update tekstu przycisku
         self._update_stats_preview()
 
@@ -160,9 +154,15 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
         self.is_running = False
         self.btn_pause.configure(state="disabled")
         self.btn_stop.configure(state="disabled")
-        self.btn_close_progress.configure(state="normal", fg_color="#2E8B57", hover_color="#1E613B")
+        # self.btn_close_progress.configure(state="normal", fg_color="#2E8B57", hover_color="#1E613B")
         self.lbl_progress.configure(text="Zakończono pomyślnie.")
         self.manager.unregister_progress_observer(self._update_progress_safe)
+        
+        # Oczekiwanie na manualne zamknięcie okna (X) po zakończeniu?
+        # A może automatycznie zamknąć? Użytkownik chciał usunięcia przycisku.
+        # Może sam zamknę oknie po krótkiej chwili?
+        # Albo po prostu zostawiam tak jak jest, tylko usunąłem przycisk - user zamknie 'X'.
+        pass
 
     def _toggle_pause(self):
         if not self.is_paused:
