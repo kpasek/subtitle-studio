@@ -64,6 +64,7 @@ class SubtitlePanel(ctk.CTkFrame):
         self.ver_stop_event = threading.Event()
         self.ver_ffprobe_path = shutil.which('ffprobe')
         self.ver_modified_buffer = []
+        self.ver_last_save_time = 0
 
         self._create_widgets()
 
@@ -801,11 +802,21 @@ class SubtitlePanel(ctk.CTkFrame):
                 continue
 
             try:
-                idx = int(k) - 1
-                if idx < 0 or idx >= len(self.app.lines):
+                line = None
+                uid = v.get('uid')
+                if uid and hasattr(self, 'ver_uid_map'):
+                    line = self.ver_uid_map.get(uid)
+                
+                if not line:
+                    try:
+                        idx = int(k) - 1
+                        if idx >= 0 and idx < len(self.app.lines):
+                            line = self.app.lines[idx]
+                    except ValueError:
+                        pass
+                
+                if not line:
                     continue
-                    
-                line = self.app.lines[idx]
                 
                 # Aktualizacja pól obiektu Line z danych otrzymanych od pracownika
                 line.audio_duration = v.get('audio_duration', line.audio_duration)
@@ -820,11 +831,17 @@ class SubtitlePanel(ctk.CTkFrame):
                 self.ver_modified_buffer.append(line)
                 any_changes = True
 
-                # Jeśli bufor przekroczył 100, zapisz do CSV
-                if len(self.ver_modified_buffer) >= 100:
+                # Jeśli bufor przekroczył 100 LUB minęło 10 sekund, zapisz do CSV
+                should_save = len(self.ver_modified_buffer) >= 100
+                if not should_save and self.ver_modified_buffer:
+                    if time.time() - getattr(self, 'ver_last_save_time', 0) > 10:
+                        should_save = True
+
+                if should_save:
                     try:
                         update_lines_in_csv(self.ver_modified_buffer)
                         self.ver_modified_buffer = []
+                        self.ver_last_save_time = time.time()
                     except Exception:
                         pass
 
@@ -849,6 +866,9 @@ class SubtitlePanel(ctk.CTkFrame):
                 self.ver_modified_buffer = []
 
             self.ver_running = False
+            if hasattr(self, 'ver_uid_map'):
+                self.ver_uid_map = None
+
             try:
                 self.after(0, lambda: self.app.set_status('Weryfikacja zakończona'))
             except Exception:
@@ -1235,6 +1255,8 @@ class SubtitlePanel(ctk.CTkFrame):
 
         self.ver_running = True
         self.ver_processed_count = 0  # Reset counter
+        self.ver_last_save_time = time.time()
+        self.ver_uid_map = {l.uid: l for l in self.app.lines if hasattr(l, 'uid')}
         
         self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
 
@@ -1253,56 +1275,12 @@ class SubtitlePanel(ctk.CTkFrame):
         # Callback wrapper
         def apply_cb(results: dict):
             try:
-                # Ponieważ wyniki z Workera mogą mieć ID oryginalne (względem przekazanej listy, czyli 1..N),
-                # a my potrzebujemy zmapować na oryginalne indeksy aplikacji do aktualizacji,
-                # jednak VerificationManager._worker_verify_task zwraca index (i+1) względem przekazanej listy job.lines.
-                # W _apply_verification_results logika opiera się na ID (1-based row number) lub UID.
-                # W obecnej implementacji _apply_verification_results szuka po UID lub przelicza ID -> index.
-                # Jeśli przekażemy subset, to ID zwrocone przez workera (1, 2, 3...) nie będą pasować do głównych linii (np. 50, 51, 52...).
-                # Musimy to obsłużyć.
-                
-                # UPDATE: W VerificationManager._worker_verify_task: index=i+1.
-                # Tutaj przekażemy subset. Więc worker zwróci ID=1 dla pierwszej wybranej linii.
-                # Jeśli ta linia to wiersz 50, to ID=1 może nadpisać wiersz 1!
-                # To jest problem.
-                
-                # Rozwiązanie:
-                # Worker powinien zwracać UID, a _apply_verification_results powinien preferować UID.
-                # Sprawdźmy _apply_verification_results.
                 self.after(0, lambda r=results: self._apply_verification_results(r))
             except Exception:
                 pass
 
         # Jeśli Worker bazuje na indexach, to mamy problem z podzbiorem.
-        # W VerificationManager._run_verification_job:
-        # for i, line in enumerate(job.lines): ... index=i+1 ...
-        #
-        # Rozwiązania:
-        # 1. Przekazać pełną listę linii, ale przefiltrować w workerze? Nie, worker ma iterować po zadaniach.
-        # 2. Zmodyfikować Worker/Job aby przyjmował explicit ID (lub indexy) dla każdej linii.
-        #    Ale VerificationJob przyjmuje `line_uids`. Może użyć UID jako klucza?
-        #    W _apply_verification_results:
-        #    k = key from results
-        #    ...
-        #    Może zróbmy tak: niech `verify_selected_dialogs` przekazuje wszystko do `start_verification` 
-        #    ale z flagą/filtrem? Nie `start_verification` bierze `self.app.lines`.
-        #
-        # 3. Zmodyfikujmy VerificationManager aby Worker dostawał też "oryginalny index" lub UID jako identyfikator zadania.
-        #    Aktualnie VerificationManager robi enumeracje job.lines.
-        
-        # OK, najprościej:
-        # W _apply_verification_results dodać logikę: jeśli w danych jest UID, szukaj po UID.
-        # result['uid'] = ...
-        # Sprawdźmy VerificationManager._worker_verify_task - zwraca asdict(line).
-        # Line ma 'uid'.
-        # Więc w res jest 'uid'.
-        # W _apply_verification_results:
-        # for k, v in data.items(): ...
-        #   uid = v.get('uid')
-        #   ... znajdź linię po uid ...
-        #
-        # Wygląda na to że to zadziała, pod warunkiem że _apply_verification_results obsługuje szukanie po UID.
-        pass
+        # Dlatego polegamy na mechanizmie UID zaimplementowanym w _apply_verification_results
         
         from audio.verification_manager import VerificationManager, VerificationJob
         manager = VerificationManager.get_instance()
