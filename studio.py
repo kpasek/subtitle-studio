@@ -23,7 +23,7 @@ from app.subtitles import SubtitlePanel
 from ui.menu import AppMenu
 
 # Refaktoryzacja IO -> app.io
-from app.io import load_subtitle_file, save_lines_to_file
+from app.io import load_subtitle_file, save_lines_to_file, set_project_path_provider
 from app.patterns import (apply_patterns as patterns_apply, BUILTIN_REMOVE, BUILTIN_REPLACE, 
                           apply_processing, _finalize_processing, open_pattern_manager,
                           open_add_remove_pattern, open_add_replace_pattern, open_edit_pattern,
@@ -89,6 +89,10 @@ class SubtitleStudioApp(ctk.CTk):
 
     def __init__(self):
         super().__init__(className="SubtitleStudio")
+        
+        # Rejestracja dostawcy ścieżki do pliku projektu (dla app.io)
+        set_project_path_provider(lambda: str(self.loaded_path) if self.loaded_path else None)
+
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.has_unsaved_changes = False
         self.global_config = {}

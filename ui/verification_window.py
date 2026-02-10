@@ -113,32 +113,30 @@ class VerificationWindow(ctk.CTkToplevel):
                 update_interval = 10
                 
                 modified_buffer = []
-                lp = getattr(self.master_app, 'loaded_path', None)
 
                 for i, line in enumerate(lines):
                     if panel.ver_stop_event.is_set():
                         break
-
-                    force = self.force_refresh.get()
-                
+                    
+                    # ... (reszta pętli)
                     line_obj, modified = VerificationManager.verify_line(
                         line=line,
                         ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
                         verify_duration=self.verify_duration_var.get(),
                         verify_hallucination=self.verify_hallucination_var.get(),
                         verify_similarity=self.verify_similarity_var.get(),
-                        force_refresh=force
+                        force_refresh=self.force_refresh.get()
                     )
                     self._processed_count += 1
 
-                    if modified and lp:
+                    if modified:
                         modified_buffer.append(line_obj)
                         
                         # Zapisuj co 100 zmodyfikowanych linii lub na końcu
                         if len(modified_buffer) >= 100:
                             try:
                                 from app.io import update_lines_in_csv
-                                update_lines_in_csv(str(lp), modified_buffer)
+                                update_lines_in_csv(modified_buffer)
                                 modified_buffer = []
                             except Exception as e:
                                 print(f"[VERIFY_SAVE_ERROR] {e}")
@@ -153,10 +151,10 @@ class VerificationWindow(ctk.CTkToplevel):
                             pass
 
                 # Zapisz pozostałe zmodyfikowane linie
-                if modified_buffer and lp:
+                if modified_buffer:
                     try:
                         from app.io import update_lines_in_csv
-                        update_lines_in_csv(str(lp), modified_buffer)
+                        update_lines_in_csv(modified_buffer)
                     except Exception as e:
                         print(f"[VERIFY_SAVE_FINAL_ERROR] {e}")
 

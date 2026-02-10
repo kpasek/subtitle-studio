@@ -828,10 +828,8 @@ class SubtitlePanel(ctk.CTkFrame):
 
                 # Jeśli bufor przekroczył 100, zapisz do CSV
                 if len(self.ver_modified_buffer) >= 100:
-                    lp = getattr(self.app, 'loaded_path', None)
-                    if lp:
-                        update_lines_in_csv(str(lp), self.ver_modified_buffer)
-                        self.ver_modified_buffer = []
+                    update_lines_in_csv(self.ver_modified_buffer)
+                    self.ver_modified_buffer = []
 
             except Exception as e:
                 print(f"[VERIFY_APPLY_ERROR] {e}")
@@ -841,9 +839,7 @@ class SubtitlePanel(ctk.CTkFrame):
         if '__done' in data or data.get('__done') is True:
             # Finalny zapis bufora
             if self.ver_modified_buffer:
-                lp = getattr(self.app, 'loaded_path', None)
-                if lp:
-                    update_lines_in_csv(str(lp), self.ver_modified_buffer)
+                update_lines_in_csv(self.ver_modified_buffer)
                 self.ver_modified_buffer = []
 
             self.ver_running = False
