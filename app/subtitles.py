@@ -786,10 +786,20 @@ class SubtitlePanel(ctk.CTkFrame):
         from app.io import update_lines_in_csv
 
         any_changes = False
+        batch_processed_count = 0
         
         for k, v in data.items():
             if k == '__done':
                 continue
+                
+            batch_processed_count += 1
+            
+            # Sprawdź czy to faktyczna aktualizacja
+            is_modified = v.get('__modified', True) # Domyślnie True dla kompatybilności
+            
+            if not is_modified:
+                continue
+
             try:
                 idx = int(k) - 1
                 if idx < 0 or idx >= len(self.app.lines):
@@ -812,18 +822,30 @@ class SubtitlePanel(ctk.CTkFrame):
 
                 # Jeśli bufor przekroczył 100, zapisz do CSV
                 if len(self.ver_modified_buffer) >= 100:
-                    update_lines_in_csv(self.ver_modified_buffer)
-                    self.ver_modified_buffer = []
+                    try:
+                        update_lines_in_csv(self.ver_modified_buffer)
+                        self.ver_modified_buffer = []
+                    except Exception:
+                        pass
 
             except Exception as e:
                 print(f"[VERIFY_APPLY_ERROR] {e}")
                 continue
+        
+        # Aktualizacja licznika postępu
+        if hasattr(self, 'ver_processed_count'):
+            self.ver_processed_count += batch_processed_count
+        else:
+            self.ver_processed_count = batch_processed_count
 
         # handle special flags
         if '__done' in data or data.get('__done') is True:
             # Finalny zapis bufora
             if self.ver_modified_buffer:
-                update_lines_in_csv(self.ver_modified_buffer)
+                try:
+                    update_lines_in_csv(self.ver_modified_buffer)
+                except Exception:
+                    pass
                 self.ver_modified_buffer = []
 
             self.ver_running = False
@@ -843,8 +865,11 @@ class SubtitlePanel(ctk.CTkFrame):
                 # Musimy jednak znać te linie. 'data' ma klucze będące indeksami + 1.
                 
                 indices_to_refresh = []
-                for k in data.keys():
+                for k, v in data.items():
                     if k == '__done': continue
+                    # Refreshing only modified ones
+                    if not v.get('__modified', True): continue
+                    
                     try:
                         indices_to_refresh.append(int(k) - 1)
                     except: pass

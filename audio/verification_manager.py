@@ -549,6 +549,9 @@ class VerificationManager:
         res['display_status'] = line.audio_status
         res['ext'] = line.audio_format
         
+        # Dodajemy flagę modyfikacji dla UI
+        res['__modified'] = modified
+        
         return str(index), res, modified
 
     def _run_verification_job(self, job: VerificationJob):

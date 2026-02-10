@@ -121,11 +121,17 @@ class VerificationWindow(ctk.CTkToplevel):
     def _on_stop(self):
         if not self.subtitle_panel:
             return
+        
+        # Prawidłowe zatrzymanie przez metodę panelu, która komunikuje się z Managerem
+        if hasattr(self.subtitle_panel, 'stop_verification'):
+            self.subtitle_panel.stop_verification()
+            
         try:
             self.subtitle_panel.ver_stop_event.set()
             self.subtitle_panel.ver_running = False
         except Exception:
             pass
+            
         self._running = False
         self._stop_poll()
         self.status_label.configure(text='Status: stopped')
