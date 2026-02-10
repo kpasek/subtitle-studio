@@ -1,5 +1,6 @@
 import threading
 import queue
+import time
 import requests
 import json
 import os
@@ -14,6 +15,7 @@ from generators.elevenlabs_tts import ElevenLabsTTS
 from generators.tts_base import TTSBase
 from audio.audio_converter import AudioConverter
 from app.utils import ready_dir_from_audio_dir
+from app.worker import Worker, BatchResultTracker
 
 
 @dataclass
@@ -57,6 +59,8 @@ class GenerationManager:
         self.current_job: Optional[JobType] = None
         self.manager_thread: Optional[threading.Thread] = None
         self.cancel_event = threading.Event()
+        self.pause_event = threading.Event()  # Flaga pauzy
+        self.worker: Optional[Worker] = None
 
         self._observers_queue: List[Callable] = []
         self._observers_progress: List[Callable] = []
@@ -94,8 +98,24 @@ class GenerationManager:
         if self.current_job:
             print("Wysyłanie sygnału zatrzymania...")
             self.cancel_event.set()
+            if self.worker:
+                self.worker.stop(clear_queue=True)
         else:
             print("Brak bieżącego zadania do zatrzymania.")
+
+    def pause_current_job(self):
+        """Pauzuje aktualne zadanie."""
+        self.pause_event.set()
+        if self.worker:
+            self.worker.pause()
+        print("Zadanie wstrzymane.")
+
+    def resume_current_job(self):
+        """Wznawia aktualne zadanie."""
+        self.pause_event.clear()
+        if self.worker:
+            self.worker.resume()
+        print("Zadanie wznowione.")
 
     def _start_thread_if_needed(self):
         if self.manager_thread is None or not self.manager_thread.is_alive():
@@ -107,6 +127,7 @@ class GenerationManager:
         while not self.job_queue.empty():
             self.current_job = self.job_queue.get()
             self.cancel_event.clear()
+            self.pause_event.clear()
             self._notify_queue_observers()
 
             try:
@@ -190,6 +211,13 @@ class GenerationManager:
 
         # 2. Pętla generowania
         for i, (identifier, text) in enumerate(job.lines_to_generate):
+            # Obsługa pauzy
+            while self.pause_event.is_set():
+                if self.cancel_event.is_set():
+                    break
+                import time
+                time.sleep(0.5)
+
             if self.cancel_event.is_set():
                 raise InterruptedError()
 
@@ -226,12 +254,120 @@ class GenerationManager:
         self._notify_progress(total_to_gen, total_to_gen, "Zakończono.")
         print("DEBUG: Zadanie generowania zakończone sukcesem.")
 
+    @staticmethod
+    def _worker_convert_task_static(input_file, output_file, filter_settings, out_format):
+        try:
+            from audio.audio_converter import AudioConverter
+            conv = AudioConverter(filter_settings=filter_settings, out_format=out_format)
+            conv.parse_ogg(input_file, output_file)
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
     def _execute_convert_job(self, job: ConversionJob):
-        self._notify_indeterminate("Rozpoczynam konwertowanie audio...")
-        self._run_converter(job.audio_dir, job.converter_config)
+        self._notify_indeterminate("Skanowanie plików...")
+        
+        # 1. Konfiguracja workera
+        if self.worker:
+            self.worker.stop(clear_queue=True)
+            self.worker = None
+
+        try:
+             workers_count = int(job.converter_config.get("conversion_workers", 4))
+        except:
+             workers_count = 4
+
+        self.worker = Worker(name="ConversionWorker", num_threads=workers_count)
+
+        # 2. Skanowanie plików
+        audio_dir = job.audio_dir
+        output_dir = ready_dir_from_audio_dir(audio_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        converter_cfg = job.converter_config
+        out_fmt = converter_cfg.get("audio_output_format", "mp3")
+        filters = converter_cfg.get("ffmpeg_filters", {})
+        
+        # Tymczasowa instancja do budowania ścieżek
+        # (ewentualnie można przenieść logikę tu, ale użycie klasy jest czystsze)
+        temp_converter = AudioConverter(filter_settings=filters, out_format=out_fmt)
+
+        tasks = []
+        try:
+            for filename in os.listdir(audio_dir):
+                if filename.lower().endswith((".wav", ".ogg", ".mp3")):
+                    if filename.lower().endswith(".temp.ogg"):
+                        continue
+                    
+                    input_path = os.path.join(audio_dir, filename)
+                    output_path = temp_converter.build_output_file_path(filename, str(output_dir), out_fmt)
+                    
+                    if os.path.exists(output_path):
+                        continue
+                        
+                    tasks.append((input_path, output_path))
+        except Exception as e:
+             self._notify_progress(0, 1, f"Błąd skanowania katalogu: {e}")
+             return
+
+        total_tasks = len(tasks)
+        if total_tasks == 0:
+             self._notify_progress(1, 1, "Brak plików do konwersji lub wszystkie gotowe.")
+             return
+
+        self._notify_progress(0, total_tasks, f"Rozpoczynam konwersję {total_tasks} plików...")
+
+        # 3. Zlecanie zadań
+        # Zgodnie z wymaganiem: aktualizacja progress baru co 5 sekund
+        tracker = BatchResultTracker(total_tasks, flush_interval=5.0)
+        tracker.callback = lambda res: self._notify_progress(
+            tracker.processed, tracker.total, f"Konwertowanie... ({tracker.processed}/{tracker.total})"
+        )
+        
+        for inp, outp in tasks:
+            if self.cancel_event.is_set():
+                break
+                
+            def on_done(res):
+                 tracker.add_result(res, None) # res here is just boolean/result, not identifier. 
+                 # Wait, BatchResultTracker.add_result takes (identifier, data, is_modified).
+                 # Tracker expects an identifier to map results.
+                 # Let's fix this in manager usage. None is fine for data if we don't care.
+
+            # Important: tracker.add_result needs some identifier if we want valid buffer
+            # With `add_result(res, None)` -> identifier=res (which is True/False/tuple from worker)
+            # Worker returns (True, None) or (False, Error) in static method.
+            # Let's pass 'outp' as identifier to tracker via closure in on_done, wait.
+            # Tracker.add_result(identifier, data).
+            
+            # Correction:
+            def on_done_corrected(worker_res):
+                # worker_res is return from _worker_convert_task_static -> (success, error)
+                tracker.add_result(outp, {"success": worker_res[0], "error": worker_res[1]})
+
+            self.worker.add_task(
+                GenerationManager._worker_convert_task_static,
+                input_file=inp, 
+                output_file=outp,
+                filter_settings=filters,
+                out_format=out_fmt,
+                on_complete=on_done_corrected
+            )
+
+        # 4. Oczekiwanie
+        while not tracker.is_done and not self.cancel_event.is_set():
+            time.sleep(0.5)
+            # trackera nie musimy flushować bo w workerze (w on_done) jest add_result -> flush_if_needed
+            
+            # W przypadku pauzy worker jest zapauzowany, więc zadania nie schodzą, on_complete nie jest wołany
+            # więc pętla tutaj czeka. Jest OK.
+            
         if self.cancel_event.is_set():
-            raise InterruptedError()
-        self._notify_progress(1, 1, "Zakończono konwersję.")
+            if self.worker:
+                self.worker.stop(clear_queue=True)
+            raise InterruptedError("Konwersja anulowana przez użytkownika.")
+            
+        self._notify_progress(total_tasks, total_tasks, "Zakończono konwersję.")
 
     def _load_tts_model(self, model_name: str, config: dict) -> Union[Dict, TTSBase, None]:
         print(f"DEBUG: _load_tts_model wywołane dla: {model_name}")

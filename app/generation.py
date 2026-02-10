@@ -65,7 +65,7 @@ def enqueue_generate_all(app):
 def _execute_generate_all(app, overwrite: bool):
     tts_model = app._get_active_tts_model_name()
     if not tts_model:
-        return
+        return False
 
     dialogs_to_generate = []
 
@@ -88,7 +88,7 @@ def _execute_generate_all(app, overwrite: bool):
 
     if not dialogs_to_generate:
         messagebox.showinfo("Info", "Brak dialogów do wygenerowania (wszystkie istnieją lub są puste).")
-        return
+        return False
 
     def _on_generate(identifier: str, path: str):
         try:
@@ -117,8 +117,9 @@ def _execute_generate_all(app, overwrite: bool):
     )
     job.on_generate = _on_generate
     GenerationManager.get_instance().add_job(job)
-    show_generation_queue(app)
+    # show_generation_queue(app) # Moved to dedicated window progress
     app.set_status(f"Dodano {len(dialogs_to_generate)} linii do kolejki.")
+    return True
 
 
 def enqueue_convert_all(app):
@@ -158,45 +159,21 @@ def _execute_convert_all(app, overwrite: bool):
             try:
                 for f in ready_dir.glob("*.ogg"):
                     os.remove(f)
+                for f in ready_dir.glob("*.mp3"):
+                    os.remove(f)
             except Exception as e:
                 print(f"Błąd czyszczenia katalogu ready: {e}")
 
-    if os.name == 'nt':
-        converter_config = app._gather_converter_config()
-        workers = converter_config.get("conversion_workers", 4)
-        filters = converter_config.get("ffmpeg_filters", {})
-        fmt = converter_config.get("audio_output_format", "ogg")
+    if not app.current_project_path:
+        messagebox.showwarning("Brak projektu", "Zapisz projekt przed dodaniem do kolejki.", parent=app)
+        return False
 
-        if getattr(__import__('sys'), 'frozen', False):
-            exe_path = "converter.exe"
-        else:
-            exe_path = str(Path(__file__).parent.parent / "audio" / "converter.py")
-
-        cmd = [
-            exe_path,
-            "--path", str(app.audio_dir),
-            "--workers", str(workers),
-            "--format", fmt,
-            "--filters", json.dumps(filters)
-        ]
-        if not getattr(__import__('sys'), 'frozen', False):
-            cmd.insert(0, __import__('sys').executable)
-
-        try:
-            creation_flags = __import__('subprocess').CREATE_NEW_CONSOLE
-            __import__('subprocess').Popen(cmd, creationflags=creation_flags)
-            app.set_status("Rozpoczęto konwersję w nowym procesie.")
-        except Exception as e:
-            messagebox.showerror("Błąd uruchamiania konwersji", str(e), parent=app)
-    else:
-        if not app.current_project_path:
-            messagebox.showwarning("Brak projektu", "Zapisz projekt przed dodaniem do kolejki.", parent=app)
-            return
-        job = ConversionJob(
-            project_path=f"KONWERSJA - {app.current_project_path.name}",
-            audio_dir=app.audio_dir,
-            converter_config=app._gather_converter_config()
-        )
-        GenerationManager.get_instance().add_job(job)
-        app.show_generation_queue()
-        app.set_status("Dodano zadanie konwersji audio do kolejki.")
+    job = ConversionJob(
+        project_path=f"KONWERSJA - {app.current_project_path.name}",
+        audio_dir=app.audio_dir,
+        converter_config=app._gather_converter_config()
+    )
+    GenerationManager.get_instance().add_job(job)
+    # show_generation_queue(app) # Moved to dedicated window progress
+    app.set_status("Dodano zadanie konwersji audio do kolejki.")
+    return True

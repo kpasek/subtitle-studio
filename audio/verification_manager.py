@@ -18,7 +18,7 @@ from collections import Counter
 
 from app.entity import Line
 from app.io import get_audio_candidates, get_primary_audio_path, set_audio_dir, get_audio_dir
-from app.worker import Worker
+from app.worker import Worker, BatchResultTracker
 from dataclasses import asdict
 
 try:
@@ -573,58 +573,4 @@ class VerificationManager:
                 self.worker.stop(clear_queue=True)
         else:
             tracker.finish()
-
-
-
-class BatchResultTracker:
-    def __init__(self, total_items, callback):
-        self.total = total_items
-        self.processed = 0
-        self.modified = 0
-        self.callback = callback
-        self.buffer = {}
-        self.last_update_time = time.time()
-        self.lock = threading.Lock()
-        self.is_done = False
-        
-    def add_result(self, identifier, data, is_modified):
-        with self.lock:
-            self.processed += 1
-            if is_modified:
-                self.modified += 1
-                
-            if data:
-                self.buffer[identifier] = data
-            
-            self.flush_if_needed()
-                
-            if self.processed >= self.total:
-                self.is_done = True
-                self.finish()
-
-    def flush_if_needed(self):
-        now = time.time()
-        # Flush if 1 second passed or finished all (and have updates)
-        if (now - self.last_update_time >= 1.0) or (self.processed >= self.total and self.processed > 0):
-            self._flush()
-            self.last_update_time = now
-            
-    def finish(self):
-        self._flush()
-        if self.callback:
-            try:
-                self.callback({'__done': True})
-            except:
-                pass
-
-    def _flush(self):
-        if not self.buffer:
-            return
-            
-        if self.callback:
-            try:
-                self.callback(self.buffer.copy())
-            except:
-                pass
-        self.buffer.clear()
 

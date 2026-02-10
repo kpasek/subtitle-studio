@@ -150,6 +150,76 @@ class Worker:
             finally:
                 self._queue.task_done()
 
+
+class BatchResultTracker:
+    """Klasa pomocnicza do śledzenia postępu grupy zadań i buforowania wyników."""
+    def __init__(self, total_items, callback=None, flush_interval=1.0):
+        self.total = total_items
+        self.processed = 0
+        self.modified = 0
+        self.callback = callback
+        self.flush_interval = flush_interval
+        self.buffer = {}
+        self.last_update_time = time.time()
+        self.lock = threading.Lock()
+        self.is_done = False
+        self.errors = []
+        
+    def add_result(self, identifier, data, is_modified=False):
+        with self.lock:
+            self.processed += 1
+            if is_modified:
+                self.modified += 1
+                
+            if data:
+                self.buffer[identifier] = data
+            
+            self.flush_if_needed()
+                
+            if self.processed >= self.total:
+                self.is_done = True
+                self.finish()
+
+    def add_error(self, identifier, error_msg):
+        with self.lock:
+            self.processed += 1
+            self.errors.append((identifier, error_msg))
+            self.flush_if_needed()
+            if self.processed >= self.total:
+                self.is_done = True
+                self.finish()
+
+    def flush_if_needed(self):
+        now = time.time()
+        # Flush if interval passed or finished all (and have updates)
+        if (now - self.last_update_time >= self.flush_interval) or (self.processed >= self.total and self.processed > 0):
+            self._flush()
+            self.last_update_time = now
+            
+    def finish(self):
+        self._flush()
+        if self.callback:
+            try:
+                # Przekazujemy info o błędach jeśli takie były
+                final_status = {'__done': True}
+                if self.errors:
+                    final_status['__errors'] = self.errors
+                self.callback(final_status)
+            except:
+                pass
+
+    def _flush(self):
+        if not self.buffer:
+            return
+            
+        if self.callback:
+            try:
+                self.callback(self.buffer.copy())
+            except:
+                pass
+        self.buffer.clear()
+
+
     def get_queue_size(self) -> int:
         return self._queue.qsize()
 
