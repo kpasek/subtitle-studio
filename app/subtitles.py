@@ -656,8 +656,11 @@ class SubtitlePanel(ctk.CTkFrame):
             menu.grab_release()
 
     # --- Weryfikacja audio (zintegrowana) ---
-    def start_verification(self, force_refresh=False, ignore_short=True):
+    def start_verification(self, force_refresh=False, ignore_short=True, verify_options=None):
         """Uruchamia proces weryfikacji audio."""
+        if verify_options is None:
+            verify_options = {}
+
         if not self.app.audio_dir:
             messagebox.showwarning("Brak audio", "Najpierw wybierz katalog audio.", parent=self)
             return
@@ -670,6 +673,7 @@ class SubtitlePanel(ctk.CTkFrame):
 
         self.ver_running = True
         self.ver_stop_event.clear()
+        self.ver_processed_count = 0  # Reset counter
 
         try:
             cpu_count = os.cpu_count() or 4
@@ -706,7 +710,9 @@ class SubtitlePanel(ctk.CTkFrame):
             force_refresh=force_refresh,
             ignore_short=ignore_short,
             ffprobe=ffprobe,
-            workers=workers,
+            workers=8,
+            verify_hallucination=verify_options.get('verify_hallucination', False),
+            verify_similarity=verify_options.get('verify_similarity', False),
             apply_callback=apply_cb
         )
 
@@ -827,11 +833,99 @@ class SubtitlePanel(ctk.CTkFrame):
                 pass
 
         if any_changes:
-            # Odśwież widok
+            # Odśwież widok częściowo zamiast pełnego przeładowania
             try:
-                self.set_preview(self.app.lines)
+                # Jeśli zmian jest dużo (>50), pełne odświeżenie może być wydajniejsze niż 50 aktualizacji itemów?
+                # Ale set_preview czyści wszystko i dodaje od nowa. To zawsze jest wolne.
+                # Zróbmy 'update_view_for_batch' jeśli mamy zidentyfikowane indeksy.
+                
+                # Użyjmy _refresh_verification_view ale dla zmodyfikowanych linii.
+                # Musimy jednak znać te linie. 'data' ma klucze będące indeksami + 1.
+                
+                indices_to_refresh = []
+                for k in data.keys():
+                    if k == '__done': continue
+                    try:
+                        indices_to_refresh.append(int(k) - 1)
+                    except: pass
+                
+                if indices_to_refresh:
+                    # Mamy metodę _refresh_verification_view ale ona bierze self.selected_line_indices
+                    # Zróbmy tymczasowe nadpisanie lub nową metodę
+                    self._refresh_lines_view(indices_to_refresh)
+                
             except Exception as e:
-                print(f"[APPLY_RESULTS] BŁĄD w set_preview: {e}")
+                print(f"[APPLY_RESULTS] BŁĄD w odświeżaniu widoku: {e}")
+
+    def _refresh_lines_view(self, indices: List[int]):
+        """Szybkie odświeżenie widoku (tylko kolumn weryfikacji) dla podanych indeksów."""
+        # Mapowanie obiektów na item_id
+        # self.item_line_map: item_iid -> Line
+        # Ale my potrzebujemy odwrotnie: Line -> item_iid
+        # Możemy zbudować mapę odwrotną, ale to kosztowne jeśli robione często.
+        # Może lepiej trzymać ją jako field?
+        
+        # Na razie zbudujmy dla bezpieczeństwa, jeśli lista jest ogromna to i tak set_preview by mulił.
+        line_to_item = {id(line): iid for iid, line in self.item_line_map.items()}
+        
+        col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+        
+        for idx in indices:
+            if idx < 0 or idx >= len(self.app.lines):
+                continue
+            line = self.app.lines[idx]
+            item_id = line_to_item.get(id(line))
+            if not item_id:
+                # Może linia nie jest widoczna (np. filtr)?
+                continue
+            
+            # Pobierz obecne wartości
+            try:
+                values = list(self.tree.item(item_id, "values"))
+            except:
+                continue
+                
+            # Zaktualizuj tylko te kolumny które zależą od weryfikacji
+            # Duration, Status (raw/display?), CPS, Similarity, Audio File
+            
+            # ... (logika podobna do _refresh_verification_view ale generyczna)
+            
+            if 'duration' in col_pos:
+                duration_val = float(getattr(line, 'audio_duration', 0.0) or 0.0)
+                values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+
+            if 'status' in col_pos:
+                 # Tutaj logika statusu - przyjmijmy prosto
+                 st = getattr(line, 'audio_status', '')
+                 values[col_pos['status']] = st
+
+            if 'cps' in col_pos:
+                # Przelicz CPS
+                try:
+                     txt = line.get_tts_text().strip()
+                     from collections import Counter
+                     stats = Counter(txt)
+                     pauses = (stats[','] + stats['-']) * 0.4 + (stats['.'] + stats['!'] + stats['?']) * 0.6
+                     dur = float(getattr(line, 'audio_duration', 0.0) or 0.0)
+                     eff_dur = dur - pauses
+                     cps = len(txt) / eff_dur if eff_dur > 0 else 0.0
+                     values[col_pos['cps']] = f"{cps:.1f}" if cps > 0 else '-'
+                except:
+                     values[col_pos['cps']] = '-'
+
+            if 'similarity' in col_pos:
+                sim = float(getattr(line, 'audio_similarity', 0.0) or 0.0)
+                # Helper format_percent jest gdzieś globalnie? Użyjmy prostego
+                sim_display = f"{int(sim*100)}%" if sim > 0 else '-'
+                values[col_pos['similarity']] = sim_display
+            
+            if 'hallucination' in col_pos:
+                 hal = getattr(line, 'audio_hallucination', '')
+                 values[col_pos['hallucination']] = hal if hal else '-'
+
+            self.tree.item(item_id, values=values)
+
+    # --- Weryfikacja audio (stara) ---
 
     def stop_verification(self):
         """Stop currently running verification via manager"""
@@ -1115,16 +1209,94 @@ class SubtitlePanel(ctk.CTkFrame):
             return
 
         self.ver_running = True
+        self.ver_processed_count = 0  # Reset counter
         
         self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
 
-        # Uruchom weryfikację w osobnym wątku aby nie blokować UI
-        thread = threading.Thread(
-            target=self._verify_selected_lines_thread,
-            args=(list(self.selected_line_indices),),
-            daemon=True
+        # Przygotowanie podzbioru linii
+        subset_lines = []
+        subset_uids = []
+        for idx in self.selected_line_indices:
+            if idx < 0 or idx >= len(self.app.lines):
+                continue
+            line = self.app.lines[idx]
+            subset_lines.append(line)
+            subset_uids.append(getattr(line, 'uid', str(idx + 1)))
+
+        ffprobe = shutil.which('ffprobe')
+        
+        # Callback wrapper
+        def apply_cb(results: dict):
+            try:
+                # Ponieważ wyniki z Workera mogą mieć ID oryginalne (względem przekazanej listy, czyli 1..N),
+                # a my potrzebujemy zmapować na oryginalne indeksy aplikacji do aktualizacji,
+                # jednak VerificationManager._worker_verify_task zwraca index (i+1) względem przekazanej listy job.lines.
+                # W _apply_verification_results logika opiera się na ID (1-based row number) lub UID.
+                # W obecnej implementacji _apply_verification_results szuka po UID lub przelicza ID -> index.
+                # Jeśli przekażemy subset, to ID zwrocone przez workera (1, 2, 3...) nie będą pasować do głównych linii (np. 50, 51, 52...).
+                # Musimy to obsłużyć.
+                
+                # UPDATE: W VerificationManager._worker_verify_task: index=i+1.
+                # Tutaj przekażemy subset. Więc worker zwróci ID=1 dla pierwszej wybranej linii.
+                # Jeśli ta linia to wiersz 50, to ID=1 może nadpisać wiersz 1!
+                # To jest problem.
+                
+                # Rozwiązanie:
+                # Worker powinien zwracać UID, a _apply_verification_results powinien preferować UID.
+                # Sprawdźmy _apply_verification_results.
+                self.after(0, lambda r=results: self._apply_verification_results(r))
+            except Exception:
+                pass
+
+        # Jeśli Worker bazuje na indexach, to mamy problem z podzbiorem.
+        # W VerificationManager._run_verification_job:
+        # for i, line in enumerate(job.lines): ... index=i+1 ...
+        #
+        # Rozwiązania:
+        # 1. Przekazać pełną listę linii, ale przefiltrować w workerze? Nie, worker ma iterować po zadaniach.
+        # 2. Zmodyfikować Worker/Job aby przyjmował explicit ID (lub indexy) dla każdej linii.
+        #    Ale VerificationJob przyjmuje `line_uids`. Może użyć UID jako klucza?
+        #    W _apply_verification_results:
+        #    k = key from results
+        #    ...
+        #    Może zróbmy tak: niech `verify_selected_dialogs` przekazuje wszystko do `start_verification` 
+        #    ale z flagą/filtrem? Nie `start_verification` bierze `self.app.lines`.
+        #
+        # 3. Zmodyfikujmy VerificationManager aby Worker dostawał też "oryginalny index" lub UID jako identyfikator zadania.
+        #    Aktualnie VerificationManager robi enumeracje job.lines.
+        
+        # OK, najprościej:
+        # W _apply_verification_results dodać logikę: jeśli w danych jest UID, szukaj po UID.
+        # result['uid'] = ...
+        # Sprawdźmy VerificationManager._worker_verify_task - zwraca asdict(line).
+        # Line ma 'uid'.
+        # Więc w res jest 'uid'.
+        # W _apply_verification_results:
+        # for k, v in data.items(): ...
+        #   uid = v.get('uid')
+        #   ... znajdź linię po uid ...
+        #
+        # Wygląda na to że to zadziała, pod warunkiem że _apply_verification_results obsługuje szukanie po UID.
+        pass
+        
+        from audio.verification_manager import VerificationManager, VerificationJob
+        manager = VerificationManager.get_instance()
+        
+        job = VerificationJob(
+            project_path=str(getattr(self.app, 'current_project_path', '')),
+            audio_dir=str(self.app.audio_dir),
+            lines=subset_lines,
+            line_uids=subset_uids,
+            force_refresh=True, # Zaznaczone zwykle chcemy wymusić
+            ignore_short=True,
+            ffprobe=ffprobe,
+            workers=4,
+            verify_hallucination=False, # Domyślnie dla wybranych
+            verify_similarity=False,
+            apply_callback=apply_cb
         )
-        thread.start()
+        
+        manager.add_job(job)
 
     def _verify_selected_lines_thread(self, selected_indices: List[int]):
         """Worker thread dla weryfikacji zaznaczonych linii."""

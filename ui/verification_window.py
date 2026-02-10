@@ -91,89 +91,30 @@ class VerificationWindow(ctk.CTkToplevel):
     def _on_start(self):
         if not self.subtitle_panel:
             return
-        # start verification in background thread (local implementation)
-        def run_verification():
-            try:
-                panel = self.subtitle_panel
-                # initialize state
-                panel.ver_running = True
-                panel.ver_stop_event.clear()
-                force = self.force_refresh.get()
 
-                lines = getattr(self.master_app, 'lines', [])
-                total = len(lines)
-                
-                # Diagnostyka
-                with_transcribed = sum(1 for line in lines if getattr(line, 'audio_transcribed_text', ''))
-                print(f"[VERIFY_START] Linie: {total}, z transkrypcją: {with_transcribed}")
-                
-                # Counter for UI refresh throttling
-                self._processed_count = 0
-                update_counter = 0
-                update_interval = 10
-                
-                modified_buffer = []
-
-                for i, line in enumerate(lines):
-                    if panel.ver_stop_event.is_set():
-                        break
-                    
-                    # ... (reszta pętli)
-                    line_obj, modified = VerificationManager.verify_line(
-                        line=line,
-                        ffprobe_path=getattr(panel, 'ver_ffprobe_path', None),
-                        verify_duration=self.verify_duration_var.get(),
-                        verify_hallucination=self.verify_hallucination_var.get(),
-                        verify_similarity=self.verify_similarity_var.get(),
-                        force_refresh=self.force_refresh.get()
-                    )
-                    self._processed_count += 1
-
-                    if modified:
-                        modified_buffer.append(line_obj)
-                        
-                        # Zapisuj co 100 zmodyfikowanych linii lub na końcu
-                        if len(modified_buffer) >= 100:
-                            try:
-                                from app.io import update_lines_in_csv
-                                update_lines_in_csv(modified_buffer)
-                                modified_buffer = []
-                            except Exception as e:
-                                print(f"[VERIFY_SAVE_ERROR] {e}")
-
-                    # Refresh UI periodically
-                    update_counter += 1
-                    if update_counter >= update_interval:
-                        update_counter = 0
-                        try:
-                            self.master_app.after(0, self._poll)
-                        except Exception:
-                            pass
-
-                # Zapisz pozostałe zmodyfikowane linie
-                if modified_buffer:
-                    try:
-                        from app.io import update_lines_in_csv
-                        update_lines_in_csv(modified_buffer)
-                    except Exception as e:
-                        print(f"[VERIFY_SAVE_FINAL_ERROR] {e}")
-
-                print(f"[VERIFY_DONE] Zweryfikowano: {self._processed_count} / {total}")
-                panel.ver_running = False
-                
-                # Final refresh
-                self.master_app.after(0, self.subtitle_panel.set_preview, self.master_app.lines)
-
-            except Exception as e:
-                print(f"[VERIFY_ERROR] {e}")
-                try:
-                    panel = self.subtitle_panel
-                    panel.ver_running = False
-                except Exception:
-                    pass
-
-        self._processed_count = 0
-        threading.Thread(target=run_verification, daemon=True).start()
+        # Pobieramy ustawienia z UI
+        force_refresh = self.force_refresh.get()
+        verify_duration = self.verify_duration_var.get()
+        verify_similarity = self.verify_similarity_var.get()
+        verify_hallucination = self.verify_hallucination_var.get()
+        
+        # Uruchamiamy weryfikację przez panel (który używa VerificationManager -> Worker)
+        self.subtitle_panel.start_verification(
+            force_refresh=force_refresh,
+            # Przekazujemy dodatkowe opcje, jeśli start_verification je obsługuje.
+            # Jeśli nie, musimy dodać obsługę w subtitles.py.
+            # Z contextu 'start_verification' przyjmuje force_refresh i ignore_short.
+            # Musimy zmodyfikować start_verification w subtitles.py aby przyjmował te parametry
+            # lub zaktualizować ten kod po modyfikacji tamtego.
+            # Ale zaraz... VerificationJob ma te pola.
+            # Więc lepiej przekażmy je do start_verification (na razie jako kwargs lub zmodyfikujmy start_verification).
+            verify_options={
+                'verify_duration': verify_duration,
+                'verify_similarity': verify_similarity,
+                'verify_hallucination': verify_hallucination
+            }
+        )
+        
         self._running = True
         self._start_poll()
 
@@ -204,9 +145,32 @@ class VerificationWindow(ctk.CTkToplevel):
 
     def _poll(self):
         try:
+            # Teraz korzystamy z worker'a w VerificationManager
+            manager = VerificationManager.get_instance()
             total = len(getattr(self.master_app, 'lines', []))
-            processed = getattr(self, '_processed_count', 0)
+            
+            # Pobieramy postęp z Workera jeśli istnieje
+            processed = 0
+            if manager.worker:
+                 # To jest pewne uproszczenie - worker nie udostępnia wprost licznika 'processed' dla konkretnego joba
+                 # Ale możemy policzyć ile zeszło z kolejki (total - tasks_in_queue)
+                 # Albo lepiej - sprawdzić postęp w panelu (bo apply_callback tam aktualizuje)
+                 # Niestety panel nie trzyma licznika 'processed'. 
+                 # Musimy dodać obsługę w panelu.
+                 pass
+
+            # Fallback na stary sposób (panel.ver_running)
             running = getattr(self.subtitle_panel, 'ver_running', False)
+            
+            # W nowym podejściu _apply_verification_results jest wołane asynchronicznie.
+            # Musimy jakoś śledzić postęp w UI. 
+            # SubtitlePanel nie ma pola z liczbą przetworzonych.
+            # Zostawmy na razie 'indeterminate' albo 'running' bez licznika liczbowego,
+            # LUB dodajmy licznik w SubtitlePanel.
+            
+            # Spróbujmy odczytać z panelu, jeśli dodamy tam licznik
+            processed = getattr(self.subtitle_panel, 'ver_processed_count', 0)
+            
             pct = 0.0
             if total > 0:
                 pct = min(100.0, (processed / total) * 100.0)
@@ -217,9 +181,13 @@ class VerificationWindow(ctk.CTkToplevel):
             else:
                 st = 'Idle: ' + st
             self.status_label.configure(text=st)
+            
+            if not running and self._running and processed >= total:
+                 self._running = False
+                 
         except Exception:
             pass
-        # Update UI every 1 second instead of 500ms to reduce rapid status updates
+        # Update UI every 1 second
         self._poll_job = self.after(1000, self._poll)
 
     def destroy(self):

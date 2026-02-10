@@ -17,7 +17,9 @@ from typing import Callable, Optional, List, Dict, Any, Tuple
 from collections import Counter
 
 from app.entity import Line
-from app.io import get_audio_candidates, get_primary_audio_path
+from app.io import get_audio_candidates, get_primary_audio_path, set_audio_dir, get_audio_dir
+from app.worker import Worker
+from dataclasses import asdict
 
 try:
     from mutagen.mp3 import MP3
@@ -57,6 +59,7 @@ class VerificationManager:
     _instance = None
     _lock = threading.Lock()
     _whisper_model = None  # Cache dla modelu Whisper
+    _model_lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -72,6 +75,7 @@ class VerificationManager:
         self.job_queue = queue.Queue()
         self.manager_thread: Optional[threading.Thread] = None
         self.cancel_event = threading.Event()
+        self.worker: Optional[Worker] = None
 
     @classmethod
     def get_instance(cls) -> 'VerificationManager':
@@ -300,8 +304,9 @@ class VerificationManager:
     @staticmethod
     def _get_whisper_model():
         """Załaduj model Whisper z cache'iem - aby nie ładować za każdym razem."""
-        if VerificationManager._whisper_model is None:
-            print(f"[INFO] Ładuję model Whisper (po raz pierwszy)...")
+        with VerificationManager._model_lock:
+            if VerificationManager._whisper_model is None:
+                print(f"[INFO] Ładuję model Whisper (po raz pierwszy)...")
             try:
                 # Sprawdź czy CUDA jest dostępne
                 import torch
@@ -501,6 +506,9 @@ class VerificationManager:
 
     def cancel_current(self):
         self.cancel_event.set()
+        if self.worker:
+            self.worker.stop(clear_queue=True)
+            self.worker = None
 
     def _process_queue(self):
         while not self.job_queue.empty():
@@ -512,84 +520,84 @@ class VerificationManager:
                 pass
         self.manager_thread = None
 
+    @staticmethod
+    def _worker_verify_task(line: Line, index: int, ffprobe_path: str, verify_hallucination: bool, verify_similarity: bool, force_refresh: bool, adir: Path):
+        """Metoda wykonywana przez workera."""
+        _, modified = VerificationManager.verify_line(
+            line=line,
+            ffprobe_path=ffprobe_path if ffprobe_path else None,
+            verify_duration=True,
+            verify_hallucination=verify_hallucination,
+            verify_similarity=verify_similarity,
+            force_refresh=force_refresh
+        )
+        
+        # Przygotowanie wyniku
+        res = asdict(line)
+        res['id'] = index
+        res['text'] = line.get_tts_text()
+        
+        if line.audio_filename and adir:
+            res['path'] = str(adir / line.audio_filename)
+        else:
+            res['path'] = None
+            
+        res['duration'] = line.audio_duration
+        res['similarity'] = line.audio_similarity
+        res['transcribed_text'] = line.audio_transcribed_text
+        res['hallucination'] = line.audio_hallucination
+        res['display_status'] = line.audio_status
+        res['ext'] = line.audio_format
+        
+        return str(index), res, modified
+
     def _run_verification_job(self, job: VerificationJob):
-        # spawn worker processes that write per-worker JSON files
-        tmpdir = tempfile.gettempdir()
-        uid = uuid.uuid4().hex
-        workers = max(1, job.workers)
-        out_files = []
-        procs = []
-        for wi in range(workers):
-            out_path = str(Path(tmpdir) / f"cps_worker_{uid}.{wi}.json")
-            p = multiprocessing.Process(
-                target=_verification_process_entry,
-                args=(job.audio_dir, job.lines, job.line_uids, out_path, job.ffprobe or '', job.force_refresh, wi, workers, job.verify_hallucination, job.verify_similarity)
-            )
-            p.start()
-            procs.append(p)
-            out_files.append(out_path)
-
-        last_mtimes = {str(p): 0 for p in out_files}
-
-        # monitor outputs and call apply_callback with delta results
-        # We send only NEW items to the callback to avoid re-processing and duplicates
-        aggregated: Dict[str, Any] = {}
-        while not self.cancel_event.is_set():
-            any_alive = any(p.is_alive() for p in procs)
-            delta: Dict[str, Any] = {}
-            for outp in list(out_files):
-                pth = Path(outp)
-                if not pth.exists():
-                    continue
-                try:
-                    m = pth.stat().st_mtime
-                except Exception:
-                    continue
-                if m == last_mtimes.get(outp):
-                    continue
-                last_mtimes[outp] = m
-                try:
-                    with open(pth, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                except Exception:
-                    continue
-                
-                for k, v in data.items():
-                    aggregated[k] = v
-                    delta[k] = v
-
-            if delta and job.apply_callback:
-                try:
-                    job.apply_callback(delta)
-                except Exception:
-                    pass
-
-            if not any_alive:
+        num_workers = max(1, job.workers)
+        
+        # Konfiguracja workera - zawsze restartujemy dla pewności (czyszczenie kontekstu)
+        if self.worker:
+            self.worker.stop(clear_queue=True)
+            
+        self.worker = Worker(name="VerificationWorker", num_threads=num_workers)
+        
+        if job.audio_dir:
+            set_audio_dir(Path(job.audio_dir))
+            
+        current_audio_dir = get_audio_dir()
+        
+        tracker = BatchResultTracker(len(job.lines), job.apply_callback)
+        
+        for i, line in enumerate(job.lines):
+            if self.cancel_event.is_set():
                 break
-
-
+                
+            def on_task_done(result):
+                ident, data, modified = result
+                tracker.add_result(ident, data, modified)
+                
+            self.worker.add_task(
+                VerificationManager._worker_verify_task,
+                line=line,
+                index=i+1,
+                ffprobe_path=job.ffprobe or '',
+                verify_hallucination=job.verify_hallucination,
+                verify_similarity=job.verify_similarity,
+                force_refresh=job.force_refresh,
+                adir=current_audio_dir,
+                on_complete=on_task_done
+            )
+            
+        # Oczekiwanie na zakończenie
+        while not tracker.is_done and not self.cancel_event.is_set():
             time.sleep(0.5)
+            tracker.flush_if_needed()
+            
+        if self.cancel_event.is_set():
+            if self.worker:
+                self.worker.stop(clear_queue=True)
+        else:
+            tracker.finish()
 
-        # final callback with aggregated results
-        if job.apply_callback:
-            try:
-                job.apply_callback(aggregated.copy())
-            except Exception:
-                pass
-            # notify finished
-            try:
-                job.apply_callback({'__done': True})
-            except Exception:
-                pass
-
-        # cleanup
-        for outp in out_files:
-            try:
-                p = Path(outp)
-                if p.exists():
-                    p.unlink()
-            except Exception:
-                pass
 
     @staticmethod
     def save_verification_results_to_csv(results: List[dict], csv_path: str) -> bool:
@@ -625,86 +633,55 @@ class VerificationManager:
             return False
 
 
-# --- worker entry (updated to use verify_line static method) ---
-def _verification_process_entry(audio_dir: str, lines: List[Line], line_uids: list, out_file: str, ffprobe_path: str, force_refresh: bool, worker_idx: int = 0, total_workers: int = 1, verify_hallucination: bool = False, verify_similarity: bool = False):
-    """
-    Pracownik procesu do weryfikacji audio.
-    Zapisuje wyniki do JSON.
-    """
-    import json
-    import os
-    from pathlib import Path
-    from app.entity import Line
-    from dataclasses import asdict
-    from app.io import set_audio_dir, get_audio_dir
-    
-    if audio_dir:
-        set_audio_dir(Path(audio_dir))
-    
-    batch = {}
-    adir = get_audio_dir()
-    modified_count = 0
-    processed_count = 0
-    
-    def write_atomic(dct):
-        if not dct:
-            return
-        tmp = Path(out_file + '.tmp')
-        try:
-            with open(tmp, 'w', encoding='utf-8') as tf:
-                json.dump(dct, tf, ensure_ascii=False)
-            tmp.replace(out_file)
-            print(f"[DEBUG] Worker {worker_idx}: Zapisano batch z {len(dct)} wynikami do {out_file}")
-        except Exception:
-            pass
-
-    for i, line in enumerate(lines):
-        if total_workers and (i % total_workers) != worker_idx:
-            continue
+class BatchResultTracker:
+    def __init__(self, total_items, callback):
+        self.total = total_items
+        self.processed = 0
+        self.modified = 0
+        self.callback = callback
+        self.buffer = {}
+        self.last_update_time = time.time()
+        self.lock = threading.Lock()
+        self.is_done = False
         
-        processed_count += 1
-
-        # Weryfikacja linii (zwraca czy zmodyfikowano)
-        _, modified = VerificationManager.verify_line(
-            line=line,
-            ffprobe_path=ffprobe_path if ffprobe_path else None,
-            verify_hallucination=verify_hallucination,
-            verify_similarity=verify_similarity,
-            verify_duration=True,
-            force_refresh=force_refresh
-        )
-        
-        if modified:
-            modified_count += 1
+    def add_result(self, identifier, data, is_modified):
+        with self.lock:
+            self.processed += 1
+            if is_modified:
+                self.modified += 1
+                
+            if data:
+                self.buffer[identifier] = data
             
-        # Przygotowanie wyniku dla GUI
-        res = asdict(line)
-        res['id'] = i + 1
-        res['text'] = line.get_tts_text()
-        
-        # Ścieżka bezwzględna (bez ponownego szukania)
-        if line.audio_filename and adir:
-            res['path'] = str(adir / line.audio_filename)
-        else:
-            res['path'] = None
-        
-        # Kompatybilność wsteczna kluczy
-        res['duration'] = line.audio_duration
-        res['similarity'] = line.audio_similarity
-        res['transcribed_text'] = line.audio_transcribed_text
-        res['hallucination'] = line.audio_hallucination
-        res['display_status'] = line.audio_status
-        res['ext'] = line.audio_format
-        
-        ident = str(i + 1)
-        batch[ident] = res
-        
-        # Zapisujemy postęp cyklicznie (co 100 przetworzonych lub co 100 zmienionych wierszy)
-        if (modified and modified_count > 0 and modified_count % 100 == 0) or (processed_count % 100 == 0):
-            write_atomic(batch)
-            batch = {}
-    
-    # Finalny zapis pozostałości
-    if batch:
-        write_atomic(batch)
+            self.flush_if_needed()
+                
+            if self.processed >= self.total:
+                self.is_done = True
+                self.finish()
+
+    def flush_if_needed(self):
+        now = time.time()
+        # Flush if 1 second passed or finished all (and have updates)
+        if (now - self.last_update_time >= 1.0) or (self.processed >= self.total and self.processed > 0):
+            self._flush()
+            self.last_update_time = now
+            
+    def finish(self):
+        self._flush()
+        if self.callback:
+            try:
+                self.callback({'__done': True})
+            except:
+                pass
+
+    def _flush(self):
+        if not self.buffer:
+            return
+            
+        if self.callback:
+            try:
+                self.callback(self.buffer.copy())
+            except:
+                pass
+        self.buffer.clear()
 
