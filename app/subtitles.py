@@ -80,6 +80,11 @@ class SubtitlePanel(ctk.CTkFrame):
                                              fg_color="#2E8B57", hover_color="#1E613B")
         self.generate_button.pack(side="left", padx=4, pady=5)
 
+        self.btn_ai_tasks = ctk.CTkButton(top_frame, text="✨ Zadania AI", width=100,
+                                          command=self.open_ai_runner_selected,
+                                          fg_color="#8e44ad", hover_color="#9b59b6")
+        self.btn_ai_tasks.pack(side="left", padx=4, pady=5)
+
         self.verify_button = ctk.CTkButton(top_frame, text="✓ Weryfikuj", width=100,
                                            command=self.verify_selected_dialogs, state="disabled",
                                            fg_color="#1E90FF", hover_color="#4169E1")
@@ -1302,6 +1307,18 @@ class SubtitlePanel(ctk.CTkFrame):
              if idx < len(self.app.lines):
                  selected.append(self.app.lines[idx])
         return selected
+
+    def open_ai_runner_selected(self):
+        """Otwiera okno zadań AI dla zaznaczonych wierszy."""
+        from ui.ai_runner import AITaskRunnerWindow
+        
+        selected = self.get_selected_lines()
+        if not selected:
+             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self)
+             return
+
+        AITaskRunnerWindow(self.app, selected)
+
 
     def generate_selected_dialogs(self):
 

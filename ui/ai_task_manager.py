@@ -71,32 +71,48 @@ class AITaskManagerWindow(ctk.CTkToplevel):
         self.btn_delete.pack(side="right", padx=10, pady=10)
 
     def _refresh_list(self):
-        # Clear list
-        for widget in self.scroll_list.winfo_children():
-            widget.destroy()
+        # Safely clear list
+        try:
+            for widget in self.scroll_list.winfo_children():
+                widget.destroy()
+        except Exception:
+            # Ignoruj błędy jeśli widżet już nie istnieje
+            pass
 
         self.all_tasks = BUILTIN_TASKS + self.custom_tasks
 
         for task in self.all_tasks:
+             # Użycie helpera do capture variable
+            def make_cmd(t):
+                return lambda: self._select_task(t)
+
+            is_selected = (task == self.selected_task)
+
             btn = ctk.CTkButton(
                 self.scroll_list, 
                 text=f"{task.name} {'(Wbudowane)' if task.is_readonly else ''}",
-                command=lambda t=task: self._select_task(t),
-                fg_color="gray" if task == self.selected_task else "transparent",
-                text_color="white", # assume dark theme by default or let ctk handle
+                command=make_cmd(task),
+                fg_color=["#3B8ED0", "#1F6AA5"] if is_selected else "transparent",
+                text_color="white" if is_selected else ("#DCE4EE", "#DCE4EE"),
                 anchor="w"
             )
+            # Jeśli "transparent", ustawiamy hover color ręcznie
+            if not is_selected:
+                 btn.configure(hover_color=["#3A7EBF", "#325882"]) 
+            
             # Override default button color behavior for "list item" look
-            if task == self.selected_task:
-                btn.configure(fg_color=["#3B8ED0", "#1F6AA5"]) 
-            else:
-                btn.configure(fg_color="transparent")
+            # Note: fg_color="transparent" makes it look like a label but clickable
                 
             btn.pack(fill="x", padx=2, pady=2)
 
     def _select_task(self, task: AITask):
+        if self.selected_task == task:
+            return 
+
         self.selected_task = task
-        self._refresh_list() # To update selection highlight
+        # Nie odświeżaj całej listy (co niszczy przycisk, który kliknąłeś), 
+        # tylko zaktualizuj style. To zapobiega błędom i "utracie" kliknięcia.
+        self._update_list_styles()
         
         self.entry_name.delete(0, "end")
         self.entry_name.insert(0, task.name)
@@ -117,11 +133,32 @@ class AITaskManagerWindow(ctk.CTkToplevel):
             self.btn_delete.configure(state="normal")
             self.lbl_readonly.pack_forget()
 
+    def _update_list_styles(self):
+        """Aktualizuje kolory przycisków na liście bez ich niszczenia."""
+        try:
+            children = self.scroll_list.winfo_children()
+            for i, widget in enumerate(children):
+                if i >= len(self.all_tasks): break
+                
+                task = self.all_tasks[i]
+                is_selected = (task == self.selected_task)
+                
+                if isinstance(widget, ctk.CTkButton):
+                    widget.configure(
+                        fg_color=["#3B8ED0", "#1F6AA5"] if is_selected else "transparent",
+                        text_color="white" if is_selected else ("#DCE4EE", "#DCE4EE")
+                    )
+        except Exception:
+            pass
+
     def _add_task(self):
         new_task = AITask(name="Nowe zadanie", system_prompt="Opisz tutaj rolę modelu...")
         self.custom_tasks.append(new_task)
         self._save_to_config()
-        self._select_task(new_task)
+        self.selected_task = new_task
+        self._refresh_list() # Rebuild list to include new item
+        self._select_task(new_task) # Fill fields
+
 
     def _save_current_task(self):
         if not self.selected_task or self.selected_task.is_readonly:

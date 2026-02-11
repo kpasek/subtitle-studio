@@ -34,22 +34,27 @@ BUILTIN_TASKS = [
     ),
     AITask(
         name="Usuń onomatopeje",
-        system_prompt="Twoim zadaniem jest usunięcie z tekstu wszelkich onomatopei (np. pf, ehh, yyy, wrr, westchnienie, płacz). Usuń także opisy dźwięków w nawiasach. Zwróć tylko wyczyszczony tekst dialogu. Jeśli po usunięciu nic nie zostaje, zwróć pusty ciąg znaków.",
+        system_prompt="Twoim zadaniem jest usunięcie z tekstu wszelkich onomatopei (np. pf, ehh, yyy, wrr, westchnienie, płacz). Usuń także opisy dźwięków w nawiasach. Zwróć TYLKO wyczyszczony tekst dialogu. Jeśli po usunięciu nic nie zostaje, zwróć pusty ciąg znaków.",
         is_readonly=True
     ),
     AITask(
         name="Usuń znaki specjalne (dla lektora)",
-        system_prompt="Przygotuj tekst dla syntezatora mowy (TTS). Usuń znaki, których lektor nie powinien czytać (np. *, #, @, --). Pozostaw interpunkcję gramatyczną. Zwróć tylko gotowy tekst.",
+        system_prompt="Przygotuj tekst dla syntezatora mowy (TTS). Usuń znaki, których lektor nie powinien czytać (np. *, #, @, --). Pozostaw interpunkcję gramatyczną. Zwróć TYLKO gotowy tekst.",
         is_readonly=True
     ),
     AITask(
         name="Daty na formę fonetyczną",
-        system_prompt="Zamień wszystkie daty i liczby w tekście na ich pełną formę słowną w języku polskim (np. '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć tylko przetworzony tekst.",
+        system_prompt="Zamień wszystkie daty i liczby w tekście na ich pełną formę słowną w języku polskim (np. '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.",
+        is_readonly=True
+    ),
+    AITask(
+        name="Liczby na formę fonetyczną",
+        system_prompt="Zamień wszystkie liczby w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.",
         is_readonly=True
     ),
     AITask(
         name="Korekta językowa",
-        system_prompt="Jesteś korektorem. Popraw błędy ortograficzne, interpunkcyjne i stylistyczne w podanym tekście. Nie zmieniaj sensu wypowiedzi. Zwróć tylko poprawiony tekst.",
+        system_prompt="Jesteś korektorem. Popraw błędy ortograficzne, interpunkcyjne i stylistyczne w podanym tekście. Nie zmieniaj sensu wypowiedzi. Zwróć TYLKO poprawiony tekst.",
         is_readonly=True
     )
 ]
