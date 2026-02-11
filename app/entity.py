@@ -7,8 +7,8 @@ from typing import Optional
 class PatternItem:
     pattern: str
     replace: str = ""
-    case_sensitive: bool = True,
-    name: str | None = None,
+    case_sensitive: bool = True
+    name: str | None = None
     enabled: bool = True
 
     def to_json(self):

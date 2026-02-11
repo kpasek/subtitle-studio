@@ -72,10 +72,6 @@ class SubtitlePanel(ctk.CTkFrame):
         stats_frame = ctk.CTkFrame(self)
         stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
-        ctk.CTkButton(stats_frame, text="Zatwierdź zmiany",
-                      command=lambda: apply_processing(self.app),
-                      fg_color="#2E8B57", hover_color="#1E613B").pack(side="left", padx=5)
-
         ctk.CTkLabel(stats_frame, text="Widok:").pack(side="left", padx=(15, 5))
         self.view_switcher = ctk.CTkSegmentedButton(
             stats_frame,

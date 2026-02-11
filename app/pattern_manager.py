@@ -1,9 +1,11 @@
+import re
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk
 from typing import List, TYPE_CHECKING, Optional
 
 from app.entity import PatternItem
+from app.patterns import apply_processing
 
 if TYPE_CHECKING:
     from studio import SubtitleStudioApp
@@ -92,6 +94,12 @@ class PatternManagerWindow(ctk.CTkToplevel):
         # -- Sekcja Custom Remove --
         ctk.CTkLabel(self.left_frame, text="Twoje wzorce wycinające (Napisy)", font=("", 13, "bold")).grid(
             row=1, column=0, sticky="w", padx=5, pady=(2, 2))
+
+        # === ZATWIERDŹ ZMIANY (Button) ===
+        ctk.CTkButton(search_frame, text="Zatwierdź zmiany", 
+                      command=lambda: apply_processing(self.master_app),
+                      fg_color="#2E8B57", hover_color="#1E613B", 
+                      height=28).pack(side="right", padx=5)
 
         self.tree_custom_remove = self._create_treeview(self.left_frame, ["Status", "Wzorzec"])
         self.tree_custom_remove.grid(row=2, column=0, sticky="nsew", padx=5, pady=0)
@@ -192,13 +200,13 @@ class PatternManagerWindow(ctk.CTkToplevel):
 
     def refresh_ui(self):
         """Przerysowuje wszystkie listy."""
-        search = self.search_var.get().lower()
+        search = self.search_var.get()
 
         self._populate_tree(self.tree_custom_remove, self.master_app.custom_remove, is_custom=True, search=search)
         self._populate_tree(self.tree_custom_replace, self.master_app.custom_replace, is_custom=True, search=search)
 
-        self._populate_tree(self.tree_builtin_remove, self.master_app.builtin_remove, is_custom=False)
-        self._populate_tree(self.tree_builtin_replace, self.master_app.builtin_replace, is_custom=False)
+        self._populate_tree(self.tree_builtin_remove, self.master_app.builtin_remove, is_custom=False, search=search)
+        self._populate_tree(self.tree_builtin_replace, self.master_app.builtin_replace, is_custom=False, search=search)
 
     def _get_display_text(self, p: PatternItem) -> str:
         """Tworzy tekst do wyświetlenia w liście (bezpiecznie)."""
@@ -216,23 +224,57 @@ class PatternManagerWindow(ctk.CTkToplevel):
         for item in tree.get_children():
             tree.delete(item)
 
+        # Decyzja o trybie wyszukiwania
+        search_regex = None
+        use_simple_search = True
+        
+        if search:
+            # Jeśli user użył znaków kotwic, zakładamy świadomy Regex
+            if search.startswith('^') or search.endswith('$'):
+                use_simple_search = False
+                try:
+                    search_regex = re.compile(search, re.IGNORECASE)
+                except re.error:
+                    # Błędny regex -> fallback to simple
+                    use_simple_search = True
+            
+            # W przeciwnym razie prosty tekst
+
         for i, p in enumerate(data_list):
-            display_text = self._get_display_text(p)
+            try:
+                display_text = self._get_display_text(p)
+                
+                # Filtrowanie
+                if search:
+                    name_str = str(p.name) if p.name else ""
+                    pat_str = str(p.pattern) if p.pattern else ""
+                    rep_str = str(p.replace) if p.replace else ""
+                    
+                    if use_simple_search:
+                        # Proste wyszukiwanie (containment)
+                        s_lower = search.lower()
+                        if (s_lower not in pat_str.lower() and 
+                            s_lower not in rep_str.lower() and 
+                            s_lower not in name_str.lower()):
+                            continue
+                    elif search_regex:
+                        # Wyszukiwanie Regex
+                        if not (search_regex.search(pat_str) or 
+                                search_regex.search(rep_str) or 
+                                search_regex.search(name_str)):
+                            continue
 
-            if is_custom and search:
-                name_str = p.name if isinstance(p.name, str) else ""
-                full_str = f"{p.pattern} {p.replace} {name_str}".lower()
-                if search not in full_str:
-                    continue
+                item_iid = str(id(p))
 
-            item_iid = str(id(p))
-
-            if is_custom:
-                status_icon = "✅" if p.enabled else "❌"
-                tags = ('disabled',) if not p.enabled else ()
-                tree.insert("", "end", iid=item_iid, values=(status_icon, display_text), tags=tags)
-            else:
-                tree.insert("", "end", iid=item_iid, values=(display_text,))
+                if is_custom:
+                    status_icon = "✅" if p.enabled else "❌"
+                    tags = ('disabled',) if not p.enabled else ()
+                    tree.insert("", "end", iid=item_iid, values=(status_icon, display_text), tags=tags)
+                else:
+                    tree.insert("", "end", iid=item_iid, values=(display_text,))
+            except Exception as e:
+                print(f"Error displaying pattern item {i}: {e}")
+                continue
 
         tree.tag_configure('disabled', foreground='gray')
 
