@@ -52,12 +52,30 @@ def apply_patterns(app, force_refresh=False):
     if not lines:
         return
 
-    lines = apply_remove_patterns(lines, app.custom_remove)
-    apply_replace_patterns(lines, app.custom_replace)
+    # Zbieranie wbudowanych wzorców, które są aktywne
+    active_builtin_remove = []
+    if hasattr(app, 'builtin_remove') and hasattr(app, 'builtin_remove_state'):
+        for i, pat in enumerate(app.builtin_remove):
+            if i < len(app.builtin_remove_state) and app.builtin_remove_state[i].get():
+                active_builtin_remove.append(pat)
+    
+    active_builtin_replace = []
+    if hasattr(app, 'builtin_replace') and hasattr(app, 'builtin_replace_state'):
+        for i, pat in enumerate(app.builtin_replace):
+            if i < len(app.builtin_replace_state) and app.builtin_replace_state[i].get():
+                active_builtin_replace.append(pat)
+
+    # Łączenie z customowymi
+    all_remove = active_builtin_remove + app.custom_remove
+    all_replace = active_builtin_replace + app.custom_replace
+
+    lines = apply_remove_patterns(lines, all_remove)
+    apply_replace_patterns(lines, all_replace)
 
     # Aktualizacja widoku
     app._update_subtitle_panel_content()
     app.set_status("Zaktualizowano podgląd.")
+
 
 
 def open_pattern_manager(app):

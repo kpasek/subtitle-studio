@@ -18,10 +18,12 @@ from app.pattern_manager import PatternManagerWindow
 from app.utils import resource_path, is_installed
 from app.entity import Line, PatternItem
 from app.subtitles import SubtitlePanel
+from app.worker import Worker
 from ui.menu import AppMenu
 
 # Refaktoryzacja IO -> app.io
 from app.io import set_project_path_provider
+
 from app.patterns import (apply_patterns as patterns_apply, BUILTIN_REMOVE, BUILTIN_REPLACE, 
                           open_pattern_manager,
                           open_add_remove_pattern, open_add_replace_pattern, open_edit_pattern,
@@ -127,8 +129,11 @@ class SubtitleStudioApp(ctk.CTk):
         self.project_config = {}
         self.torch_installed = is_installed('torch')
 
+        self.worker = Worker(name="StudioWorker", num_threads=2)
+
         self.queue = queue.Queue()
         self.queue_window: Optional[GenerationQueueWindow] = None
+
         self.pattern_manager_window: Optional[PatternManagerWindow] = None
 
         self.audio_dir: Optional[Path] = None
@@ -324,7 +329,7 @@ class SubtitleStudioApp(ctk.CTk):
         try:
             from app.io import update_line_in_csv
             if self.loaded_path:
-                update_line_in_csv(str(self.loaded_path), idx, lines[idx])
+                update_line_in_csv(lines[idx], str(self.loaded_path))
         except Exception as e:
             print(f"Błąd zapisu do CSV: {e}")
 
@@ -446,10 +451,13 @@ class SubtitleStudioApp(ctk.CTk):
         if _check_unsaved_changes(self):
             if hasattr(self, 'subtitle_panel'):
                 self.subtitle_panel.stop_audio()
+            if hasattr(self, 'worker'):
+                self.worker.stop()
             self.quit()
 
     def check_queue(self):
         try:
+
             task = self.queue.get_nowait()
             task()
         except queue.Empty:

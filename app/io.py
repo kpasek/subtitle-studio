@@ -378,11 +378,12 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
     fieldnames = [
         'original_text', 'text', 'tts_text', 'audio_duration',
         'audio_similarity', 'audio_format', 'audio_filename',
-        'audio_transcribed_text', 'audio_hallucination', 'status_flagename',
-        'audio_transcribed_text', 'audio_hallucination', 'uid'
+        'audio_transcribed_text', 'audio_hallucination', 'status_flag',
+        'uid'
     ]
     
     try:
+
         temp_path = p.with_suffix(p.suffix + ".upd.tmp")
         try:
             with open(temp_path, 'w', encoding='utf-8', newline='') as f:

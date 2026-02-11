@@ -697,7 +697,7 @@ class SubtitlePanel(ctk.CTkFrame):
         # Zapisz do CSV bezpośrednio
         try:
             if self.app.loaded_path:
-                update_line_in_csv(str(self.app.loaded_path), line_idx, self.app.lines[line_idx])
+                update_line_in_csv(self.app.lines[line_idx], str(self.app.loaded_path))
         except Exception as e:
             print(f"Błąd zapisu do CSV: {e}")
         
