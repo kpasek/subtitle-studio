@@ -53,19 +53,13 @@ class AppMenu:
         gen_menu.add_command(label="Weryfikacja", command=lambda: VerificationWindow(self.app), accelerator="Ctrl+Shift+Y")
         gen_menu.add_separator()
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=lambda: delete_all_converted_audio(self.app))
-        gen_menu.add_separator()
-        gen_menu.add_command(label="Pobierz napisy", command=lambda: download_clean(self.app))
-        gen_menu.add_command(label="Pobierz napisy TTS", command=lambda: download_replace(self.app))
-        gen_menu.add_command(label="Generuj preset", command=lambda: self._open_game_reader_export())
-        
-        # --- Weryfikacja: otwiera dedykowane okno sterujące weryfikacją ---
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
 
         # --- AI / Ollama ---
         ai_menu = tk.Menu(menubar, tearoff=0)
         ai_menu.add_command(label="Menedżer Zadań AI", command=lambda: AITaskManagerWindow(self.app))
         ai_menu.add_command(label="Uruchom zadania AI", command=lambda: self._run_ai_global())
-        menubar.add_cascade(label="AI", menu=ai_menu)
+        menubar.add_cascade(label="Zadania AI", menu=ai_menu)
         
         # --- Wzorce ---
         patterns_menu = tk.Menu(menubar, tearoff=0)
@@ -76,6 +70,12 @@ class AppMenu:
         patterns_menu.add_separator()
         patterns_menu.add_command(label="Usuwanie dialogów", command=lambda: self._run_audio_deleter())
         menubar.add_cascade(label="Wzorce", menu=patterns_menu)
+                
+        export_menu = tk.Menu(menubar, tearoff=0)
+        export_menu.add_command(label="Eksportuj napisy", command=lambda: download_clean(self.app))
+        export_menu.add_command(label="Eksportuj napisy TTS", command=lambda: download_replace(self.app))
+        export_menu.add_command(label="Generuj preset", command=lambda: self._open_game_reader_export())
+        menubar.add_cascade(label="Eksport", menu=export_menu)
 
         # --- Ustawienia ---
         settings_menu = tk.Menu(menubar, tearoff=0)
@@ -155,7 +155,7 @@ class AppMenu:
             messagebox.showwarning('Brak audio', 'Nie wybrano katalogu audio w projekcie.', parent=self.app)
             return
 
-        GameReaderExportWindow(self.app)
+        self.export_window = GameReaderExportWindow(self.app)
 
 
         

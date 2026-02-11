@@ -31,7 +31,7 @@ BUILTIN_TASKS = [
         name="Liczby i daty na formę fonetyczną",
         system_prompt=(
             "Zamień wszystkie liczby (w tym liczby rzymskie) i daty w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy', '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.\n"
-            "Jeśli masz wątpliwości co do tego jakiego typu liczby lub data jest lub nie jest to zawsze lepiej zwrócić oryginalny tekst bez żadnych przeróbek."
+            "Jeśli masz wątpliwości co do tego, czy dana liczba lub data jest liczbą lub datą, lepiej zawsze zwrócić oryginalny tekst bez żadnych przeróbek."
         ),
         is_readonly=True
     ),

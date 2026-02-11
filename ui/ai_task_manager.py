@@ -12,7 +12,7 @@ class AITaskManagerWindow(ctk.CTkToplevel):
         super().__init__(master)
         self.master = master
         self.title("Menedżer Zadań AI")
-        self.geometry("800x600")
+        self.geometry("1100x800")
         
         # Load custom tasks from config
         self.custom_tasks: List[AITask] = []
@@ -35,7 +35,7 @@ class AITaskManagerWindow(ctk.CTkToplevel):
         self.grid_rowconfigure(0, weight=1)
 
         # Left Panel
-        self.frame_left = ctk.CTkFrame(self, width=250)
+        self.frame_left = ctk.CTkFrame(self, width=500)
         self.frame_left.grid(row=0, column=0, sticky="ns", padx=10, pady=10)
         self.frame_left.grid_rowconfigure(0, weight=1)
 
@@ -114,6 +114,10 @@ class AITaskManagerWindow(ctk.CTkToplevel):
         # tylko zaktualizuj style. To zapobiega błędom i "utracie" kliknięcia.
         self._update_list_styles()
         
+        # Enable temporarily to update content
+        self.entry_name.configure(state="normal")
+        self.text_prompt.configure(state="normal")
+        
         self.entry_name.delete(0, "end")
         self.entry_name.insert(0, task.name)
         
@@ -127,8 +131,6 @@ class AITaskManagerWindow(ctk.CTkToplevel):
             self.btn_delete.configure(state="disabled")
             self.lbl_readonly.pack(pady=5)
         else:
-            self.entry_name.configure(state="normal")
-            self.text_prompt.configure(state="normal")
             self.btn_save.configure(state="normal")
             self.btn_delete.configure(state="normal")
             self.lbl_readonly.pack_forget()

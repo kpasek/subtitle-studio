@@ -693,6 +693,14 @@ class SubtitlePanel(ctk.CTkFrame):
             return
         
         item_id, col_idx, line_idx = self.inline_edit_item
+        
+        # Check if item still exists in tree (might have been removed or filtered out)
+        if not self.tree.exists(item_id):
+            self.inline_edit_entry.destroy()
+            self.inline_edit_entry = None
+            self.inline_edit_item = None
+            return
+
         new_text = self.inline_edit_entry.get()
         
         # Usuń entry widget
