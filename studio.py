@@ -313,6 +313,10 @@ class SubtitleStudioApp(ctk.CTk):
         idx = self.selected_line_index
         line: Line = lines[idx]
 
+        # Nie pozwalamy edytować linii oznaczonych jako gotowe
+        if getattr(line, 'status_flag', None) == "DONE":
+            return
+
         # Nie pozwalamy edytować oryginału
         if mode == "Oryginał":
             messagebox.showinfo("Info", "Nie można edytować oryginału.", parent=self)

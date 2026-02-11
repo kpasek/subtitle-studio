@@ -57,7 +57,7 @@ class SubtitlePanel(ctk.CTkFrame):
             {"id": "audio_file", "text": "Plik", "width": 250, "anchor": "w", "stretch": False},
         ]
 
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         # --- Weryfikacja audio ---
@@ -70,62 +70,82 @@ class SubtitlePanel(ctk.CTkFrame):
         self._create_widgets()
 
     def _create_widgets(self):
-        stats_frame = ctk.CTkFrame(self)
-        stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        # 1. Action Frame (Buttons)
+        action_frame = ctk.CTkFrame(self)
+        action_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5), padx=5)
+        
+        self.generate_button = ctk.CTkButton(action_frame, text="⚙️ Generuj", width=80,
+                                             command=self.generate_selected_dialogs, state="disabled",
+                                             fg_color="#2E8B57", hover_color="#1E613B")
+        self.generate_button.pack(side="left", padx=4, pady=5)
 
-        ctk.CTkLabel(stats_frame, text="Widok:").pack(side="left", padx=(15, 5))
+        self.verify_button = ctk.CTkButton(action_frame, text="✓ Weryfikuj", width=100,
+                                           command=self.verify_selected_dialogs, state="disabled",
+                                           fg_color="#1E90FF", hover_color="#4169E1")
+        self.verify_button.pack(side="left", padx=4, pady=5)
+        
+        # Flagi statusu
+        self.btn_flag_done = ctk.CTkButton(action_frame, text="✅ Gotowe", width=80,
+                                           command=lambda: self.set_selected_status("DONE"),
+                                           fg_color="#27ae60", hover_color="#2ecc71")
+        self.btn_flag_done.pack(side="left", padx=4, pady=5)
+
+        self.btn_flag_error = ctk.CTkButton(action_frame, text="⚠️ Błędne", width=80,
+                                            command=lambda: self.set_selected_status("ERROR"),
+                                            fg_color="#c0392b", hover_color="#e74c3c")
+        self.btn_flag_error.pack(side="left", padx=4, pady=5)
+        
+        self.btn_flag_clear = ctk.CTkButton(action_frame, text="⚪ Wyczyść", width=80,
+                                            command=lambda: self.set_selected_status(None),
+                                            fg_color="#7f8c8d", hover_color="#95a5a6")
+        self.btn_flag_clear.pack(side="left", padx=4, pady=5)
+
+        self.delete_all_button = ctk.CTkButton(action_frame, text="🗑️ Usuń audio", width=100,
+                                               command=self.delete_selected_dialogs, state="disabled",
+                                               fg_color="#C51616", hover_color="#920F0F")
+        self.delete_all_button.pack(side="left", padx=4, pady=5)
+        
+        self.filter_button = ctk.CTkButton(action_frame, text="Filtruj", command=self.open_filter_window, width=80)
+        self.filter_button.pack(side="right", padx=6, pady=5)
+
+
+        # 2. Status/Info Frame (View Mode, Update, Filename)
+        info_frame = ctk.CTkFrame(self)
+        info_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
+
+        ctk.CTkLabel(info_frame, text="Widok:").pack(side="left", padx=(15, 5))
         self.view_switcher = ctk.CTkSegmentedButton(
-            stats_frame,
+            info_frame,
             values=["Oryginał", "Napisy", "TTS"],
             variable=self.app.view_mode,
             command=self._on_view_mode_change,
             width=200
         )
-        self.view_switcher.pack(side="left", padx=5)
+        self.view_switcher.pack(side="left", padx=5, pady=5)
 
-        self.app.update_button = ctk.CTkButton(stats_frame, text="Nowa wersja!",
+        self.app.update_button = ctk.CTkButton(info_frame, text="Nowa wersja!",
                                                command=lambda: download_update(self.app),
                                                fg_color="#006400", hover_color="#004d00")
         self.app.update_button.pack(side="left", padx=5)
         self.app.update_button.pack_forget()
 
-        self.app.lbl_filename = ctk.CTkLabel(stats_frame, text="Brak wczytanego pliku")
+        self.app.lbl_filename = ctk.CTkLabel(info_frame, text="Brak wczytanego pliku")
         self.app.lbl_filename.pack(side="left", anchor="w", padx=5)
 
-        audio_btn_frame = ctk.CTkFrame(self)
-        audio_btn_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
 
-        audio_btn_frame.grid_columnconfigure(4, weight=1)
-
-        self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
-                                             command=self.generate_selected_dialogs, state="disabled",
-                                             fg_color="#2E8B57", hover_color="#1E613B")
-        self.generate_button.grid(row=0, column=0, padx=4)
-
-        self.verify_button = ctk.CTkButton(audio_btn_frame, text="✓ Weryfikuj", width=100,
-                                           command=self.verify_selected_dialogs, state="disabled",
-                                           fg_color="#1E90FF", hover_color="#4169E1")
-        self.verify_button.grid(row=0, column=1, padx=4)
-
-        self.delete_all_button = ctk.CTkButton(audio_btn_frame, text="🗑️ Usuń audio", width=100,
-                                               command=self.delete_selected_dialogs, state="disabled",
-                                               fg_color="#C51616", hover_color="#920F0F")
-        self.delete_all_button.grid(row=0, column=2, padx=4)
-
-        ctk.CTkLabel(audio_btn_frame, text="Szukaj").grid(row=0, column=3, padx=(15, 5))
-
-        self.search_entry = ctk.CTkEntry(audio_btn_frame, placeholder_text="Tekst")
-        self.search_entry.grid(row=0, column=4, sticky="ew")
+        # 3. Search Bar
+        search_frame = ctk.CTkFrame(self, fg_color="transparent")
+        search_frame.grid(row=2, column=0, sticky="ew", pady=(0, 5), padx=5)
+        
+        self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Szukaj tekstu...")
+        self.search_entry.pack(fill="x", expand=True)
         self.search_entry.bind("<Return>", lambda event: apply_patterns(self.app))
         self.search_entry.bind("<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
 
-        self.search_button = ctk.CTkButton(audio_btn_frame, text="Szukaj", command=lambda: apply_patterns(self.app), width=60)
-        self.search_button.grid(row=0, column=5, padx=(6, 0))
-        self.filter_button = ctk.CTkButton(audio_btn_frame, text="Filtruj", command=self.open_filter_window, width=80)
-        self.filter_button.grid(row=0, column=6, padx=(6, 0))
 
+        # 4. Table Frame
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
-        table_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        table_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
@@ -556,6 +576,10 @@ class SubtitlePanel(ctk.CTkFrame):
         if not line_obj:
             return
             
+        # Blokada ręcznej edycji dla linii oznaczonych jako gotowe
+        if getattr(line_obj, 'status_flag', None) == "DONE":
+            return
+
         try:
             line_idx = self.app.lines.index(line_obj)
         except ValueError:
@@ -1236,10 +1260,18 @@ class SubtitlePanel(ctk.CTkFrame):
             return
 
         lines_to_gen = []
+        skipped_done = 0
+        
         for idx in self.selected_line_indices:
             try:
                 line_no = idx + 1
                 line_obj = self.app.lines[idx]
+                
+                # Zabezpieczenie przed generowaniem "Gotowych" wierszy
+                if getattr(line_obj, 'status_flag', None) == "DONE":
+                    skipped_done += 1
+                    continue
+                
                 getter = getattr(line_obj, 'get_tts_text', None)
                 candidate = getter() if callable(getter) else getattr(line_obj, 'tts_text', '')
                 text = (candidate or '').strip()
@@ -1249,6 +1281,14 @@ class SubtitlePanel(ctk.CTkFrame):
                 lines_to_gen.append((uid, text))
             except (IndexError, ValueError):
                 continue
+                
+        if skipped_done > 0:
+             if not lines_to_gen:
+                 messagebox.showinfo("Informacja", f"Pominięto {skipped_done} wierszy oznaczonych jako 'Gotowe'. Brak innych wierszy do wygenerowania.")
+                 return
+             else:
+                 # Opcjonalnie można wyświetlić info, ale może być irytujące
+                 pass
 
         if not lines_to_gen:
             messagebox.showwarning("Brak danych", "Nie można wygenerować audio dla zaznaczonych linii.", parent=self)
@@ -1391,8 +1431,11 @@ class SubtitlePanel(ctk.CTkFrame):
         # Zbierz wszystkie pliki do usunięcia
         files_to_delete = []
         for idx in self.selected_line_indices:
-            line_num = idx + 1
             line_obj = self.app.lines[idx]
+            if getattr(line_obj, 'status_flag', None) == "DONE":
+                continue
+
+            line_num = idx + 1
             identifier = getattr(line_obj, 'uid', str(line_num))
             found_files = get_audio_candidates(identifier)
             if found_files:
@@ -1418,11 +1461,21 @@ class SubtitlePanel(ctk.CTkFrame):
         if not self.selected_line_indices:
             return
 
-        count = len(self.selected_line_indices)
+        # Filtruj linie oznaczone jako 'DONE'
+        indices_to_delete = []
+        for idx in self.selected_line_indices:
+            line_obj = self.app.lines[idx]
+            if getattr(line_obj, 'status_flag', None) != "DONE":
+                indices_to_delete.append(idx)
+        
+        if not indices_to_delete:
+            return
+
+        count = len(indices_to_delete)
         if not messagebox.askyesno("Usuń wiersze", f"Czy na pewno chcesz usunąć {count} wierszy oraz wszystkie ich pliki audio?"):
             return
 
-        indices = sorted(self.selected_line_indices, reverse=True)
+        indices = sorted(indices_to_delete, reverse=True)
         
         # Zatrzymaj odtwarzanie jeśli dotyczy usuwanego wiersza
         # Uproszczenie: zatrzymaj zawsze
