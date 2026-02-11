@@ -199,6 +199,25 @@ class SettingsWindow(ctk.CTkToplevel):
         CreateToolTip(
             entry_model, "Ścieżka do pliku .onnx używanego przez Piper.", wraplength=300)
 
+        # --- AI / Ollama ---
+        ctk.CTkLabel(frame, text="AI / Ollama", font=("", 16, "bold")).grid(
+            row=4, column=0, columnspan=3, sticky="w", padx=10, pady=(15, 5))
+        
+        frame_ai = ctk.CTkFrame(frame)
+        frame_ai.grid(row=5, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
+        frame_ai.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(frame_ai, text="Url serwera Ollama:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.ollama_url_var = tk.StringVar(value=self.master.global_config.get('ollama_url', 'http://localhost:11434'))
+        ctk.CTkEntry(frame_ai, textvariable=self.ollama_url_var).grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+        CreateToolTip(frame_ai, "Adres API Ollama (domyślnie http://localhost:11434)")
+        
+        ctk.CTkLabel(frame_ai, text="Model Ollama:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        self.ollama_model_var = tk.StringVar(value=self.master.global_config.get('ollama_model', 'gemma2:2b'))
+        ctk.CTkEntry(frame_ai, textvariable=self.ollama_model_var).grid(row=1, column=1, sticky="ew", padx=10, pady=10)
+        CreateToolTip(frame_ai, "Nazwa modelu do użycia (musi być zainstalowana w Ollama)")
+
+
         theme_frame = ctk.CTkFrame(frame)
         theme_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=6)
         ctk.CTkLabel(theme_frame, text="Motyw aplikacji:",
@@ -389,8 +408,11 @@ class SettingsWindow(ctk.CTkToplevel):
                 'start_directory': self.start_dir_var.get(),
                 'verification_workers': workers,
                 'local_api_url': self.local_api_url_var.get(),
+                'ollama_url': self.ollama_url_var.get(),
+                'ollama_model': self.ollama_model_var.get(),
                 'audio_output_format': self.audio_format_var.get(),
                 'xtts_voice_path': new_voice_path,
+
                 'elevenlabs_api_key': self.el_api_key_var.get(),
                 'elevenlabs_voice_id': self.el_voice_id_var.get(),
                 'google_credentials_path': self.gcp_creds_var.get(),

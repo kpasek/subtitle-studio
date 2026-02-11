@@ -1292,7 +1292,19 @@ class SubtitlePanel(ctk.CTkFrame):
             self.current_audio_process = None
             messagebox.showerror("Błąd", f"Nie udało się uruchomić ffplay:\n{e}", parent=self)
 
+    def get_selected_lines(self) -> List[Line]:
+        """Zwraca listę zaznaczonych obiektów Line."""
+        if not self.selected_line_indices:
+            return []
+        
+        selected = []
+        for idx in self.selected_line_indices:
+             if idx < len(self.app.lines):
+                 selected.append(self.app.lines[idx])
+        return selected
+
     def generate_selected_dialogs(self):
+
         """Generuje audio dla wszystkich zaznaczonych wierszy."""
         if not self.selected_line_indices or not self.app.audio_dir:
             return

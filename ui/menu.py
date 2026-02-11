@@ -11,8 +11,11 @@ from audio.deleter import AudioDeleterWindow
 from ui.verification_window import VerificationWindow
 from ui.pattern_io import PatternIOWindow
 from ui.game_reader_export import GameReaderExportWindow
+from ui.ai_task_manager import AITaskManagerWindow
+from ui.ai_runner import AITaskRunnerWindow
 from audio.generation_queue import GenerationQueueWindow
 from app.settings import SettingsWindow
+
 
 
 class AppMenu:
@@ -58,9 +61,16 @@ class AppMenu:
         # --- Weryfikacja: otwiera dedykowane okno sterujące weryfikacją ---
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
 
-
+        # --- AI / Ollama ---
+        ai_menu = tk.Menu(menubar, tearoff=0)
+        ai_menu.add_command(label="Menedżer Zadań AI", command=lambda: AITaskManagerWindow(self.app))
+        ai_menu.add_command(label="Uruchom na wszystkich wierszach...", command=lambda: self._run_ai_global())
+        ai_menu.add_command(label="Uruchom na zaznaczonych...", command=lambda: self._run_ai_selected())
+        menubar.add_cascade(label="AI", menu=ai_menu)
+        
         # --- Wzorce ---
         patterns_menu = tk.Menu(menubar, tearoff=0)
+
         patterns_menu.add_command(label="Menedżer wzorców", command=lambda: open_pattern_manager(self.app), accelerator="Ctrl+R")
         patterns_menu.add_command(label="Importuj wzorce z CSV", command=lambda: self._open_pattern_io("Import"))
         patterns_menu.add_command(label="Eksportuj wzorce do CSV", command=lambda: self._open_pattern_io("Eksport"))
@@ -91,6 +101,42 @@ class AppMenu:
             return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self.app)
         if not self.app.audio_dir: 
             return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self.app)
+            messagebox.showerror("Błąd", "Najpierw zapisz/otwórz projekt.", parent=self.app)
+            return
+        SettingsWindow(self.app, self.app.torch_installed, mode='project')
+
+    def _run_ai_global(self):
+        if not self.app.lines:
+             messagebox.showwarning("Brak danych", "Brak wierszy do przetworzenia.", parent=self.app)
+             return
+        AITaskRunnerWindow(self.app, self.app.lines)
+
+    def _run_ai_selected(self):
+        # Pobierz zaznaczone
+        panel = self.app.subtitle_panel  # Assuming SubtitlePanel is accessible via app.subtitle_panel
+        # SubtitlePanel usually has a selection mechanism.
+        # If not easily accessible, we might need a workaround or check how "lines" are stored.
+        # But looking at studio.py, app contains "lines" list. 
+        # Getting *selected* lines usually requires asking the UI component.
+        
+        # Checking studio.py, "self.selected_line_index" is stored. But multiple selection?
+        # If multiple selection isn't supported in current architecture, fallback to single or global.
+        # Let's assume for now we use the main lines list or try to fetch from panel if possible. 
+        # For safety in this iteration, I'll fetch 'selected' if implemented, else warn.
+        
+        if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, 'get_selected_lines'):
+             selected = self.app.subtitle_panel.get_selected_lines()
+        elif self.app.selected_line_index is not None:
+             selected = [self.app.lines[self.app.selected_line_index]]
+        else:
+             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
+             return
+             
+        if not selected:
+             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
+             return
+
+        AITaskRunnerWindow(self.app, selected)
 
         win = AudioDeleterWindow(self.app, self.app.lines, str(self.app.audio_dir))
         win.wait_visibility()
