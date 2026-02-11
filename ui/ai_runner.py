@@ -7,6 +7,7 @@ import time
 from app.entity import Line
 from app.ai_core import AITask, BUILTIN_TASKS, OllamaService
 from app.tooltip import CreateToolTip
+from app.io import update_line_in_csv
 
 if TYPE_CHECKING:
     from app.gui import SubtitleStudioApp
@@ -159,7 +160,6 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
 
     def _run_process(self):
         if not self.execution_queue:
-            messagebox.showwarning("Brak zadań", "Dodaj zadania do kolejki.")
             return
 
         # Prepare parameters
@@ -241,6 +241,11 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
             temp_text = current_text
             for task in tasks:
                 temp_text = service.process_text(temp_text, task.system_prompt)
+                
+                # Check if empty - if so, stop processing this line
+                if not temp_text or not temp_text.strip():
+                    temp_text = ""
+                    break
             
             # Update Object
             if target_field == "tts":
@@ -248,20 +253,12 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
             else:
                 line.set_text(temp_text)
             
-            # Save to CSV immediately (Persistence)
-            if hasattr(app_ref, 'io_manager'):
-                # status_flag should be preserved or updated? Let's just update text.
-                # update_line_in_csv(self, uid, text, tts_text, status_flag, start_time, end_time, character_id, audio_path)
-                app_ref.io_manager.update_line_in_csv(
-                    line.uid, 
-                    line.text, 
-                    line.tts_text, 
-                    line.status_flag, 
-                    line.start_time, 
-                    line.end_time, 
-                    line.character_id, 
-                    line.audio_path
-                )
+            # Save to CSV immediately
+            if app_ref and hasattr(app_ref, 'loaded_path') and app_ref.loaded_path:
+                try:
+                    update_line_in_csv(line, str(app_ref.loaded_path))
+                except Exception as db_err:
+                    print(f"Error saving line {line.uid}: {db_err}")
 
             processed_count += 1
             

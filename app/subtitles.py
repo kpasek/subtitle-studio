@@ -259,7 +259,9 @@ class SubtitlePanel(ctk.CTkFrame):
                   foreground=[('selected', selected_fg)])
 
     def _on_view_mode_change(self, value):
-        apply_patterns(self.app)
+        # Optimization: Do not re-apply patterns on simple view switch. 
+        # Data in 'text'/'tts_text' should already be consistent.
+        # apply_patterns(self.app)  
         self.set_preview(self.app.lines)
         from app.project import save_app_setting
         save_app_setting(self.app, 'last_view_mode', value)
@@ -701,9 +703,16 @@ class SubtitlePanel(ctk.CTkFrame):
         except Exception as e:
             print(f"Błąd zapisu do CSV: {e}")
         
-        # Odśwież UI
-        apply_patterns(self.app)
-        self.set_preview(self.app.lines)
+        # Odśwież UI pojedynczego wiersza (Optymalizacja)
+        values = list(self.tree.item(item_id, "values"))
+        col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+        if "content" in col_pos:
+            values[col_pos["content"]] = new_text
+        
+        self.tree.item(item_id, values=values)
+        
+        # apply_patterns(self.app)  <-- To powodowało pełne odświeżenie (wolne!)
+        # self.set_preview(self.app.lines) <-- To powodowało pełne przerysowanie (wolne!)
 
     def _cancel_inline_edit(self, event=None):
         """Anuluje edycję inline bez zmian."""
