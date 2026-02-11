@@ -57,7 +57,7 @@ class SubtitlePanel(ctk.CTkFrame):
             {"id": "audio_file", "text": "Plik", "width": 250, "anchor": "w", "stretch": False},
         ]
 
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         # --- Weryfikacja audio ---
@@ -70,82 +70,86 @@ class SubtitlePanel(ctk.CTkFrame):
         self._create_widgets()
 
     def _create_widgets(self):
-        # 1. Action Frame (Buttons)
-        action_frame = ctk.CTkFrame(self)
-        action_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5), padx=5)
+        # 1. Top Panel (Actions + View + Info) - merged into one line
+        top_frame = ctk.CTkFrame(self)
+        top_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5), padx=5)
         
-        self.generate_button = ctk.CTkButton(action_frame, text="⚙️ Generuj", width=80,
+        # --- Left side: Action Buttons ---
+        self.generate_button = ctk.CTkButton(top_frame, text="⚙️ Generuj", width=80,
                                              command=self.generate_selected_dialogs, state="disabled",
                                              fg_color="#2E8B57", hover_color="#1E613B")
         self.generate_button.pack(side="left", padx=4, pady=5)
 
-        self.verify_button = ctk.CTkButton(action_frame, text="✓ Weryfikuj", width=100,
+        self.verify_button = ctk.CTkButton(top_frame, text="✓ Weryfikuj", width=100,
                                            command=self.verify_selected_dialogs, state="disabled",
                                            fg_color="#1E90FF", hover_color="#4169E1")
         self.verify_button.pack(side="left", padx=4, pady=5)
         
         # Flagi statusu
-        self.btn_flag_done = ctk.CTkButton(action_frame, text="✅ Gotowe", width=80,
+        self.btn_flag_done = ctk.CTkButton(top_frame, text="✅ Gotowe", width=80,
                                            command=lambda: self.set_selected_status("DONE"),
                                            fg_color="#27ae60", hover_color="#2ecc71")
         self.btn_flag_done.pack(side="left", padx=4, pady=5)
 
-        self.btn_flag_error = ctk.CTkButton(action_frame, text="⚠️ Błędne", width=80,
+        self.btn_flag_error = ctk.CTkButton(top_frame, text="⚠️ Błędne", width=80,
                                             command=lambda: self.set_selected_status("ERROR"),
                                             fg_color="#c0392b", hover_color="#e74c3c")
         self.btn_flag_error.pack(side="left", padx=4, pady=5)
         
-        self.btn_flag_clear = ctk.CTkButton(action_frame, text="⚪ Wyczyść", width=80,
+        self.btn_flag_clear = ctk.CTkButton(top_frame, text="⚪ Wyczyść", width=80,
                                             command=lambda: self.set_selected_status(None),
                                             fg_color="#7f8c8d", hover_color="#95a5a6")
         self.btn_flag_clear.pack(side="left", padx=4, pady=5)
 
-        self.delete_all_button = ctk.CTkButton(action_frame, text="🗑️ Usuń audio", width=100,
+        self.delete_all_button = ctk.CTkButton(top_frame, text="🗑️ Usuń audio", width=100,
                                                command=self.delete_selected_dialogs, state="disabled",
                                                fg_color="#C51616", hover_color="#920F0F")
         self.delete_all_button.pack(side="left", padx=4, pady=5)
-        
-        self.filter_button = ctk.CTkButton(action_frame, text="Filtruj", command=self.open_filter_window, width=80)
-        self.filter_button.pack(side="right", padx=6, pady=5)
 
+        # --- Right/Middle side: View & Info ---
+        ctk.CTkLabel(top_frame, text="|", text_color="gray").pack(side="left", padx=(10, 5))
 
-        # 2. Status/Info Frame (View Mode, Update, Filename)
-        info_frame = ctk.CTkFrame(self)
-        info_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
-
-        ctk.CTkLabel(info_frame, text="Widok:").pack(side="left", padx=(15, 5))
+        ctk.CTkLabel(top_frame, text="Widok:").pack(side="left", padx=(5, 5))
         self.view_switcher = ctk.CTkSegmentedButton(
-            info_frame,
+            top_frame,
             values=["Oryginał", "Napisy", "TTS"],
             variable=self.app.view_mode,
             command=self._on_view_mode_change,
-            width=200
+            width=180
         )
         self.view_switcher.pack(side="left", padx=5, pady=5)
 
-        self.app.update_button = ctk.CTkButton(info_frame, text="Nowa wersja!",
+        self.app.update_button = ctk.CTkButton(top_frame, text="Nowa wersja!",
                                                command=lambda: download_update(self.app),
-                                               fg_color="#006400", hover_color="#004d00")
+                                               fg_color="#006400", hover_color="#004d00",
+                                               width=100)
         self.app.update_button.pack(side="left", padx=5)
         self.app.update_button.pack_forget()
 
-        self.app.lbl_filename = ctk.CTkLabel(info_frame, text="Brak wczytanego pliku")
-        self.app.lbl_filename.pack(side="left", anchor="w", padx=5)
+        self.app.lbl_filename = ctk.CTkLabel(top_frame, text="Brak wczytanego pliku")
+        self.app.lbl_filename.pack(side="left", anchor="w", padx=10)
 
 
-        # 3. Search Bar
+        # 2. Search Frame (Filter + Search Entry + Search Button)
         search_frame = ctk.CTkFrame(self, fg_color="transparent")
-        search_frame.grid(row=2, column=0, sticky="ew", pady=(0, 5), padx=5)
+        search_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
+
+        self.filter_button = ctk.CTkButton(search_frame, text="Filtruj", command=self.open_filter_window, width=80)
+        self.filter_button.pack(side="left", padx=(0, 5))
         
         self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Szukaj tekstu...")
-        self.search_entry.pack(fill="x", expand=True)
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.search_entry.bind("<Return>", lambda event: apply_patterns(self.app))
         self.search_entry.bind("<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
 
+        self.search_button = ctk.CTkButton(search_frame, text="Szukaj", width=80,
+                                            command=lambda: apply_patterns(self.app))
+        self.search_button.pack(side="left", padx=0)
 
-        # 4. Table Frame
+
+        # 3. Table Frame
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
-        table_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        table_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
@@ -378,7 +382,6 @@ class SubtitlePanel(ctk.CTkFrame):
                 if not is_pending:
                     continue
             
-            # TODO: Filter by status flag (Gotowe/Błędne)
             status_filter = f.get('status')
             if status_filter:
                 flag = getattr(line_obj, 'status_flag', None) or ""
@@ -699,10 +702,7 @@ class SubtitlePanel(ctk.CTkFrame):
         menu.add_command(label="➕ Dodaj wzorzec zamieniający (Ctrl+Klik)",
                          command=lambda: add_replace_pattern_from_selection(self.app, from_menu=True), state=tk.NORMAL)
 
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+        menu.tk_popup(event.x_root, event.y_root)
 
     def set_selected_status(self, status: Optional[str]):
         """Ustawia flagę statusu dla zaznaczonych wierszy."""
