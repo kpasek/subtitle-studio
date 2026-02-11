@@ -97,6 +97,7 @@ class Worker:
         """
         logger.info(f"[{self.name}] Zatrzymywanie...")
         self._stop_event.set()
+        self._is_running = False
         
         if clear_queue:
             with self._queue.mutex:

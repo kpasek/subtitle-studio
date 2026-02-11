@@ -293,14 +293,15 @@ class SubtitleStudioApp(ctk.CTk):
         return "break"
 
     def _on_delete_key(self, event=None):
-        """Obsługa Del (Wyczyść linię), z zabezpieczeniem edycji tekstu."""
+        """Obsługa Del (Usuń wiersze)."""
         widget = self.focus_get()
         # Jeśli piszemy w edytorze lub wyszukiwarce, Del ma usuwać znaki
         if isinstance(widget, (tk.Entry, ctk.CTkEntry)):
             return
-
-            # Jeśli nie edytujemy tekstu, czyścimy zawartość linii
-        self._clear_selected_line_content()
+            
+        # Wywołaj metodę usuwania wierszy (tę samą co w menu kontekstowym)
+        if self.subtitle_panel:
+            self.subtitle_panel.delete_selected_rows()
 
     def _clear_selected_line_content(self):
         """Czyści treść aktualnie zaznaczonej linii (zastępuje pustym stringiem)."""

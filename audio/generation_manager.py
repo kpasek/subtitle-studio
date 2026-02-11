@@ -73,7 +73,9 @@ class GenerationManager:
         return cls()
         
     def is_busy(self) -> bool:
-        return self.current_job is not None or (self.worker and self.worker._is_running)
+        # If cancellation is requested, consider manager not busy to allow new jobs strictly
+        busy_job = self.current_job is not None and not self.cancel_event.is_set()
+        return busy_job or (self.worker and self.worker._is_running)
 
     def get_current_progress(self):
         return self.last_progress
@@ -488,56 +490,3 @@ class GenerationManager:
 
         raise ValueError(f"Nieznany model TTS: {model_name}")
 
-    def _call_local_api(self, tts_model: dict, text: str, output_file: str, config: dict):
-        api_url = tts_model['url']
-        session = tts_model['session']
-        payload = {"text": text, "output_file": output_file}
-
-        # XTTS wymaga dodatkowego parametru
-        if "xtts" in api_url.lower():
-            payload["voice_file"] = config.get('xtts_voice_path', '')
-        # Piper wymaga dodatkowego parametru
-        if "piper" in api_url.lower():
-            payload["voice_file"] = config.get('piper_model_path', '')
-
-        try:
-            response = session.post(api_url, json=payload, timeout=90)
-            response.raise_for_status()
-            
-            # Niektóre API mogą zwracać 200 OK ale z jsonem {"error": "..."}
-            try:
-                response_data = response.json()
-                if not response_data.get("output_file") and response_data.get("error"):
-                     raise ConnectionError(f"API Error Message: {response_data.get('error')}")
-            except json.JSONDecodeError:
-                pass # Jeśli nie JSON, a status 200, to zakładamy że ok (chyba że binary)
-
-        except requests.exceptions.RequestException as e:
-            print(f"DEBUG ERROR: Request failed to {api_url}: {e}")
-            raise ConnectionError(f"Błąd połączenia z API ({api_url}): {e}")
-
-    def _run_converter(self, audio_dir: Path, config: dict):
-        try:
-            filter_settings = config.get('ffmpeg_filters', {})
-            default_workers = max(1, os.cpu_count() // 2 if os.cpu_count() else 4)
-            max_workers = int(config.get('conversion_workers', default_workers))
-
-            converter = AudioConverter(filter_settings=filter_settings, out_format=config.get('audio_output_format', 'mp3'))
-            output_dir = ready_dir_from_audio_dir(audio_dir)
-            os.makedirs(output_dir, exist_ok=True)
-
-            def conversion_progress(current: int, total: int):
-                if not self.cancel_event.is_set():
-                    self._notify_progress(current, total, f"Konwertowanie... ({current}/{total})")
-
-            converter.convert_dir(
-                str(audio_dir),
-                str(output_dir),
-                max_workers=max_workers,
-                progress_callback=conversion_progress,
-                cancel_event=self.cancel_event
-            )
-
-        except Exception as e:
-            print(f"Błąd podczas konwersji audio w menedżerze: {e}")
-            raise e

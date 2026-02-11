@@ -643,8 +643,6 @@ class SubtitlePanel(ctk.CTkFrame):
         menu.add_separator()
         menu.add_command(label="📄 Kopiuj linię (Ctrl+C)", command=lambda: self.app._on_ctrl_c_from_menu(),
                          state=tk.NORMAL)
-        menu.add_command(label="❌ Wyczyść treść linii (Del)", command=lambda: self.app._clear_selected_line_content(),
-                         state=tk.NORMAL if can_edit else tk.DISABLED)
         menu.add_separator()
         menu.add_command(label="➕ Dodaj wzorzec zamieniający (Ctrl+Klik)",
                          command=lambda: add_replace_pattern_from_selection(self.app, from_menu=True), state=tk.NORMAL)
