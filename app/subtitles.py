@@ -193,14 +193,23 @@ class SubtitlePanel(ctk.CTkFrame):
         self.inline_edit_item = None
 
         # Inicjalizacja stylu tabeli
-        self.update_table_theme(ctk.get_appearance_mode())
+        self.update_table_theme()
 
-    def update_table_theme(self, mode: str):
+    def update_table_theme(self, mode: str = None):
         """Aktualizuje kolory tabeli (Treeview) w zależności od motywu (Light/Dark)."""
+        
+        # Próbujemy pobrać efektywny tryb z CustomTkinter (widgetu)
+        # _get_appearance_mode() zwraca 'light' lub 'dark'
+        if hasattr(self, "_get_appearance_mode"):
+            effective_mode = self._get_appearance_mode()
+        else:
+            # Fallback dla starszych wersji CTK lub jeśli metoda jest niedostępna
+            effective_mode = mode or ctk.get_appearance_mode()
+
         style = ttk.Style()
         style.theme_use("clam")
 
-        if mode == "Light":
+        if effective_mode.lower() == "light":
             bg_color = "#ffffff"
             fg_color = "#000000"
             field_bg = "#ffffff"
@@ -211,7 +220,7 @@ class SubtitlePanel(ctk.CTkFrame):
             selected_fg = "white"
             border_color = "#e1e1e1"
         else:
-            # Dark mode
+            # Dark mode (default)
             bg_color = "#2b2b2b"
             fg_color = "white"
             field_bg = "#2b2b2b"
@@ -230,6 +239,7 @@ class SubtitlePanel(ctk.CTkFrame):
                         lightcolor=border_color,
                         darkcolor=border_color,
                         rowheight=25)
+
 
         style.configure("Treeview.Heading",
                         background=heading_bg,
