@@ -487,6 +487,9 @@ class SubtitleStudioApp(ctk.CTk):
     def apply_theme_settings(self):
         ctk.set_appearance_mode(self.global_config.get('appearance_mode', 'System'))
         ctk.set_default_color_theme(self.global_config.get('color_theme', 'blue'))
+        
+        if hasattr(self, 'subtitle_panel'):
+            self.subtitle_panel.update_table_theme(ctk.get_appearance_mode())
 
     def save_app_setting(self, param, value):
         save_app_setting(self, param, value)

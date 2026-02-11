@@ -153,28 +153,6 @@ class SubtitlePanel(ctk.CTkFrame):
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
-
-        # Stylizacja Treeview (aby pasowało do ciemnego motywu CustomTkinter)
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Treeview",
-                        background="#2b2b2b",
-                        foreground="white",
-                        fieldbackground="#2b2b2b",
-                        bordercolor="#2b2b2b",
-                        lightcolor="#2b2b2b",
-                        darkcolor="#2b2b2b",
-                        rowheight=25)
-        style.configure("Treeview.Heading",
-                        background="#1c1c1c",
-                        foreground="white",
-                        relief="flat")
-        style.map("Treeview.Heading",
-                  background=[('active', '#252525')])
-        style.map("Treeview",
-                  background=[('selected', '#1f538d')],
-                  foreground=[('selected', 'white')])
-
         # Pobieramy ID kolumn z konfiguracji
         column_ids = [col["id"] for col in self.columns_config]
 
@@ -211,9 +189,59 @@ class SubtitlePanel(ctk.CTkFrame):
         self.tree.bind("<Control-a>", self.select_all_visible)
 
         # Zmienne do edycji inline
-
         self.inline_edit_entry = None
         self.inline_edit_item = None
+
+        # Inicjalizacja stylu tabeli
+        self.update_table_theme(ctk.get_appearance_mode())
+
+    def update_table_theme(self, mode: str):
+        """Aktualizuje kolory tabeli (Treeview) w zależności od motywu (Light/Dark)."""
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        if mode == "Light":
+            bg_color = "#ffffff"
+            fg_color = "#000000"
+            field_bg = "#ffffff"
+            heading_bg = "#e1e1e1"
+            heading_fg = "#000000"
+            heading_active = "#d1d1d1"
+            selected_bg = "#3a7ebf"
+            selected_fg = "white"
+            border_color = "#e1e1e1"
+        else:
+            # Dark mode
+            bg_color = "#2b2b2b"
+            fg_color = "white"
+            field_bg = "#2b2b2b"
+            heading_bg = "#1c1c1c"
+            heading_fg = "white"
+            heading_active = "#252525"
+            selected_bg = "#1f538d"
+            selected_fg = "white"
+            border_color = "#2b2b2b"
+
+        style.configure("Treeview",
+                        background=bg_color,
+                        foreground=fg_color,
+                        fieldbackground=field_bg,
+                        bordercolor=border_color,
+                        lightcolor=border_color,
+                        darkcolor=border_color,
+                        rowheight=25)
+
+        style.configure("Treeview.Heading",
+                        background=heading_bg,
+                        foreground=heading_fg,
+                        relief="flat")
+
+        style.map("Treeview.Heading",
+                  background=[('active', heading_active)])
+
+        style.map("Treeview",
+                  background=[('selected', selected_bg)],
+                  foreground=[('selected', selected_fg)])
 
     def _on_view_mode_change(self, value):
         apply_patterns(self.app)
