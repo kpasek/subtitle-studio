@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+import traceback
 from audio.generation_manager import GenerationManager
 
 
@@ -10,18 +11,15 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
     Pełni także funkcję okna postępu.
     """
 
-    def __init__(self, parent, title, total_count, existing_count, callback):
+    def __init__(self, parent, title, total_count, existing_count, callback, monitor_only=False):
         super().__init__(parent)
         self.callback = callback
         self.title(title)
         self.geometry("500x400")
         self.resizable(False, False)
-        # Transient jest OK, ale grab_set() może blokować. Utrzymamy transient.
-        # W trybie postępu usuwamy grab.
+        
         self.transient(parent)
-        self.wait_visibility()
-        self.grab_set()
-
+        
         self.manager = GenerationManager.get_instance()
         self.is_paused = False
         self.is_running = False
@@ -98,71 +96,108 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
         )
         self.btn_stop.grid(row=0, column=1, padx=10)
         
-        # Inicjalny update tekstu przycisku
+        # Inicjalny update tekstu przycisku jeśli jest
         self._update_stats_preview()
 
-        # Handle close
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        # ================= LOGIC START =================
+
+        if monitor_only:
+            self.summary_frame.grid_remove()
+            self.progress_frame.grid()
+            self.is_running = True
+            
+            # Setup immediate view
+            self._setup_progress_view()
+            
+            # Restore state if available
+            try:
+                if hasattr(self.manager, 'get_current_progress'):
+                    last_prog = self.manager.get_current_progress()
+                    if last_prog:
+                        # (current, total, message)
+                        self.update_progress(*last_prog)
+                    else:
+                        self.lbl_progress.configure(text="Błąd: Brak danych postępu (None).")
+                else:
+                    self.lbl_progress.configure(text="Błąd: Manager bez get_current_progress.")
+            except Exception as e:
+                self.lbl_progress.configure(text=f"Błąd przywracania: {e}")
+                traceback.print_exc()
+        else:
+            # Normal init
+            self.wait_visibility()
+            self.grab_set()
+
+        # Handle close - ważna zmiana: tylko unregister, nie cancel
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self._update_stats_preview()
+
+    def destroy(self):
+        """Zamykanie okna."""
+        # Odpinamy obserwatora, ale NIE zatrzymujemy managera (chyba że user kliknął Anuluj)
+        if hasattr(self, 'manager') and self.manager:
+             self.manager.unregister_progress_observer(self._update_progress_safe)
+        super().destroy()
 
     def _update_stats_preview(self):
         """Aktualizuje tekst w zależności od checkboxa."""
         pass
 
     def _on_confirm(self):
-        overwrite = self.var_overwrite.get()
-        # Wywołujemy callback (który dodaje job do managera)
-        success = self.callback(overwrite)
-        
-        if success:
-            self._switch_to_progress_view()
-        else:
-            # Jeśli false (np. brak modelu), okno zostaje w trybie summary lub user je zamknie
-            pass
-
-    def _switch_to_progress_view(self):
+        # 1. Start w UI
         self.summary_frame.grid_remove()
         self.progress_frame.grid()
+        try:
+             self.grab_release() # Zwalniamy blokadę okna nadrzędnego
+        except:
+             pass
+        
+        # 2. Rejestracja listenera
+        self._setup_progress_view()
+        
+        # 3. Start faktyczny (logika biznesowa)
         self.is_running = True
-        self.grab_release() # Odblokuj UI pod spodem
-        
-        # Rejestracja observerów
+        overwrite = self.var_overwrite.get()
+        # Wywołanie callbacka z argumentem overwrite
+        if self.callback:
+            success = self.callback(overwrite)
+            if not success:
+                self.destroy()
+
+    def _setup_progress_view(self):
         self.manager.register_progress_observer(self._update_progress_safe)
-        
+        self.progress_bar.set(0)
+        self.lbl_progress.configure(text="Inicjalizacja...")
+
     def _update_progress_safe(self, current, total, message):
+        """Callback wołany z wątku managera. Używamy after, by dotknąć UI."""
         if not self.winfo_exists():
             return
-            
-        # Aktualizacja UI w wątku głównym
-        # Używamy after zamiast queue mastera dla prostoty, jeśli master nie ma queue
-        # Jeśli caller ma queue, super, ale after(0, ...) działa w ctk.
         self.after(0, lambda: self.update_progress(current, total, message))
 
     def update_progress(self, current, total, message):
         self.lbl_progress.configure(text=message)
         
         if total > 0:
-            val = current / total
-            self.progress_bar.set(val)
-        elif current == -1:
-            self.progress_bar.configure(mode="indeterminate")
-            self.progress_bar.start()
+            if current == -1 and total == -1: # Indeterminate
+                 self.progress_bar.configure(mode="indeterminate")
+                 self.progress_bar.start()
+            else:
+                 self.progress_bar.configure(mode="determinate")
+                 self.progress_bar.stop()
+                 progress = current / total
+                 self.progress_bar.set(progress)
         
-        if current == total and total > 0:
-            self._on_finished()
+        if current >= total and total > 0 and current != -1:
+             self._on_finished()
 
     def _on_finished(self):
         self.is_running = False
         self.btn_pause.configure(state="disabled")
-        self.btn_stop.configure(state="disabled")
-        # self.btn_close_progress.configure(state="normal", fg_color="#2E8B57", hover_color="#1E613B")
+        self.btn_stop.configure(text="Zamknij", command=self.destroy)
         self.lbl_progress.configure(text="Zakończono pomyślnie.")
-        self.manager.unregister_progress_observer(self._update_progress_safe)
-        
-        # Oczekiwanie na manualne zamknięcie okna (X) po zakończeniu?
-        # A może automatycznie zamknąć? Użytkownik chciał usunięcia przycisku.
-        # Może sam zamknę oknie po krótkiej chwili?
-        # Albo po prostu zostawiam tak jak jest, tylko usunąłem przycisk - user zamknie 'X'.
-        pass
+        # Nie unregisterujemy observera tutaj, bo może user chce widzieć stan "Zakończono"
+        # Observer zostanie odpięty przy destroy()
 
     def _toggle_pause(self):
         if not self.is_paused:
@@ -182,13 +217,4 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
         self.btn_stop.configure(state="disabled")
         self.btn_pause.configure(state="disabled")
         # Okno zamknie się lub przejdzie w stan closeable po otrzymaniu sygnału progress update
-
-    def on_close(self):
-        if self.is_running:
-             response = tk.messagebox.askyesno("Zamykanie", "Zadanie w toku. Czy na pewno chcesz przerwać?", parent=self)
-             if not response:
-                 return
-             self._stop_job()
-        
-        self.manager.unregister_progress_observer(self._update_progress_safe)
-        self.destroy()
+        # lub po prostu user zamknie X

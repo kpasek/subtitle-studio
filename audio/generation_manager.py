@@ -64,10 +64,19 @@ class GenerationManager:
 
         self._observers_queue: List[Callable] = []
         self._observers_progress: List[Callable] = []
+        
+        # State for monitoring
+        self.last_progress = (0, 0, "Oczekiwanie...")
 
     @classmethod
     def get_instance(cls) -> 'GenerationManager':
         return cls()
+        
+    def is_busy(self) -> bool:
+        return self.current_job is not None or (self.worker and self.worker._is_running)
+
+    def get_current_progress(self):
+        return self.last_progress
 
     def add_job(self, job: JobType):
         self.job_queue.put(job)
@@ -174,26 +183,85 @@ class GenerationManager:
             callback(self.current_job, jobs)
 
     def _notify_progress(self, current: int, total: int, message: str):
+        self.last_progress = (current, total, message)
         for callback in self._observers_progress:
             callback(current, total, message)
 
     def _notify_indeterminate(self, message: str):
+        self.last_progress = (-1, -1, message)
         for callback in self._observers_progress:
             callback(-1, -1, message)
 
     # --- Logika wykonywania zadań ---
 
+    @staticmethod
+    def _worker_tts_task(identifier, text, job, tts_model_instance):
+        """Statyczna metoda workera dla TTS."""
+        output_path = job.audio_dir / f"output1 ({identifier}).wav"
+        
+        try:
+            model_name_lower = job.tts_model_name.lower()
+
+            if model_name_lower in ['xtts', 'stylish', 'piper']:
+                # Wywołanie API (wymaga instancji managera lub metody statycznej, tutaj wydzieliliśmy logikę)
+                # Ponieważ _call_local_api jest w managerze, a to jest metoda statyczna, musimy to obsłużyć.
+                # Najlepiej jeśli tts_model_instance zawiera wszystko co potrzebne.
+                # W _load_tts_model tts_model_instance dla API to dict z sesją i urlem.
+                
+                # Użyjemy metody klasy pomocniczej lub duplikacji logiki wywołania API, 
+                # ale logiczniej jest przekazać self, lub po prostu przenieść _call_local_api do statycznej.
+                GenerationManager._call_local_api_static(tts_model_instance, text, str(output_path), job.tts_config)
+            
+            elif isinstance(tts_model_instance, TTSBase):
+                tts_model_instance.tts(text, str(output_path))
+            else:
+                raise TypeError(f"Nieznany typ instancji modelu: {type(tts_model_instance)}")
+
+            # Powiadomienie o sukcesie (zwracamy wynik)
+            return (identifier, str(output_path))
+            
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def _call_local_api_static(tts_model: dict, text: str, output_file: str, config: dict):
+        # Statyczna wersja _call_local_api
+        api_url = tts_model['url']
+        session = tts_model['session']
+        payload = {"text": text, "output_file": output_file}
+
+        if "xtts" in api_url.lower():
+            payload["voice_file"] = config.get('xtts_voice_path', '')
+        if "piper" in api_url.lower():
+            payload["voice_file"] = config.get('piper_model_path', '')
+
+        try:
+            response = session.post(api_url, json=payload, timeout=90)
+            response.raise_for_status()
+            try:
+                response_data = response.json()
+                if not response_data.get("output_file") and response_data.get("error"):
+                     raise ConnectionError(f"API Error Message: {response_data.get('error')}")
+            except json.JSONDecodeError:
+                pass
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Błąd połączenia z API ({api_url}): {e}")
+
     def _execute_tts_job(self, job: GenerationJob):
         print(f"DEBUG: Konfiguracja modelu: {job.tts_model_name}")
         self._notify_progress(0, 1, f"Ładowanie modelu {job.tts_model_name}...")
 
-        # 1. Ładowanie modelu
+        # 1. Konfiguracja workera
+        if self.worker:
+            self.worker.stop(clear_queue=True)
+        self.worker = Worker(name="TTSWorker", num_threads=1) # TTS models are mostly sequential or resource heavy
+
+        # 1a. Ładowanie modelu
         try:
             tts_model_instance = self._load_tts_model(job.tts_model_name, job.tts_config)
             if tts_model_instance is None:
                 raise ValueError("Model zwrócił None przy ładowaniu.")
         except Exception as e:
-            # KLUCZOWE: Wypisz błąd w konsoli!
             print(f"DEBUG ERROR: Błąd ładowania modelu: {e}")
             self._notify_progress(0, 1, f"Błąd ładowania modelu: {e}")
             return
@@ -205,50 +273,51 @@ class GenerationManager:
         print(f"DEBUG: Liczba linii do wygenerowania: {total_to_gen}")
 
         if total_to_gen == 0:
-            print("DEBUG: Lista linii jest pusta. Kończę zadanie.")
             self._notify_progress(1, 1, "Brak linii do wygenerowania.")
+            print("DEBUG: Lista linii jest pusta. Kończę zadanie.")
             return
 
-        # 2. Pętla generowania
-        for i, (identifier, text) in enumerate(job.lines_to_generate):
-            # Obsługa pauzy
-            while self.pause_event.is_set():
-                if self.cancel_event.is_set():
-                    break
-                import time
-                time.sleep(0.5)
+        self._notify_progress(0, total_to_gen, f"Rozpoczynam generowanie {total_to_gen} linii...")
 
+        # 2. Zlecanie zadań
+        tracker = BatchResultTracker(total_to_gen, flush_interval=1.0)
+        tracker.callback = lambda res: self._notify_progress(
+            tracker.processed, tracker.total, f"Generowanie... ({tracker.processed}/{tracker.total})"
+        )
+
+        for identifier, text in job.lines_to_generate:
             if self.cancel_event.is_set():
-                raise InterruptedError()
+                break
 
-            self._notify_progress(i, total_to_gen, f"Generowanie... ({i + 1}/{total_to_gen})")
-            # Konstrukcja nazwy pliku na podstawie UID
-            output_path = job.audio_dir / f"output1 ({identifier}).wav"
+            def on_done(res):
+                ident, path = res
+                tracker.add_result(ident, path, is_modified=True)
+                if getattr(job, 'on_generate', None):
+                    job.on_generate(ident, path)
+            
+            def on_error(err):
+                # Identifier is tricky to pass to error handling without partial/closure, 
+                # but worker loop prints log. We just need to tick the tracker.
+                tracker.add_result(identifier, None, is_modified=False) # Tratujemy jako przetworzone (z błędem)
+                print(f"Błąd generowania dla {identifier}: {err}")
 
-            try:
-                # Zabezpieczenie przed różnicą wielkości liter (xtts vs XTTS, stylish vs STylish)
-                model_name_lower = job.tts_model_name.lower()
-
-                if model_name_lower in ['xtts', 'stylish', 'piper']:
-                    # Obsługa modeli API (dict)
-                    print(f"DEBUG: Wywołanie API ({model_name_lower}) dla id={identifier}")
-                    self._call_local_api(tts_model_instance, text, str(output_path), job.tts_config)
-                
-                elif isinstance(tts_model_instance, TTSBase):
-                    tts_model_instance.tts(text, str(output_path))
-                
-                else:
-                    raise TypeError(f"Nieznany typ instancji modelu: {type(tts_model_instance)}")
-                
-                if getattr(job, 'on_generate', None):\
-                    job.on_generate(identifier, str(output_path))
-            except Exception as e:
-                print(f"DEBUG ERROR: Błąd generowania linii {identifier}: {e}")
-                self._notify_progress(i, total_to_gen, f"Błąd linii {identifier}: {e}")
-                # Kontynuujemy z następną linią, mimo błędu
-                continue
-
+            self.worker.add_task(
+                GenerationManager._worker_tts_task,
+                identifier=identifier,
+                text=text,
+                job=job,
+                tts_model_instance=tts_model_instance,
+                on_complete=on_done,
+                on_error=on_error
+            )
+            
+        # 3. Oczekiwanie
+        while not tracker.is_done and not self.cancel_event.is_set():
+            time.sleep(0.5)
+            
         if self.cancel_event.is_set():
+            if self.worker:
+                self.worker.stop(clear_queue=True)
             raise InterruptedError()
 
         self._notify_progress(total_to_gen, total_to_gen, "Zakończono.")

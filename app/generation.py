@@ -38,6 +38,17 @@ def _audio_path(audio_dir: Path, uid: str, ext: str) -> Path:
 
 
 def enqueue_generate_all(app):
+    # Check for active job first
+    manager = GenerationManager.get_instance()
+    if manager.is_busy():
+        from ui.generation_summary import GenerationSummaryWindow
+        GenerationSummaryWindow(
+            app,
+            "Postęp (zadanie w tle)",
+            0, 0, None, monitor_only=True
+        )
+        return
+
     if not prepare_job_dependencies(app):
         return
 
@@ -63,7 +74,8 @@ def enqueue_generate_all(app):
 
 
 def _execute_generate_all(app, overwrite: bool):
-    tts_model = app._get_active_tts_model_name()
+    # Fix: Get model name from project config directly
+    tts_model = app.project_config.get('active_tts_model')
     if not tts_model:
         return False
 
@@ -123,6 +135,17 @@ def _execute_generate_all(app, overwrite: bool):
 
 
 def enqueue_convert_all(app):
+    # Check for active job first
+    manager = GenerationManager.get_instance()
+    if manager.is_busy():
+        from ui.generation_summary import GenerationSummaryWindow
+        GenerationSummaryWindow(
+            app,
+            "Postęp (zadanie w tle)",
+            0, 0, None, monitor_only=True
+        )
+        return
+
     if not app.audio_dir or not app.audio_dir.is_dir():
         messagebox.showwarning("Brak katalogu", "Najpierw wybierz katalog audio.", parent=app)
         return
