@@ -642,6 +642,8 @@ class SubtitlePanel(ctk.CTkFrame):
                          state=tk.NORMAL if can_verify else tk.DISABLED)
         menu.add_command(label="🗑️ Usuń audio (Ctrl+X)", command=self.delete_selected_dialogs,
                          state=tk.NORMAL if can_del else tk.DISABLED)
+        menu.add_command(label="🗑️ Usuń zaznaczone wiersze", command=self.delete_selected_rows,
+                         state=tk.NORMAL)
         menu.add_separator()
         menu.add_command(label="📄 Kopiuj linię (Ctrl+C)", command=lambda: self.app._on_ctrl_c_from_menu(),
                          state=tk.NORMAL)
@@ -1374,3 +1376,50 @@ class SubtitlePanel(ctk.CTkFrame):
         self.update_audio_buttons_state()
         if deleted and hasattr(self.app, 'set_status'):
             self.app.set_status(f"Usunięto {deleted} plików audio.")
+
+    def delete_selected_rows(self):
+        """Usuwa zaznaczone wiersze oraz powiązane pliki audio (wszystkie dla danego UID)."""
+        if not self.selected_line_indices:
+            return
+
+        count = len(self.selected_line_indices)
+        if not messagebox.askyesno("Usuń wiersze", f"Czy na pewno chcesz usunąć {count} wierszy oraz wszystkie ich pliki audio?"):
+            return
+
+        indices = sorted(self.selected_line_indices, reverse=True)
+        
+        # Zatrzymaj odtwarzanie jeśli dotyczy usuwanego wiersza
+        # Uproszczenie: zatrzymaj zawsze
+        self.stop_audio()
+
+        deleted_audio_count = 0
+        
+        for idx in indices:
+            if idx < 0 or idx >= len(self.app.lines):
+                continue
+            
+            line_obj = self.app.lines[idx]
+            identifier = getattr(line_obj, 'uid', None)
+            
+            if identifier:
+                found_files = get_audio_candidates(identifier)
+                for file_path, _ in found_files:
+                    try:
+                        if file_path.exists():
+                            file_path.unlink()
+                            deleted_audio_count += 1
+                    except Exception as e:
+                        print(f"Błąd usuwania pliku {file_path}: {e}")
+            
+            # Usuń wiersz z listy
+            del self.app.lines[idx]
+
+        # Wyczyść zaznaczenie
+        self.selected_line_indices = []
+        self.app.selected_line_index = None
+        self.tree.selection_remove(self.tree.selection())
+
+        # Odśwież UI
+        self.set_preview(self.app.lines)
+        self.app.mark_as_unsaved()
+        self.app.set_status(f"Usunięto {count} wierszy i {deleted_audio_count} plików audio.")

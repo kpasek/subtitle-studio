@@ -23,7 +23,7 @@ def compile_pattern(pat: PatternItem) -> re.Pattern:
     return re.compile(pat.pattern, flags)
 
 
-def apply_remove_patterns(lines: List[Line], patterns: List[PatternItem]) -> List[Line]:
+def apply_remove_patterns(lines: List[Line], patterns: List[PatternItem], remove_empty: bool = True) -> List[Line]:
     """
     Applies 'remove' patterns to a list of lines.
     Does NOT automatically remove empty lines or duplicates anymore.
@@ -36,18 +36,26 @@ def apply_remove_patterns(lines: List[Line], patterns: List[PatternItem]) -> Lis
         A new list of processed lines (regex applied only).
     """
     try:
-        compiled = [compile_pattern(p) for p in patterns]
+        all_enabled = [p for p in patterns if p.enabled]
+        compiled = [compile_pattern(p) for p in all_enabled]
     except Exception as e:
         messagebox.showerror("Błąd", f"Nieprawidłowy pattern:\n{e}")
         return []
 
-    for line in lines:
-        s = line.text
-        for i, pat in enumerate(patterns):
+    if not compiled:
+        return lines
+    
+    filtered_lines = []
+    for i, line in enumerate(lines):
+        s = line.get_text()
+        for i, pat in enumerate(all_enabled):
             s = compiled[i].sub(pat.replace, s)
-        line.text = s
+        if remove_empty and not s.strip():
+            continue
+        line.set_text(s)
+        filtered_lines.append(line)
 
-    return lines
+    return filtered_lines
 
 
 def resource_path(relative_path: str) -> str:
