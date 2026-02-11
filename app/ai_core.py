@@ -29,32 +29,58 @@ class AITask:
 BUILTIN_TASKS = [
     AITask(
         name="Liczby i daty na formę fonetyczną",
-        system_prompt="Zamień wszystkie liczby i daty w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy', '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.",
+        system_prompt=(
+            "Zamień wszystkie liczby i daty w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy', '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.\n"
+            "Jeśli masz wątpliwości co do tego jakiego typu liczby lub data jest lub nie jest to zawsze lepiej zwrócić ORYGINALNY TEKST."
+        ),
         is_readonly=True
     ),
     AITask(
         name="Usuń onomatopeje",
-        system_prompt="Twoim zadaniem jest usunięcie z tekstu wszelkich onomatopei (np. pf, ehh, yyy, wrr, westchnienie, płacz). Usuń także opisy dźwięków w nawiasach. Zwróć TYLKO wyczyszczony tekst dialogu. Jeśli po usunięciu nic nie zostaje, zwróć pusty ciąg znaków.",
+        system_prompt=(
+            "Twoim zadaniem jest usunięcie z tekstu wszelkich onomatopei (np. pf, ehh, yyy, wrr, westchnienie, płacz). Usuń także opisy dźwięków w nawiasach. Zwróć TYLKO wyczyszczony tekst dialogu.\n"
+            "Jeśli masz wątpliwości co do tego czy dany ciąg jest onomatopeją lub nie zawsze lepiej zwrócić ORYGINALNY TEKST."
+        ),
         is_readonly=True
     ),
     AITask(
         name="Usuń znaki specjalne (dla lektora)",
-        system_prompt="Przygotuj tekst dla syntezatora mowy (TTS). Usuń znaki, których lektor nie powinien czytać (np. *, #, @, --). Pozostaw interpunkcję gramatyczną. Zwróć TYLKO gotowy tekst.",
+        system_prompt=(
+            "Przygotuj tekst dla syntezatora mowy (TTS). Usuń znaki, których lektor nie powinien czytać (np. *, #, @, --). Pozostaw interpunkcję gramatyczną. Zwróć TYLKO gotowy tekst.\n"
+            "Jeśli masz wątpliwości co do tego czy dany znak powinien zostać usunięty zawsze lepiej zwrócić ORYGINALNY TEKST."
+        ),
         is_readonly=True
     ),
     AITask(
         name="Tłumaczenie na Polski",
-        system_prompt="Jesteś profesjonalnym tłumaczem napisów filmowych. Przetłumacz podany tekst na język polski, zachowując kontekst i styl wypowiedzi. Zwróć TYLKO przetłumaczony tekst, bez żadnych dodatkowych komentarzy.",
+        system_prompt=(
+            "Jesteś profesjonalnym tłumaczem napisów filmowych. Przetłumacz podany tekst na język polski, zachowując kontekst i styl wypowiedzi. Zwróć TYLKO przetłumaczony tekst, bez żadnych dodatkowych komentarzy.\n"
+            "Jeśli masz wątpliwości co do tego czy dany wyraz powinien zostać przełożony na inny sposób zawsze lepiej zwrócić ORYGINALNY TEKST."
+        ),
+        is_readonly=True
+    ),
+    AITask(
+        name="Zamień obce słowa na fonetyczne odpowiedniki",
+        system_prompt=(
+            "Jesteś profesjonalnym tłumaczem napisów. Zamień obce słowa na ich fonetyczne odpowiedniki w języku polskim. Zwróć TYLKO gotowy tekst.\n"
+            "Jeśli masz wątpliwości co do tego czy dany wyraz powinien zostać przełożony na inny sposób zawsze lepiej zwrócić ORYGINALNY TEKST."
+        ),
         is_readonly=True
     ),
     AITask(
         name="Korekta językowa",
-        system_prompt="Jesteś korektorem. Popraw błędy ortograficzne, interpunkcyjne i stylistyczne w podanym tekście. Nie zmieniaj sensu wypowiedzi. Zwróć TYLKO poprawiony tekst.",
+        system_prompt=(
+            "Jesteś korektorem. Popraw błędy ortograficzne, interpunkcyjne i stylistyczne w podanym tekście. Nie zmieniaj sensu wypowiedzi. Zwróć TYLKO poprawiony tekst.\n"
+            "Jeśli masz wątpliwości co do tego czy dany wyraz jest błędny zawsze lepiej zwrócić ORYGINALNY TEKST."
+        ),
         is_readonly=True
     ),
     AITask(
         name="Usuń elementy interfejsu",
-        system_prompt="Sprawdzasz napisy wyciągnięte z gry. Mogą one zawierać nazwy interfejsu lub inne elementy gry. Twoim zadaniem jest ustalić czy dany tekst jest elementem interfejsu lub nie. Jeżeli tak zwóć pusty ciąg znaków, jeśli nie zwróć oryginalny tekst bez zmian. Nie dodawaj żadnych komentarzy, zwróć TYLKO oczyszczony tekst.",
+        system_prompt=(
+            "Sprawdzasz napisy wyciągnięte z gry. Mogą one zawierać nazwy interfejsu lub inne elementy gry. Twoim zadaniem jest ustalić czy dany tekst jest elementem interfejsu lub nie. Jeżeli tak zwóć pusty ciąg znaków, jeśli nie zwróć ORYGINALNY TEKST bez zmian.\n"
+            "Jeśli masz wątpliwości co do tego czy dany wyraz jest elementem interfejsu zawsze lepiej zwrócić ORYGINALNY TEKST."
+        ),
         is_readonly=True
     )
 ]
