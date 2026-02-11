@@ -30,7 +30,7 @@ BUILTIN_TASKS = [
     AITask(
         name="Liczby i daty na formę fonetyczną",
         system_prompt=(
-            "Zamień wszystkie liczby i daty w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy', '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.\n"
+            "Zamień wszystkie liczby (w tym liczby rzymskie) i daty w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy', '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.\n"
             "Jeśli masz wątpliwości co do tego jakiego typu liczby lub data jest lub nie jest to zawsze lepiej zwrócić oryginalny tekst bez żadnych przeróbek."
         ),
         is_readonly=True

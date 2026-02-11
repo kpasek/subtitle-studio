@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 import subprocess
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 from app.entity import Line
@@ -345,7 +346,13 @@ class SubtitlePanel(ctk.CTkFrame):
             self.tree.delete(item)
         self.item_line_map.clear()
 
-        search_term = self.search_entry.get().lower()
+        raw_search = self.search_entry.get()
+        regex_obj = None
+        if raw_search:
+            try:
+                regex_obj = re.compile(raw_search, re.IGNORECASE)
+            except re.error:
+                pass
 
         # Przygotuj dane do wstawienia
         # Jeśli w przyszłości lines_to_show będzie listą słowników/obiektów,
@@ -362,7 +369,10 @@ class SubtitlePanel(ctk.CTkFrame):
             else:
                 line_text = line_obj.original_text
 
-            if search_term and search_term not in line_text:
+            if regex_obj:
+                if not regex_obj.search(line_text):
+                    continue
+            elif raw_search and raw_search.lower() not in line_text.lower():
                 continue
 
             f = self.filter_spec
