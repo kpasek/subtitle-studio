@@ -308,28 +308,28 @@ class VerificationManager:
         with VerificationManager._model_lock:
             if VerificationManager._whisper_model is None:
                 print(f"[INFO] Ładuję model Whisper (po raz pierwszy)...")
-            try:
-                # Sprawdź czy CUDA jest dostępne
-                import torch
-                if torch.cuda.is_available():
-                    print(f"[INFO] CUDA dostępne, próbuję załadować na GPU...")
-                    try:
-                        VerificationManager._whisper_model = whisper.load_model("base", device="cuda")
-                        print(f"[INFO] Model załadowany na GPU (CUDA)")
-                    except Exception as cuda_err:
-                        print(f"[WARNING] Błąd ładowania na CUDA: {cuda_err}")
-                        print(f"[INFO] Załaduję na CPU zamiast...")
+                try:
+                    # Sprawdź czy CUDA jest dostępne
+                    import torch
+                    if torch.cuda.is_available():
+                        print(f"[INFO] CUDA dostępne, próbuję załadować na GPU...")
+                        try:
+                            VerificationManager._whisper_model = whisper.load_model("base", device="cuda")
+                            print(f"[INFO] Model załadowany na GPU (CUDA)")
+                        except Exception as cuda_err:
+                            print(f"[WARNING] Błąd ładowania na CUDA: {cuda_err}")
+                            print(f"[INFO] Załaduję na CPU zamiast...")
+                            VerificationManager._whisper_model = whisper.load_model("base", device="cpu")
+                            print(f"[INFO] Model załadowany na CPU")
+                    else:
+                        print(f"[INFO] CUDA niedostępne, załaduję na CPU...")
                         VerificationManager._whisper_model = whisper.load_model("base", device="cpu")
-                        print(f"[INFO] Model załadowany na CPU")
-                else:
-                    print(f"[INFO] CUDA niedostępne, załaduję na CPU...")
-                    VerificationManager._whisper_model = whisper.load_model("base", device="cpu")
-                    print(f"[INFO] Model załadowany na CPU")
-            except Exception as e:
-                print(f"[ERROR] Nie mogę załadować modelu Whisper: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
+                        print(f"[INFO] Model teraz załadowany na CPU")
+                except Exception as e:
+                    print(f"[ERROR] Nie mogę załadować modelu Whisper: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
         return VerificationManager._whisper_model
 
     @staticmethod
