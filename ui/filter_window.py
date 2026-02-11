@@ -51,9 +51,14 @@ class FilterWindow(ctk.CTkToplevel):
         self.hal_option = tk.StringVar(value=self.current_filters.get('halucination', 'Wszystkie'))
         ctk.CTkOptionMenu(frm, variable=self.hal_option, values=["Wszystkie", "Tylko halucynacje", "Bez halucynacji", "Nieweryfikowane"]).grid(row=4, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
 
+        # Status filter
+        ctk.CTkLabel(frm, text="Status: ").grid(row=5, column=0, sticky="w", pady=(8,0))
+        self.status_option = tk.StringVar(value=self.current_filters.get('status', 'Wszystkie'))
+        ctk.CTkOptionMenu(frm, variable=self.status_option, values=["Wszystkie", "Gotowe", "Błędne", "Bez flagi"]).grid(row=5, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
+
         # Buttons
         btn_frame = ctk.CTkFrame(frm, fg_color="transparent")
-        btn_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(12,0))
+        btn_frame.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(12,0))
         ctk.CTkButton(btn_frame, text="Wyczyść", command=self._on_clear).pack(side="left", padx=6)
         ctk.CTkButton(btn_frame, text="Zastosuj", command=self._on_apply).pack(side="right", padx=6)
 
@@ -83,6 +88,9 @@ class FilterWindow(ctk.CTkToplevel):
             filters['max_sim'] = sim_max
         filters['show'] = self.show_option.get()
         filters['halucination'] = self.hal_option.get()
+        status_v = self.status_option.get()
+        if status_v != "Wszystkie":
+            filters['status'] = status_v
 
         if callable(self.apply_callback):
             self.apply_callback(filters)
@@ -97,6 +105,7 @@ class FilterWindow(ctk.CTkToplevel):
         self.max_sim.set('')
         self.show_option.set('Wszystkie')
         self.hal_option.set('Wszystkie')
+        self.status_option.set('Wszystkie')
         if callable(self.apply_callback):
             self.apply_callback({})
 

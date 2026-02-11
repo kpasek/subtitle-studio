@@ -35,6 +35,9 @@ class Line:
     audio_status: str = ""  # MISSING/ERROR/OK/SHORT/etc.
     audio_format: str = ""  # WAV/MP3/OGG
     audio_hallucination: str = "PENDING"  # Flag for TTS hallucinations (silence, buzzing)
+    
+    # Flagi statusu wiersza (ręczne)
+    status_flag: Optional[str] = None  # None, "DONE" (Gotowe), "ERROR" (Błędne)
 
 
     def get_text(self) -> str:

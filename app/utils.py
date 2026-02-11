@@ -47,6 +47,11 @@ def apply_remove_patterns(lines: List[Line], patterns: List[PatternItem], remove
     
     filtered_lines = []
     for i, line in enumerate(lines):
+        # Skip DONE lines (do not modify, preserve in list)
+        if getattr(line, 'status_flag', None) == "DONE":
+            filtered_lines.append(line)
+            continue
+            
         s = line.get_text()
         for i, pat in enumerate(all_enabled):
             s = compiled[i].sub(pat.replace, s)
@@ -91,6 +96,10 @@ def apply_replace_patterns(lines: List[Line], patterns: List[PatternItem]) -> Li
     compiled = [compile_pattern(p) for p in patterns]
 
     for line in lines:
+        # Skip DONE lines
+        if getattr(line, 'status_flag', None) == "DONE":
+            continue
+
         s = line.get_tts_text()
         for i, pat in enumerate(patterns):
             s = compiled[i].sub(pat.replace, s)

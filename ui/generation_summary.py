@@ -11,10 +11,11 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
     Pełni także funkcję okna postępu.
     """
 
-    def __init__(self, parent, title, total_count, existing_count, callback, monitor_only=False):
+    def __init__(self, parent, title, total_count, existing_count, callback, error_count=0, monitor_only=False):
         super().__init__(parent)
         self.callback = callback
         self.title(title)
+        self.error_count = error_count
         self.geometry("500x400")
         self.resizable(False, False)
         
@@ -44,7 +45,8 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
         to_process = total_count - existing_count
         stats_text = (
             f"Wszystkich elementów: {total_count}\n"
-            f"Już istniejących: {existing_count}\n\n"
+            f"Już istniejących: {existing_count}\n"
+            f"Oznaczonych błędów: {self.error_count}\n\n"
             f"Domyślnie do wykonania: {to_process}"
         )
         self.lbl_stats = ctk.CTkLabel(self.summary_frame, text=stats_text, justify="center", font=("", 14))
@@ -58,7 +60,18 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
             variable=self.var_overwrite,
             command=self._update_stats_preview
         )
-        self.chk_overwrite.pack(pady=15)
+        self.chk_overwrite.pack(pady=5)
+        
+        # Opcja tylko błędy
+        self.var_only_errors = tk.BooleanVar(value=False)
+        if self.error_count > 0:
+            self.chk_only_errors = ctk.CTkCheckBox(
+                self.summary_frame,
+                text=f"Generuj tylko błędne ({self.error_count})",
+                variable=self.var_only_errors,
+                command=self._update_stats_preview
+            )
+            self.chk_only_errors.pack(pady=5)
 
         # Przyciski Summary
         btn_frame = ctk.CTkFrame(self.summary_frame, fg_color="transparent")
@@ -165,9 +178,13 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
         # 3. Start faktyczny (logika biznesowa)
         self.is_running = True
         overwrite = self.var_overwrite.get()
-        # Wywołanie callbacka z argumentem overwrite
+        only_errors = self.var_only_errors.get() if self.error_count > 0 else False
+        
+        # Wywołanie callbacka z argumentem overwrite i only_errors
         if self.callback:
-            success = self.callback(overwrite)
+            # Sprawdźmy ile argumentów przyjmuje callback, żeby zachować kompatybilność w razie czego
+            # Ale tutaj zmieniamy definicję callbacka w app/generation.py więc będzie OK.
+            success = self.callback(overwrite, only_errors)
             if not success:
                 self.destroy()
 

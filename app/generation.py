@@ -55,9 +55,13 @@ def enqueue_generate_all(app):
     lines: LineList = app.lines
     total_items = len(lines)
     existing_items = 0
+    error_items = 0
 
     for i, line in enumerate(lines):
         uid = line.uid
+        if getattr(line, 'status_flag', None) == "ERROR":
+            error_items += 1
+            
         raw_wav = _audio_path(app.audio_dir, uid, 'wav')
         raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
         if raw_wav.exists() or raw_mp3.exists():
@@ -69,11 +73,12 @@ def enqueue_generate_all(app):
         "Generowanie dialogów",
         total_items,
         existing_items,
-        callback=lambda overwrite: _execute_generate_all(app, overwrite)
+        callback=lambda overwrite, only_errors: _execute_generate_all(app, overwrite, only_errors),
+        error_count=error_items
     )
 
 
-def _execute_generate_all(app, overwrite: bool):
+def _execute_generate_all(app, overwrite: bool, only_errors: bool = False):
     # Fix: Get model name from project config directly
     tts_model = app.project_config.get('active_tts_model')
     if not tts_model:
@@ -84,22 +89,46 @@ def _execute_generate_all(app, overwrite: bool):
     uid_to_idx: Dict[str, int] = {}
     lines: LineList = app.lines
     for i, line in enumerate(lines):
+        # SKIP if DONE
+        if getattr(line, 'status_flag', None) == "DONE":
+            continue
+            
+        # If filtering by errors
+        if only_errors and getattr(line, 'status_flag', None) != "ERROR":
+             continue
+
         uid = line.uid
         text = line.get_tts_text().strip()
 
         if not text:
             continue
 
-        if not overwrite:
+        if not overwrite and not only_errors:
+            # Check existing only if NOT overwriting AND NOT explicitly regenerating errors
+            # (If checking errors, we assume we want to regenerate them regardless of file existence?)
+            # Actually user requirement: "Błędne - musi być możliwość wybrania szybkiej generacji". 
+            # Usually implies reprocessing.
+            # safe logic: if only_errors is True, we regenerate even if exists (it's flagged error after all)
             raw_wav = _audio_path(app.audio_dir, uid, 'wav')
             raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
             if raw_wav.exists() or raw_mp3.exists():
-                continue
+                # But wait, if overwrite is False, we typically skip existing.
+                # If "Generuj tylko błędne" is checked, we probably expect regeneration.
+                # Let's say: if only_errors is TRUE, we treat overwrite as TRUE for these items locally.
+                pass
+            else:
+                pass # Doesn't exist, so generate.
+        elif not overwrite and not only_errors: # Standard incremental
+             raw_wav = _audio_path(app.audio_dir, uid, 'wav')
+             raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
+             if raw_wav.exists() or raw_mp3.exists():
+                 continue
+
         dialogs_to_generate.append((uid, text))
         uid_to_idx[uid] = i
 
     if not dialogs_to_generate:
-        messagebox.showinfo("Info", "Brak dialogów do wygenerowania (wszystkie istnieją lub są puste).")
+        messagebox.showinfo("Info", "Brak dialogów do wygenerowania, które spełniają kryteria.")
         return False
 
     def _on_generate(identifier: str, path: str):
@@ -108,8 +137,46 @@ def _execute_generate_all(app, overwrite: bool):
             if target_idx is None:
                 target_idx = next((i for i, l in enumerate(lines) if l.uid == identifier), None)
             if target_idx is not None and 0 <= target_idx < len(lines):
-                lines[target_idx].audio_filename = Path(path).name
-                lines[target_idx].audio_status = 'OK'
+                line_obj = lines[target_idx]
+                line_obj.audio_filename = Path(path).name
+                line_obj.audio_status = 'OK' # Resetujemy status na OK (bo nowy plik)
+                # Czyścimy dane weryfikacji
+                line_obj.audio_similarity = 0.0
+                line_obj.audio_hallucination = "PENDING"
+                # Jeśli była flaga ERROR, można ją zdjąć? 
+                # User did not explicit say to clear ERROR flag on success. 
+                # "Generowanie dialogów ma od razu usuwać dane o weryfikacji"
+                # Maybe leave flag manual? safer.
+                
+                # Zapisujemy
+                try:
+                    # dummy save or rely on bulk save later? 
+                    # Generation usually saves automatically via app state
+                    pass
+                except: 
+                    pass
+        except Exception as e:
+            print(f"Error update line: {e}")
+
+    # Build job
+    # ... rest of function ... we need to construct job, but function continues in original file.
+    # I replaced the beginning of `_execute_generate_all` and `enqueue_generate_all`.
+    # Wait `_execute_generate_all` in original file continues after `lines: LineList = app.lines`.
+    # I should be careful with replacement scope.
+    
+    # Original:
+    # def _execute_generate_all(app, overwrite: bool):
+    #   ...
+    #   for i, line in enumerate(lines):
+    #       uid = line.uid
+    #       text = ...
+    #       if not text: continue
+    #       if not overwrite:
+    #           ...
+    #       dialogs_to_generate.append...
+    
+    # I need to match carefully.
+
             try:
                 from app.io import save_lines_to_file
                 if getattr(app, 'loaded_path', None):

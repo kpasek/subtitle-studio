@@ -49,6 +49,7 @@ class SubtitlePanel(ctk.CTkFrame):
         # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
         self.columns_config = [
             {"id": "content", "text": "Tekst", "width": 600, "anchor": "w", "stretch": True},
+            {"id": "status", "text": "Status", "width": 80, "anchor": "center", "stretch": False},
             {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
             {"id": "cps", "text": "CPS", "width": 70, "anchor": "center", "stretch": False},
             {"id": "similarity", "text": "SIM %", "width": 80, "anchor": "center", "stretch": False},
@@ -214,6 +215,9 @@ class SubtitlePanel(ctk.CTkFrame):
                 if col_id == 'content':
                     val = ln.get_text() if hasattr(ln, 'get_text') else getattr(ln, 'text', '')
                     return (0, str(val or '').lower())
+                if col_id == 'status':
+                    val = getattr(ln, 'status_flag', '') or ''
+                    return (0, str(val).lower())
                 if col_id == 'duration':
                     val = getattr(ln, 'audio_duration', 0.0)
                     return (0, float(val if val is not None else 0.0))
@@ -353,60 +357,80 @@ class SubtitlePanel(ctk.CTkFrame):
             elif hal_f == 'Nieweryfikowane':
                 if not is_pending:
                     continue
+            
+            # TODO: Filter by status flag (Gotowe/Błędne)
+            status_filter = f.get('status')
+            if status_filter:
+                flag = getattr(line_obj, 'status_flag', None) or ""
+                # status_filter mapping needed
+                if status_filter == "Gotowe" and flag != "DONE":
+                    continue
+                if status_filter == "Błędne" and flag != "ERROR":
+                    continue
+                if status_filter == "Bez flagi" and flag != "":
+                    continue
 
 
             # Budowanie wartości dla wiersza zgodnie z self.columns_config
-            row_values = []
-            for col in self.columns_config:
-                col_id = col["id"]
-                if col_id == "content":
-                    mode = self.app.view_mode.get()
-                    if mode == 'TTS':
-                        row_values.append(line_obj.get_tts_text())
-                    elif mode == "Napisy":
-                        line_content = line_obj.get_text()
-                        row_values.append(line_content)
-                    else:
-                        row_values.append(line_obj.original_text)
-
-            # Fill columns from Line object
+            row_values = [""] * len(self.columns_config)
             col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
-            try:
-                if 'duration' in col_pos:
-                    duration_val = line_obj.audio_duration
-                    row_values.append(f"{duration_val:.2f}" if duration_val > 0 else '-')
-                if 'cps' in col_pos:
-                    row_values.append(f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-')
-                if 'similarity' in col_pos:
-                    sim_display = format_percent(sim_val)
-                    row_values.append(sim_display if sim_display else '-')
-                if 'hallucination' in col_pos:
-                    if halo_val and halo_val != "PENDING":
-                        row_values.append(halo_val)
-                    elif halo_val == "PENDING":
-                        row_values.append("?")
-                    elif status_val:
-                        row_values.append("Brak")
-                    else:
-                        row_values.append("-")
 
-                if 'format' in col_pos:
-                    fmt = line_obj.audio_format
-                    row_values.append((fmt or '').upper())
-                if 'audio_file' in col_pos:
-                    path = None
-                    fname = line_obj.audio_filename
-                    if fname:
-                        path = Path(getattr(self, 'app').audio_dir or Path('.')) / fname
-                    else:
-                        path = get_primary_audio_path(line_obj.uid)
-                    
-                    if path and Path(path).exists():
-                        row_values.append(Path(path).name if path else '')
-                    else:
-                        row_values.append("Brak pliku")
-            except Exception as e:
-                print(f"Blad podczas przetwarzania wiersza: {e}")
+            # Fill columns
+            if "content" in col_pos:
+                mode = self.app.view_mode.get()
+                if mode == 'TTS':
+                    row_values[col_pos["content"]] = line_obj.get_tts_text()
+                elif mode == "Napisy":
+                    row_values[col_pos["content"]] = line_obj.get_text()
+                else:
+                    row_values[col_pos["content"]] = line_obj.original_text
+
+            if "status" in col_pos:
+                flag = getattr(line_obj, 'status_flag', None)
+                if flag == "DONE":
+                    row_values[col_pos["status"]] = "Gotowe"
+                elif flag == "ERROR":
+                    row_values[col_pos["status"]] = "Błąd"
+                else:
+                    row_values[col_pos["status"]] = ""
+
+            if 'duration' in col_pos:
+                duration_val = line_obj.audio_duration
+                row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+            
+            if 'cps' in col_pos:
+                row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
+            
+            if 'similarity' in col_pos:
+                sim_display = format_percent(sim_val)
+                row_values[col_pos['similarity']] = sim_display if sim_display else '-'
+            
+            if 'hallucination' in col_pos:
+                if halo_val and halo_val != "PENDING":
+                    row_values[col_pos['hallucination']] = halo_val
+                elif halo_val == "PENDING":
+                    row_values[col_pos['hallucination']] = "?"
+                elif status_val:
+                    row_values[col_pos['hallucination']] = "Brak"
+                else:
+                    row_values[col_pos['hallucination']] = "-"
+
+            if 'format' in col_pos: # Jeśli taka kolumna istnieje (w configu nie widziałem, ale logika była)
+                fmt = line_obj.audio_format
+                row_values[col_pos['format']] = (fmt or '').upper()
+                
+            if 'audio_file' in col_pos:
+                path = None
+                fname = line_obj.audio_filename
+                if fname:
+                    path = Path(getattr(self, 'app').audio_dir or Path('.')) / fname
+                else:
+                    path = get_primary_audio_path(line_obj.uid)
+                
+                if path and Path(path).exists():
+                    row_values[col_pos['audio_file']] = Path(path).name if path else ''
+                else:
+                    row_values[col_pos['audio_file']] = "Brak pliku"
 
             # Wstawienie wiersza
             item_id = self.tree.insert("", "end", values=tuple(row_values))
@@ -641,6 +665,10 @@ class SubtitlePanel(ctk.CTkFrame):
         menu.add_command(label="🗑️ Usuń zaznaczone wiersze", command=self.delete_selected_rows,
                          state=tk.NORMAL)
         menu.add_separator()
+        menu.add_command(label="✅ Oznacz jako Gotowe", command=lambda: self.set_selected_status("DONE"), state=tk.NORMAL)
+        menu.add_command(label="⚠️ Oznacz jako Błędne", command=lambda: self.set_selected_status("ERROR"), state=tk.NORMAL)
+        menu.add_command(label="⚪ Wyczyść flagi", command=lambda: self.set_selected_status(None), state=tk.NORMAL)
+        menu.add_separator()
         menu.add_command(label="📄 Kopiuj linię (Ctrl+C)", command=lambda: self.app._on_ctrl_c_from_menu(),
                          state=tk.NORMAL)
         menu.add_separator()
@@ -651,6 +679,20 @@ class SubtitlePanel(ctk.CTkFrame):
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def set_selected_status(self, status: Optional[str]):
+        """Ustawia flagę statusu dla zaznaczonych wierszy."""
+        if not self.selected_line_indices:
+            return
+            
+        changed = False
+        for idx in self.selected_line_indices:
+            if 0 <= idx < len(self.app.lines):
+                self.app.lines[idx].status_flag = status
+                changed = True
+        
+        if changed:
+            self.set_preview(self.app.lines)
 
     # --- Weryfikacja audio (zintegrowana) ---
     def start_verification(self, force_refresh=False, ignore_short=True, verify_options=None):
@@ -1322,8 +1364,8 @@ class SubtitlePanel(ctk.CTkFrame):
                 ignore_short=True,
                 ffprobe=ffprobe,
                 workers=4,
-                verify_hallucination=False,
-                verify_similarity=False,
+                verify_hallucination=True,  # Zgodnie z żądaniem: Hallucinations + CPS
+                verify_similarity=False,    # Zgodnie z żądaniem: No Similarity
                 apply_callback=apply_cb
             )
             
