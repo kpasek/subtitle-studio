@@ -191,14 +191,15 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
             uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
             out.append(Line(
                 original_text=row.get('original_text', '') or '',
-                text=row.get('text', '') or '',
-                tts_text=row.get('tts_text', '') or '',
+                text=row.get('text', '') or None,
+                tts_text=row.get('tts_text', '') or None,
                 audio_duration=dur,
                 audio_filename=audio_filename,
                 audio_similarity=float(row.get('audio_similarity') or 0.0),
                 audio_format=row.get('audio_format', '') or '',
                 audio_transcribed_text=transcribed,
                 audio_hallucination=row.get('audio_hallucination', 'PENDING'),
+                status_flag=row.get('status_flag', None),
                 uid=uid
             ))
 
@@ -244,7 +245,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                 fieldnames = [
                     'original_text', 'text', 'tts_text', 'audio_duration',
                     'audio_similarity', 'audio_format', 'audio_filename',
-                    'audio_transcribed_text', 'audio_hallucination', 'uid'
+                    'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'uid'
                 ]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
                 writer.writeheader()
@@ -264,6 +265,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                             'audio_filename': item.audio_filename, 
                             'audio_transcribed_text': item.audio_transcribed_text,
                             'audio_hallucination': item.audio_hallucination,
+                            'status_flag': item.status_flag,
                             'uid': _cleanup_uid_field(item.uid)  
                         }
                         if not row_dict['uid']:
@@ -340,7 +342,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_format': line.audio_format,
                 'audio_filename': line.audio_filename,
                 'audio_transcribed_text': line.audio_transcribed_text,
-                'audio_hallucination': line.audio_hallucination,
+                'status_flag': getattr(line, 'status_flag', None),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -364,6 +366,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_filename': line.audio_filename,
                 'audio_transcribed_text': line.audio_transcribed_text,
                 'audio_hallucination': line.audio_hallucination,
+                'status_flag': getattr(line, 'status_flag', None),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -375,6 +378,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
     fieldnames = [
         'original_text', 'text', 'tts_text', 'audio_duration',
         'audio_similarity', 'audio_format', 'audio_filename',
+        'audio_transcribed_text', 'audio_hallucination', 'status_flagename',
         'audio_transcribed_text', 'audio_hallucination', 'uid'
     ]
     

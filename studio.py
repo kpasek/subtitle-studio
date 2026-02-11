@@ -85,6 +85,7 @@ LineList = List[Line]
 
 class SubtitleStudioApp(ctk.CTk):
     """Główna klasa aplikacji Subtitle Studio."""
+    APP_TITLE = "Subtitle Studio"
     APP_VERSION = "0.14.0"
 
     def __init__(self):
@@ -293,14 +294,15 @@ class SubtitleStudioApp(ctk.CTk):
         return "break"
 
     def _on_delete_key(self, event=None):
-        """Obsługa Del (Wyczyść linię), z zabezpieczeniem edycji tekstu."""
+        """Obsługa Del (Usuń wiersze)."""
         widget = self.focus_get()
         # Jeśli piszemy w edytorze lub wyszukiwarce, Del ma usuwać znaki
         if isinstance(widget, (tk.Entry, ctk.CTkEntry)):
             return
-
-            # Jeśli nie edytujemy tekstu, czyścimy zawartość linii
-        self._clear_selected_line_content()
+            
+        # Wywołaj metodę usuwania wierszy (tę samą co w menu kontekstowym)
+        if self.subtitle_panel:
+            self.subtitle_panel.delete_selected_rows()
 
     def _clear_selected_line_content(self):
         """Czyści treść aktualnie zaznaczonej linii (zastępuje pustym stringiem)."""
@@ -311,6 +313,10 @@ class SubtitleStudioApp(ctk.CTk):
         mode = self.view_mode.get()
         idx = self.selected_line_index
         line: Line = lines[idx]
+
+        # Nie pozwalamy edytować linii oznaczonych jako gotowe
+        if getattr(line, 'status_flag', None) == "DONE":
+            return
 
         # Nie pozwalamy edytować oryginału
         if mode == "Oryginał":
@@ -482,6 +488,10 @@ class SubtitleStudioApp(ctk.CTk):
     def apply_theme_settings(self):
         ctk.set_appearance_mode(self.global_config.get('appearance_mode', 'System'))
         ctk.set_default_color_theme(self.global_config.get('color_theme', 'blue'))
+        
+        if hasattr(self, 'subtitle_panel'):
+            # Nie musimy przekazywać trybu, panel sam go pobierze z CTK
+            self.subtitle_panel.update_table_theme()
 
     def save_app_setting(self, param, value):
         save_app_setting(self, param, value)

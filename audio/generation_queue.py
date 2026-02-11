@@ -47,18 +47,36 @@ class GenerationQueueWindow(ctk.CTkToplevel):
         btn_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=10)
 
         self.btn_cancel_current = ctk.CTkButton(
-            btn_frame, text="Zatrzymaj bieżące zadanie",
+            btn_frame, text="Zatrzymaj", width=100,
             command=self.manager.cancel_current_job,
             fg_color="red", hover_color="darkred")
         self.btn_cancel_current.pack(side="left", padx=5)
 
+        self.btn_pause = ctk.CTkButton(
+            btn_frame, text="Pauza", width=100,
+            command=self._toggle_pause,
+            fg_color="orange", hover_color="darkorange")
+        self.btn_pause.pack(side="left", padx=5)
+
         self.btn_close = ctk.CTkButton(
             btn_frame, text="Zamknij okno", command=self.destroy)
         self.btn_close.pack(side="right", padx=5)
+        
+        self.is_paused = False
 
         # Inicjalne odświeżenie
         self.update_job_list(self.manager.current_job,
                              list(self.manager.job_queue.queue))
+
+    def _toggle_pause(self):
+        if not self.is_paused:
+            self.manager.pause_current_job()
+            self.btn_pause.configure(text="Wznów", fg_color="green", hover_color="darkgreen")
+            self.is_paused = True
+        else:
+            self.manager.resume_current_job()
+            self.btn_pause.configure(text="Pauza", fg_color="orange", hover_color="darkorange")
+            self.is_paused = False
 
     def _update_job_list_safe(self, current_job: Optional[JobType], queued_jobs: List[JobType]):
         self.master.queue.put(
@@ -75,9 +93,13 @@ class GenerationQueueWindow(ctk.CTkToplevel):
         if current_job:
             self.lbl_current_job.configure(text=current_job.project_path)
             self.btn_cancel_current.configure(state="normal")
+            self.btn_pause.configure(state="normal")
         else:
             self.lbl_current_job.configure(text="Brak")
             self.btn_cancel_current.configure(state="disabled")
+            self.btn_pause.configure(state="disabled")
+            if self.is_paused:
+                 self._toggle_pause() # Reset button state if job finished while paused
             # WAŻNE: Zakomentowane, aby nie nadpisywać komunikatu o błędzie
             # self.update_progress(0, 1, "Oczekuję na zadania...")
 

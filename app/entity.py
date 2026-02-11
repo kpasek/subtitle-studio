@@ -1,13 +1,14 @@
 from dataclasses import dataclass, asdict, field
 import uuid
+from typing import Optional
 
 
 @dataclass
 class PatternItem:
     pattern: str
     replace: str = ""
-    case_sensitive: bool = True,
-    name: str | None = None,
+    case_sensitive: bool = True
+    name: str | None = None
     enabled: bool = True
 
     def to_json(self):
@@ -22,8 +23,8 @@ class PatternItem:
 class Line:
     uid: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     original_text: str = ""  # Tekst oryginalny (niezmienny)
-    text: str = ""  # Tekst po obróbce (do wyświetlania/napisów) - dawniej processed_clean
-    tts_text: str = ""  # Tekst do syntezy mowy - dawniej processed_replace
+    text: Optional[str] = None  # Tekst po obróbce (None = brak zmian)
+    tts_text: Optional[str] = None  # Tekst do syntezy mowy (None = takie jak text)
 
     audio_duration: float = 0.0  # Długość wygenerowanego audio
     audio_filename: str = ""  # Nazwa pliku audio (np. output1 (1).wav)
@@ -34,75 +35,50 @@ class Line:
     audio_status: str = ""  # MISSING/ERROR/OK/SHORT/etc.
     audio_format: str = ""  # WAV/MP3/OGG
     audio_hallucination: str = "PENDING"  # Flag for TTS hallucinations (silence, buzzing)
+    
+    # Flagi statusu wiersza (ręczne)
+    status_flag: Optional[str] = None  # None, "DONE" (Gotowe), "ERROR" (Błędne)
 
 
     def get_text(self) -> str:
         """
-        Returns the text. If it is equal to original_text, returns original_text.
-
-        Args:
-            None
-
-        Returns:
-            str: The text or original_text if they are equal
+        Returns the text. If it is None, returns original_text.
         """
-        if not self.text:
+        if self.text is None:
             return self.original_text
         return self.text
 
     def get_tts_text(self) -> str:
         """
-        Returns the tts_text. If it is equal to text, returns text.
-
-        Args:
-            None
-
-        Returns:
-            str: The tts_text or text if they are equal
+        Returns the tts_text. If it is None, returns text.
         """
-        if self.tts_text:
+        if self.tts_text is not None:
             return self.tts_text
         return self.get_text()
     
     def get_original_text(self) -> str:
         """
         Returns the original_text.
-
-        Args:
-            None
-
-        Returns:
-            str: The original text
         """
         return self.original_text
 
     def set_text(self, value: str):
         """
-        Sets the text. If it is equal to original_text, clears text.
-        Args:
-            value (str): The new text
-
-        Returns:
-            None
+        Sets the text. If it is equal to original_text, sets to None.
         """
         if value == self.original_text:
-            self.text = ""
+            self.text = None
         else:
             self.text = value
 
     def set_tts_text(self, value: str):
         """
-        Sets the tts_text. If it is equal to text, clears tts_text.
-
-        Args:
-            value (str): The new tts_text
-
-        Returns:
-            None
+        Sets the tts_text. If it is equal to text, sets to None.
         """
-        if self.tts_text:
-            return self.tts_text
-        return self.get_text()
+        if value == self.get_text():
+            self.tts_text = None
+        else:
+            self.tts_text = value
     
     def calculate_cps(self) -> float:
         """

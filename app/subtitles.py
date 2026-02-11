@@ -49,6 +49,7 @@ class SubtitlePanel(ctk.CTkFrame):
         # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
         self.columns_config = [
             {"id": "content", "text": "Tekst", "width": 600, "anchor": "w", "stretch": True},
+            {"id": "status", "text": "Status", "width": 80, "anchor": "center", "stretch": False},
             {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
             {"id": "cps", "text": "CPS", "width": 70, "anchor": "center", "stretch": False},
             {"id": "similarity", "text": "SIM %", "width": 80, "anchor": "center", "stretch": False},
@@ -64,94 +65,93 @@ class SubtitlePanel(ctk.CTkFrame):
         self.ver_stop_event = threading.Event()
         self.ver_ffprobe_path = shutil.which('ffprobe')
         self.ver_modified_buffer = []
+        self.ver_last_save_time = 0
 
         self._create_widgets()
 
     def _create_widgets(self):
-        stats_frame = ctk.CTkFrame(self)
-        stats_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        # 1. Top Panel (Actions + View + Info) - merged into one line
+        top_frame = ctk.CTkFrame(self)
+        top_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5), padx=5)
+        
+        # --- Left side: Action Buttons ---
+        self.generate_button = ctk.CTkButton(top_frame, text="⚙️ Generuj", width=80,
+                                             command=self.generate_selected_dialogs, state="disabled",
+                                             fg_color="#2E8B57", hover_color="#1E613B")
+        self.generate_button.pack(side="left", padx=4, pady=5)
 
-        ctk.CTkButton(stats_frame, text="Zatwierdź zmiany",
-                      command=lambda: apply_processing(self.app),
-                      fg_color="#2E8B57", hover_color="#1E613B").pack(side="left", padx=5)
+        self.verify_button = ctk.CTkButton(top_frame, text="✓ Weryfikuj", width=100,
+                                           command=self.verify_selected_dialogs, state="disabled",
+                                           fg_color="#1E90FF", hover_color="#4169E1")
+        self.verify_button.pack(side="left", padx=4, pady=5)
+        
+        # Flagi statusu
+        self.btn_flag_done = ctk.CTkButton(top_frame, text="✅ Gotowe", width=80,
+                                           command=lambda: self.set_selected_status("DONE"),
+                                           fg_color="#27ae60", hover_color="#2ecc71")
+        self.btn_flag_done.pack(side="left", padx=4, pady=5)
 
-        ctk.CTkLabel(stats_frame, text="Widok:").pack(side="left", padx=(15, 5))
+        self.btn_flag_error = ctk.CTkButton(top_frame, text="⚠️ Błędne", width=80,
+                                            command=lambda: self.set_selected_status("ERROR"),
+                                            fg_color="#c0392b", hover_color="#e74c3c")
+        self.btn_flag_error.pack(side="left", padx=4, pady=5)
+        
+        self.btn_flag_clear = ctk.CTkButton(top_frame, text="⚪ Wyczyść", width=80,
+                                            command=lambda: self.set_selected_status(None),
+                                            fg_color="#7f8c8d", hover_color="#95a5a6")
+        self.btn_flag_clear.pack(side="left", padx=4, pady=5)
+
+        self.delete_all_button = ctk.CTkButton(top_frame, text="🗑️ Usuń audio", width=100,
+                                               command=self.delete_selected_dialogs, state="disabled",
+                                               fg_color="#C51616", hover_color="#920F0F")
+        self.delete_all_button.pack(side="left", padx=4, pady=5)
+
+        # --- Right/Middle side: View & Info ---
+        ctk.CTkLabel(top_frame, text="|", text_color="gray").pack(side="left", padx=(10, 5))
+
+        ctk.CTkLabel(top_frame, text="Widok:").pack(side="left", padx=(5, 5))
         self.view_switcher = ctk.CTkSegmentedButton(
-            stats_frame,
+            top_frame,
             values=["Oryginał", "Napisy", "TTS"],
             variable=self.app.view_mode,
             command=self._on_view_mode_change,
-            width=200
+            width=180
         )
-        self.view_switcher.pack(side="left", padx=5)
+        self.view_switcher.pack(side="left", padx=5, pady=5)
 
-        self.app.update_button = ctk.CTkButton(stats_frame, text="Nowa wersja!",
+        self.app.update_button = ctk.CTkButton(top_frame, text="Nowa wersja!",
                                                command=lambda: download_update(self.app),
-                                               fg_color="#006400", hover_color="#004d00")
+                                               fg_color="#006400", hover_color="#004d00",
+                                               width=100)
         self.app.update_button.pack(side="left", padx=5)
         self.app.update_button.pack_forget()
 
-        self.app.lbl_filename = ctk.CTkLabel(stats_frame, text="Brak wczytanego pliku")
-        self.app.lbl_filename.pack(side="left", anchor="w", padx=5)
+        self.app.lbl_filename = ctk.CTkLabel(top_frame, text="Brak wczytanego pliku")
+        self.app.lbl_filename.pack(side="left", anchor="w", padx=10)
 
-        audio_btn_frame = ctk.CTkFrame(self)
-        audio_btn_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
 
-        audio_btn_frame.grid_columnconfigure(4, weight=1)
+        # 2. Search Frame (Filter + Search Entry + Search Button)
+        search_frame = ctk.CTkFrame(self, fg_color="transparent")
+        search_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5), padx=5)
 
-        self.generate_button = ctk.CTkButton(audio_btn_frame, text="⚙️ Generuj", width=80,
-                                             command=self.generate_selected_dialogs, state="disabled",
-                                             fg_color="#2E8B57", hover_color="#1E613B")
-        self.generate_button.grid(row=0, column=0, padx=4)
-
-        self.verify_button = ctk.CTkButton(audio_btn_frame, text="✓ Weryfikuj", width=100,
-                                           command=self.verify_selected_dialogs, state="disabled",
-                                           fg_color="#1E90FF", hover_color="#4169E1")
-        self.verify_button.grid(row=0, column=1, padx=4)
-
-        self.delete_all_button = ctk.CTkButton(audio_btn_frame, text="🗑️ Usuń audio", width=100,
-                                               command=self.delete_selected_dialogs, state="disabled",
-                                               fg_color="#C51616", hover_color="#920F0F")
-        self.delete_all_button.grid(row=0, column=2, padx=4)
-
-        ctk.CTkLabel(audio_btn_frame, text="Szukaj").grid(row=0, column=3, padx=(15, 5))
-
-        self.search_entry = ctk.CTkEntry(audio_btn_frame, placeholder_text="Tekst")
-        self.search_entry.grid(row=0, column=4, sticky="ew")
+        self.filter_button = ctk.CTkButton(search_frame, text="Filtruj", command=self.open_filter_window, width=80)
+        self.filter_button.pack(side="left", padx=(0, 5))
+        
+        self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Szukaj tekstu...")
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.search_entry.bind("<Return>", lambda event: apply_patterns(self.app))
         self.search_entry.bind("<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
 
-        self.search_button = ctk.CTkButton(audio_btn_frame, text="Szukaj", command=lambda: apply_patterns(self.app), width=60)
-        self.search_button.grid(row=0, column=5, padx=(6, 0))
-        self.filter_button = ctk.CTkButton(audio_btn_frame, text="Filtruj", command=self.open_filter_window, width=80)
-        self.filter_button.grid(row=0, column=6, padx=(6, 0))
+        self.search_button = ctk.CTkButton(search_frame, text="Szukaj", width=80,
+                                            command=lambda: apply_patterns(self.app))
+        self.search_button.pack(side="left", padx=0)
 
+
+        # 3. Table Frame
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
         table_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
-
-
-        # Stylizacja Treeview (aby pasowało do ciemnego motywu CustomTkinter)
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Treeview",
-                        background="#2b2b2b",
-                        foreground="white",
-                        fieldbackground="#2b2b2b",
-                        bordercolor="#2b2b2b",
-                        lightcolor="#2b2b2b",
-                        darkcolor="#2b2b2b",
-                        rowheight=25)
-        style.configure("Treeview.Heading",
-                        background="#1c1c1c",
-                        foreground="white",
-                        relief="flat")
-        style.map("Treeview.Heading",
-                  background=[('active', '#252525')])
-        style.map("Treeview",
-                  background=[('selected', '#1f538d')],
-                  foreground=[('selected', 'white')])
 
         # Pobieramy ID kolumn z konfiguracji
         column_ids = [col["id"] for col in self.columns_config]
@@ -189,9 +189,69 @@ class SubtitlePanel(ctk.CTkFrame):
         self.tree.bind("<Control-a>", self.select_all_visible)
 
         # Zmienne do edycji inline
-
         self.inline_edit_entry = None
         self.inline_edit_item = None
+
+        # Inicjalizacja stylu tabeli
+        self.update_table_theme()
+
+    def update_table_theme(self, mode: str = None):
+        """Aktualizuje kolory tabeli (Treeview) w zależności od motywu (Light/Dark)."""
+        
+        # Próbujemy pobrać efektywny tryb z CustomTkinter (widgetu)
+        # _get_appearance_mode() zwraca 'light' lub 'dark'
+        if hasattr(self, "_get_appearance_mode"):
+            effective_mode = self._get_appearance_mode()
+        else:
+            # Fallback dla starszych wersji CTK lub jeśli metoda jest niedostępna
+            effective_mode = mode or ctk.get_appearance_mode()
+
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        if effective_mode.lower() == "light":
+            bg_color = "#ffffff"
+            fg_color = "#000000"
+            field_bg = "#ffffff"
+            heading_bg = "#e1e1e1"
+            heading_fg = "#000000"
+            heading_active = "#d1d1d1"
+            selected_bg = "#3a7ebf"
+            selected_fg = "white"
+            border_color = "#e1e1e1"
+        else:
+            # Dark mode (default)
+            bg_color = "#2b2b2b"
+            fg_color = "white"
+            field_bg = "#2b2b2b"
+            heading_bg = "#1c1c1c"
+            heading_fg = "white"
+            heading_active = "#252525"
+            selected_bg = "#1f538d"
+            selected_fg = "white"
+            border_color = "#2b2b2b"
+
+        style.configure("Treeview",
+                        background=bg_color,
+                        foreground=fg_color,
+                        fieldbackground=field_bg,
+                        bordercolor=border_color,
+                        lightcolor=border_color,
+                        darkcolor=border_color,
+                        rowheight=25)
+
+
+        style.configure("Treeview.Heading",
+                        background=heading_bg,
+                        foreground=heading_fg,
+                        relief="flat")
+
+        style.map("Treeview.Heading",
+                  background=[('active', heading_active)])
+
+        style.map("Treeview",
+                  background=[('selected', selected_bg)],
+                  foreground=[('selected', selected_fg)])
 
     def _on_view_mode_change(self, value):
         apply_patterns(self.app)
@@ -217,6 +277,9 @@ class SubtitlePanel(ctk.CTkFrame):
                 if col_id == 'content':
                     val = ln.get_text() if hasattr(ln, 'get_text') else getattr(ln, 'text', '')
                     return (0, str(val or '').lower())
+                if col_id == 'status':
+                    val = getattr(ln, 'status_flag', '') or ''
+                    return (0, str(val).lower())
                 if col_id == 'duration':
                     val = getattr(ln, 'audio_duration', 0.0)
                     return (0, float(val if val is not None else 0.0))
@@ -356,60 +419,79 @@ class SubtitlePanel(ctk.CTkFrame):
             elif hal_f == 'Nieweryfikowane':
                 if not is_pending:
                     continue
+            
+            status_filter = f.get('status')
+            if status_filter:
+                flag = getattr(line_obj, 'status_flag', None) or ""
+                # status_filter mapping needed
+                if status_filter == "Gotowe" and flag != "DONE":
+                    continue
+                if status_filter == "Błędne" and flag != "ERROR":
+                    continue
+                if status_filter == "Bez flagi" and flag != "":
+                    continue
 
 
             # Budowanie wartości dla wiersza zgodnie z self.columns_config
-            row_values = []
-            for col in self.columns_config:
-                col_id = col["id"]
-                if col_id == "content":
-                    mode = self.app.view_mode.get()
-                    if mode == 'TTS':
-                        row_values.append(line_obj.get_tts_text())
-                    elif mode == "Napisy":
-                        line_content = line_obj.get_text()
-                        row_values.append(line_content)
-                    else:
-                        row_values.append(line_obj.original_text)
-
-            # Fill columns from Line object
+            row_values = [""] * len(self.columns_config)
             col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
-            try:
-                if 'duration' in col_pos:
-                    duration_val = line_obj.audio_duration
-                    row_values.append(f"{duration_val:.2f}" if duration_val > 0 else '-')
-                if 'cps' in col_pos:
-                    row_values.append(f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-')
-                if 'similarity' in col_pos:
-                    sim_display = format_percent(sim_val)
-                    row_values.append(sim_display if sim_display else '-')
-                if 'hallucination' in col_pos:
-                    if halo_val and halo_val != "PENDING":
-                        row_values.append(halo_val)
-                    elif halo_val == "PENDING":
-                        row_values.append("?")
-                    elif status_val:
-                        row_values.append("Brak")
-                    else:
-                        row_values.append("-")
 
-                if 'format' in col_pos:
-                    fmt = line_obj.audio_format
-                    row_values.append((fmt or '').upper())
-                if 'audio_file' in col_pos:
-                    path = None
-                    fname = line_obj.audio_filename
-                    if fname:
-                        path = Path(getattr(self, 'app').audio_dir or Path('.')) / fname
-                    else:
-                        path = get_primary_audio_path(line_obj.uid)
-                    
-                    if path and Path(path).exists():
-                        row_values.append(Path(path).name if path else '')
-                    else:
-                        row_values.append("Brak pliku")
-            except Exception as e:
-                print(f"Blad podczas przetwarzania wiersza: {e}")
+            # Fill columns
+            if "content" in col_pos:
+                mode = self.app.view_mode.get()
+                if mode == 'TTS':
+                    row_values[col_pos["content"]] = line_obj.get_tts_text()
+                elif mode == "Napisy":
+                    row_values[col_pos["content"]] = line_obj.get_text()
+                else:
+                    row_values[col_pos["content"]] = line_obj.original_text
+
+            if "status" in col_pos:
+                flag = getattr(line_obj, 'status_flag', None)
+                if flag == "DONE":
+                    row_values[col_pos["status"]] = "Gotowe"
+                elif flag == "ERROR":
+                    row_values[col_pos["status"]] = "Błąd"
+                else:
+                    row_values[col_pos["status"]] = ""
+
+            if 'duration' in col_pos:
+                duration_val = line_obj.audio_duration
+                row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+            
+            if 'cps' in col_pos:
+                row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
+            
+            if 'similarity' in col_pos:
+                sim_display = format_percent(sim_val)
+                row_values[col_pos['similarity']] = sim_display if sim_display else '-'
+            
+            if 'hallucination' in col_pos:
+                if halo_val and halo_val != "PENDING":
+                    row_values[col_pos['hallucination']] = halo_val
+                elif halo_val == "PENDING":
+                    row_values[col_pos['hallucination']] = "?"
+                elif status_val:
+                    row_values[col_pos['hallucination']] = "Brak"
+                else:
+                    row_values[col_pos['hallucination']] = "-"
+
+            if 'format' in col_pos: # Jeśli taka kolumna istnieje (w configu nie widziałem, ale logika była)
+                fmt = line_obj.audio_format
+                row_values[col_pos['format']] = (fmt or '').upper()
+                
+            if 'audio_file' in col_pos:
+                path = None
+                fname = line_obj.audio_filename
+                if fname:
+                    path = Path(getattr(self, 'app').audio_dir or Path('.')) / fname
+                else:
+                    path = get_primary_audio_path(line_obj.uid)
+                
+                if path and Path(path).exists():
+                    row_values[col_pos['audio_file']] = Path(path).name if path else ''
+                else:
+                    row_values[col_pos['audio_file']] = "Brak pliku"
 
             # Wstawienie wiersza
             item_id = self.tree.insert("", "end", values=tuple(row_values))
@@ -535,6 +617,10 @@ class SubtitlePanel(ctk.CTkFrame):
         if not line_obj:
             return
             
+        # Blokada ręcznej edycji dla linii oznaczonych jako gotowe
+        if getattr(line_obj, 'status_flag', None) == "DONE":
+            return
+
         try:
             line_idx = self.app.lines.index(line_obj)
         except ValueError:
@@ -641,23 +727,41 @@ class SubtitlePanel(ctk.CTkFrame):
                          state=tk.NORMAL if can_verify else tk.DISABLED)
         menu.add_command(label="🗑️ Usuń audio (Ctrl+X)", command=self.delete_selected_dialogs,
                          state=tk.NORMAL if can_del else tk.DISABLED)
+        menu.add_command(label="🗑️ Usuń zaznaczone wiersze", command=self.delete_selected_rows,
+                         state=tk.NORMAL)
+        menu.add_separator()
+        menu.add_command(label="✅ Oznacz jako Gotowe", command=lambda: self.set_selected_status("DONE"), state=tk.NORMAL)
+        menu.add_command(label="⚠️ Oznacz jako Błędne", command=lambda: self.set_selected_status("ERROR"), state=tk.NORMAL)
+        menu.add_command(label="⚪ Wyczyść flagi", command=lambda: self.set_selected_status(None), state=tk.NORMAL)
         menu.add_separator()
         menu.add_command(label="📄 Kopiuj linię (Ctrl+C)", command=lambda: self.app._on_ctrl_c_from_menu(),
                          state=tk.NORMAL)
-        menu.add_command(label="❌ Wyczyść treść linii (Del)", command=lambda: self.app._clear_selected_line_content(),
-                         state=tk.NORMAL if can_edit else tk.DISABLED)
         menu.add_separator()
         menu.add_command(label="➕ Dodaj wzorzec zamieniający (Ctrl+Klik)",
                          command=lambda: add_replace_pattern_from_selection(self.app, from_menu=True), state=tk.NORMAL)
 
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def set_selected_status(self, status: Optional[str]):
+        """Ustawia flagę statusu dla zaznaczonych wierszy."""
+        if not self.selected_line_indices:
+            return
+            
+        changed = False
+        for idx in self.selected_line_indices:
+            if 0 <= idx < len(self.app.lines):
+                self.app.lines[idx].status_flag = status
+                changed = True
+        
+        if changed:
+            self.set_preview(self.app.lines)
 
     # --- Weryfikacja audio (zintegrowana) ---
-    def start_verification(self, force_refresh=False, ignore_short=True):
+    def start_verification(self, force_refresh=False, ignore_short=True, verify_options=None):
         """Uruchamia proces weryfikacji audio."""
+        if verify_options is None:
+            verify_options = {}
+
         if not self.app.audio_dir:
             messagebox.showwarning("Brak audio", "Najpierw wybierz katalog audio.", parent=self)
             return
@@ -670,6 +774,7 @@ class SubtitlePanel(ctk.CTkFrame):
 
         self.ver_running = True
         self.ver_stop_event.clear()
+        self.ver_processed_count = 0  # Reset counter
 
         try:
             cpu_count = os.cpu_count() or 4
@@ -706,7 +811,9 @@ class SubtitlePanel(ctk.CTkFrame):
             force_refresh=force_refresh,
             ignore_short=ignore_short,
             ffprobe=ffprobe,
-            workers=workers,
+            workers=8,
+            verify_hallucination=verify_options.get('verify_hallucination', False),
+            verify_similarity=verify_options.get('verify_similarity', False),
             apply_callback=apply_cb
         )
 
@@ -780,16 +887,41 @@ class SubtitlePanel(ctk.CTkFrame):
         from app.io import update_lines_in_csv
 
         any_changes = False
+        batch_processed_count = 0
         
         for k, v in data.items():
             if k == '__done':
                 continue
+            
+            if not isinstance(v, dict):
+                continue
+                
+            batch_processed_count += 1
+            
+            # Check if line was modified
+            is_modified = v.get('__modified', True)
+            
+            if not is_modified:
+                continue
+
             try:
-                idx = int(k) - 1
-                if idx < 0 or idx >= len(self.app.lines):
+                line = None
+                uid = v.get('uid')
+                uid_map = getattr(self, 'ver_uid_map', None)
+                
+                if uid and uid_map:
+                    line = uid_map.get(uid)
+                
+                if not line:
+                    try:
+                        idx = int(k) - 1
+                        if idx >= 0 and idx < len(self.app.lines):
+                            line = self.app.lines[idx]
+                    except ValueError:
+                        pass
+                
+                if not line:
                     continue
-                    
-                line = self.app.lines[idx]
                 
                 # Aktualizacja pól obiektu Line z danych otrzymanych od pracownika
                 line.audio_duration = v.get('audio_duration', line.audio_duration)
@@ -804,34 +936,155 @@ class SubtitlePanel(ctk.CTkFrame):
                 self.ver_modified_buffer.append(line)
                 any_changes = True
 
-                # Jeśli bufor przekroczył 100, zapisz do CSV
-                if len(self.ver_modified_buffer) >= 100:
-                    update_lines_in_csv(self.ver_modified_buffer)
-                    self.ver_modified_buffer = []
+                # Jeśli bufor przekroczył 100 LUB minęło 10 sekund, zapisz do CSV
+                should_save = len(self.ver_modified_buffer) >= 100
+                if not should_save and self.ver_modified_buffer:
+                    if time.time() - getattr(self, 'ver_last_save_time', 0) > 10:
+                        should_save = True
+
+                if should_save:
+                    try:
+                        update_lines_in_csv(self.ver_modified_buffer)
+                        self.ver_modified_buffer = []
+                        self.ver_last_save_time = time.time()
+                    except Exception:
+                        pass
 
             except Exception as e:
                 print(f"[VERIFY_APPLY_ERROR] {e}")
                 continue
+        
+        # Aktualizacja licznika postępu
+        if hasattr(self, 'ver_processed_count'):
+            self.ver_processed_count += batch_processed_count
+        else:
+            self.ver_processed_count = batch_processed_count
 
         # handle special flags
         if '__done' in data or data.get('__done') is True:
             # Finalny zapis bufora
             if self.ver_modified_buffer:
-                update_lines_in_csv(self.ver_modified_buffer)
+                try:
+                    update_lines_in_csv(self.ver_modified_buffer)
+                except Exception:
+                    pass
                 self.ver_modified_buffer = []
 
             self.ver_running = False
+            if hasattr(self, 'ver_uid_map'):
+                self.ver_uid_map = None
+            if hasattr(self, 'ver_uid_to_index_map'):
+                self.ver_uid_to_index_map = None
+
             try:
                 self.after(0, lambda: self.app.set_status('Weryfikacja zakończona'))
             except Exception:
                 pass
 
         if any_changes:
-            # Odśwież widok
+            # Odśwież widok częściowo (szukamy właściwych indeksów wierszy w UI poprzez UID)
             try:
-                self.set_preview(self.app.lines)
+                indices_to_refresh = []
+                
+                # Słownik: uid -> modified_flag
+                modified_uids = []
+                for k, v in data.items():
+                    if k == '__done': continue
+                    if v.get('__modified', True):
+                        u = v.get('uid')
+                        if u:
+                             modified_uids.append(u)
+                
+                if modified_uids and hasattr(self, 'ver_uid_to_index_map') and self.ver_uid_to_index_map:
+                    for u in modified_uids:
+                        idx = self.ver_uid_to_index_map.get(u)
+                        if idx is not None:
+                            indices_to_refresh.append(idx)
+                
+                # Fallback jeśli mapy brak (np. pełna weryfikacja), wtedy k jest indeksem + 1
+                if not indices_to_refresh and not modified_uids:
+                     for k, v in data.items():
+                        if k == '__done': continue
+                        if not v.get('__modified', True): continue
+                        try:
+                            indices_to_refresh.append(int(k) - 1)
+                        except: pass
+
+                if indices_to_refresh:
+                    self._refresh_lines_view(indices_to_refresh)
+                
             except Exception as e:
-                print(f"[APPLY_RESULTS] BŁĄD w set_preview: {e}")
+                print(f"[APPLY_RESULTS] BŁĄD w odświeżaniu widoku: {e}")
+
+    def _refresh_lines_view(self, indices: List[int]):
+        """Szybkie odświeżenie widoku (tylko kolumn weryfikacji) dla podanych indeksów."""
+        # Mapowanie obiektów na item_id
+        # self.item_line_map: item_iid -> Line
+        # Ale my potrzebujemy odwrotnie: Line -> item_iid
+        # Możemy zbudować mapę odwrotną, ale to kosztowne jeśli robione często.
+        # Może lepiej trzymać ją jako field?
+        
+        # Na razie zbudujmy dla bezpieczeństwa, jeśli lista jest ogromna to i tak set_preview by mulił.
+        line_to_item = {id(line): iid for iid, line in self.item_line_map.items()}
+        
+        col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+        
+        for idx in indices:
+            if idx < 0 or idx >= len(self.app.lines):
+                continue
+            line = self.app.lines[idx]
+            item_id = line_to_item.get(id(line))
+            if not item_id:
+                # Może linia nie jest widoczna (np. filtr)?
+                continue
+            
+            # Pobierz obecne wartości
+            try:
+                values = list(self.tree.item(item_id, "values"))
+            except:
+                continue
+                
+            # Zaktualizuj tylko te kolumny które zależą od weryfikacji
+            # Duration, Status (raw/display?), CPS, Similarity, Audio File
+            
+            # ... (logika podobna do _refresh_verification_view ale generyczna)
+            
+            if 'duration' in col_pos:
+                duration_val = float(getattr(line, 'audio_duration', 0.0) or 0.0)
+                values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+
+            if 'status' in col_pos:
+                 # Tutaj logika statusu - przyjmijmy prosto
+                 st = getattr(line, 'audio_status', '')
+                 values[col_pos['status']] = st
+
+            if 'cps' in col_pos:
+                # Przelicz CPS
+                try:
+                     txt = line.get_tts_text().strip()
+                     from collections import Counter
+                     stats = Counter(txt)
+                     pauses = (stats[','] + stats['-']) * 0.4 + (stats['.'] + stats['!'] + stats['?']) * 0.6
+                     dur = float(getattr(line, 'audio_duration', 0.0) or 0.0)
+                     eff_dur = dur - pauses
+                     cps = len(txt) / eff_dur if eff_dur > 0 else 0.0
+                     values[col_pos['cps']] = f"{cps:.1f}" if cps > 0 else '-'
+                except:
+                     values[col_pos['cps']] = '-'
+
+            if 'similarity' in col_pos:
+                sim = float(getattr(line, 'audio_similarity', 0.0) or 0.0)
+                # Helper format_percent jest gdzieś globalnie? Użyjmy prostego
+                sim_display = f"{int(sim*100)}%" if sim > 0 else '-'
+                values[col_pos['similarity']] = sim_display
+            
+            if 'hallucination' in col_pos:
+                 hal = getattr(line, 'audio_hallucination', '')
+                 values[col_pos['hallucination']] = hal if hal else '-'
+
+            self.tree.item(item_id, values=values)
+
+    # --- Weryfikacja audio (stara) ---
 
     def stop_verification(self):
         """Stop currently running verification via manager"""
@@ -1045,10 +1298,18 @@ class SubtitlePanel(ctk.CTkFrame):
             return
 
         lines_to_gen = []
+        skipped_done = 0
+        
         for idx in self.selected_line_indices:
             try:
                 line_no = idx + 1
                 line_obj = self.app.lines[idx]
+                
+                # Zabezpieczenie przed generowaniem "Gotowych" wierszy
+                if getattr(line_obj, 'status_flag', None) == "DONE":
+                    skipped_done += 1
+                    continue
+                
                 getter = getattr(line_obj, 'get_tts_text', None)
                 candidate = getter() if callable(getter) else getattr(line_obj, 'tts_text', '')
                 text = (candidate or '').strip()
@@ -1058,6 +1319,14 @@ class SubtitlePanel(ctk.CTkFrame):
                 lines_to_gen.append((uid, text))
             except (IndexError, ValueError):
                 continue
+                
+        if skipped_done > 0:
+             if not lines_to_gen:
+                 messagebox.showinfo("Informacja", f"Pominięto {skipped_done} wierszy oznaczonych jako 'Gotowe'. Brak innych wierszy do wygenerowania.")
+                 return
+             else:
+                 # Opcjonalnie można wyświetlić info, ale może być irytujące
+                 pass
 
         if not lines_to_gen:
             messagebox.showwarning("Brak danych", "Nie można wygenerować audio dla zaznaczonych linii.", parent=self)
@@ -1103,86 +1372,89 @@ class SubtitlePanel(ctk.CTkFrame):
 
     def verify_selected_dialogs(self):
         """Weryfikuje audio dla wszystkich zaznaczonych wierszy w osobnym wątku."""
-        if not self.selected_line_indices or not self.app.audio_dir:
-            return
-
-        if self.ver_running:
-            messagebox.showinfo("Weryfikacja", "Weryfikacja jest już w toku.", parent=self)
-            return
-
-        if VerificationManager is None:
-            messagebox.showerror("Błąd", "Brak VerificationManager.", parent=self)
-            return
-
-        self.ver_running = True
-        
-        self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
-
-        # Uruchom weryfikację w osobnym wątku aby nie blokować UI
-        thread = threading.Thread(
-            target=self._verify_selected_lines_thread,
-            args=(list(self.selected_line_indices),),
-            daemon=True
-        )
-        thread.start()
-
-    def _verify_selected_lines_thread(self, selected_indices: List[int]):
-        """Worker thread dla weryfikacji zaznaczonych linii."""
-        from dataclasses import asdict
         try:
-            ffprobe = shutil.which('ffprobe')
-            results = {}
+            from audio.verification_manager import VerificationManager, VerificationJob
 
-            for line_idx in selected_indices:
-                if line_idx < 0 or line_idx >= len(self.app.lines):
+            if not self.selected_line_indices:
+                messagebox.showwarning("Weryfikacja", "Nie wybrano żadnych wierszy.", parent=self)
+                return
+
+            if not self.app.audio_dir:
+                 messagebox.showwarning("Weryfikacja", "Brak ustawionego katalogu audio.", parent=self)
+                 return
+
+            # Add to queue even if another verification is running
+            was_running = self.ver_running
+            self.ver_running = True
+            
+            if not was_running:
+                self.ver_processed_count = 0
+                self.ver_last_save_time = time.time()
+                self.ver_uid_map = {}
+                self.ver_uid_to_index_map = {}
+            
+            # Map UIDs for UI updates
+            try:
+                new_uid_map = {l.uid: l for l in self.app.lines if hasattr(l, 'uid')}
+                new_uid_to_idx = {}
+                for i, l in enumerate(self.app.lines):
+                    uid = getattr(l, 'uid', None)
+                    if uid:
+                        new_uid_to_idx[uid] = i
+                
+                self.ver_uid_map = new_uid_map
+                self.ver_uid_to_index_map = new_uid_to_idx
+                
+            except Exception as e:
+                print(f"[VERIFY_INIT_ERROR] Map creation failed: {e}")
+                
+            if not was_running:
+                self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
+            else:
+                 self.app.set_status(f"Dodano do kolejki ({len(self.selected_line_indices)} linii)...")
+
+            # Prepare subset
+            subset_lines = []
+            subset_uids = []
+            for idx in self.selected_line_indices:
+                if idx < 0 or idx >= len(self.app.lines):
                     continue
+                line = self.app.lines[idx]
+                subset_lines.append(line)
+                subset_uids.append(getattr(line, 'uid', str(idx + 1)))
 
+            ffprobe = shutil.which('ffprobe')
+            
+            def apply_cb(results: dict):
                 try:
-                    line = self.app.lines[line_idx]
-                    line_id = line_idx + 1
-                    
-                    # Weryfikuj pojedynczą linię
-                    _, modified = VerificationManager.verify_line(
-                        line=line,
-                        ffprobe_path=ffprobe,
-                        force_refresh=True
-                    )
-                    
-                    # Przygotowanie wyniku dla apply (JSON/dict format)
-                    res = asdict(line)
-                    res['id'] = line_id
-                    res['text'] = line.get_tts_text()
-                    res['display_status'] = line.audio_status
-                    res['ext'] = line.audio_format
-                    res['path'] = str(get_primary_audio_path(line.uid)) if get_primary_audio_path(line.uid) else None
-                    res['similarity'] = line.audio_similarity
-                    res['transcribed_text'] = line.audio_transcribed_text
-                    res['duration'] = line.audio_duration
-                    res['hallucination'] = line.audio_hallucination
+                    self.after(0, lambda r=results: self._apply_verification_results(r))
+                except Exception:
+                    pass
 
-                    results[str(line_id)] = res
-                except Exception as e:
-                    results[str(line_idx + 1)] = {
-                        'id': line_idx + 1,
-                        'text': line.get_tts_text() if line_idx < len(self.app.lines) else '',
-                        'duration': 0.0,
-                        'cps': 0.0,
-                        'raw_status': 'ERROR',
-                        'path': None,
-                        'ext': '',
-                        'display_status': f'ERROR: {str(e)[:30]}'
-                    }
-
-            # Dodaj marker końca
-            results['__done'] = True
-
-            # Zaplanuj aktualizację UI na głównym wątku
-            self.after(0, lambda r=results: self._apply_verification_results(r))
-
+            manager = VerificationManager.get_instance()
+            
+            job = VerificationJob(
+                project_path=str(getattr(self.app, 'current_project_path', '')),
+                audio_dir=str(self.app.audio_dir),
+                lines=subset_lines,
+                line_uids=subset_uids,
+                force_refresh=True,
+                ignore_short=True,
+                ffprobe=ffprobe,
+                workers=4,
+                verify_hallucination=True,  # Zgodnie z żądaniem: Hallucinations + CPS
+                verify_similarity=False,    # Zgodnie z żądaniem: No Similarity
+                apply_callback=apply_cb
+            )
+            
+            manager.add_job(job, priority=0)
+            
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("Błąd weryfikacji", f"Błąd: {str(e)}", parent=self))
-            self.after(0, lambda: setattr(self, 'ver_running', False))
-        # Tutaj nie ustawiamy ver_running na False, bo _apply_verification_results to zrobi po otrzymaniu __done
+            self.ver_running = False
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Błąd Weryfikacji", f"Wystąpił błąd: {e}", parent=self)
+
 
     def delete_selected_dialogs(self):
         """Usuwa audio dla wszystkich zaznaczonych wierszy."""
@@ -1197,8 +1469,11 @@ class SubtitlePanel(ctk.CTkFrame):
         # Zbierz wszystkie pliki do usunięcia
         files_to_delete = []
         for idx in self.selected_line_indices:
-            line_num = idx + 1
             line_obj = self.app.lines[idx]
+            if getattr(line_obj, 'status_flag', None) == "DONE":
+                continue
+
+            line_num = idx + 1
             identifier = getattr(line_obj, 'uid', str(line_num))
             found_files = get_audio_candidates(identifier)
             if found_files:
@@ -1218,3 +1493,60 @@ class SubtitlePanel(ctk.CTkFrame):
         self.update_audio_buttons_state()
         if deleted and hasattr(self.app, 'set_status'):
             self.app.set_status(f"Usunięto {deleted} plików audio.")
+
+    def delete_selected_rows(self):
+        """Usuwa zaznaczone wiersze oraz powiązane pliki audio (wszystkie dla danego UID)."""
+        if not self.selected_line_indices:
+            return
+
+        # Filtruj linie oznaczone jako 'DONE'
+        indices_to_delete = []
+        for idx in self.selected_line_indices:
+            line_obj = self.app.lines[idx]
+            if getattr(line_obj, 'status_flag', None) != "DONE":
+                indices_to_delete.append(idx)
+        
+        if not indices_to_delete:
+            return
+
+        count = len(indices_to_delete)
+        if not messagebox.askyesno("Usuń wiersze", f"Czy na pewno chcesz usunąć {count} wierszy oraz wszystkie ich pliki audio?"):
+            return
+
+        indices = sorted(indices_to_delete, reverse=True)
+        
+        # Zatrzymaj odtwarzanie jeśli dotyczy usuwanego wiersza
+        # Uproszczenie: zatrzymaj zawsze
+        self.stop_audio()
+
+        deleted_audio_count = 0
+        
+        for idx in indices:
+            if idx < 0 or idx >= len(self.app.lines):
+                continue
+            
+            line_obj = self.app.lines[idx]
+            identifier = getattr(line_obj, 'uid', None)
+            
+            if identifier:
+                found_files = get_audio_candidates(identifier)
+                for file_path, _ in found_files:
+                    try:
+                        if file_path.exists():
+                            file_path.unlink()
+                            deleted_audio_count += 1
+                    except Exception as e:
+                        print(f"Błąd usuwania pliku {file_path}: {e}")
+            
+            # Usuń wiersz z listy
+            del self.app.lines[idx]
+
+        # Wyczyść zaznaczenie
+        self.selected_line_indices = []
+        self.app.selected_line_index = None
+        self.tree.selection_remove(self.tree.selection())
+
+        # Odśwież UI
+        self.set_preview(self.app.lines)
+        self.app.mark_as_unsaved()
+        self.app.set_status(f"Usunięto {count} wierszy i {deleted_audio_count} plików audio.")

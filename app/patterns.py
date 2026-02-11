@@ -52,8 +52,8 @@ def apply_patterns(app, force_refresh=False):
     if not lines:
         return
 
-    apply_remove_patterns(lines, app.builtin_remove + app.custom_remove)
-    apply_replace_patterns(lines, app.builtin_replace + app.custom_replace)
+    lines = apply_remove_patterns(lines, app.custom_remove)
+    apply_replace_patterns(lines, app.custom_replace)
 
     # Aktualizacja widoku
     app._update_subtitle_panel_content()
@@ -116,6 +116,7 @@ def handle_pattern_update(app, new_pattern: PatternItem, old_pattern: Optional[P
     app.mark_as_unsaved()
     app.set_status("Zaktualizowano wzorce.")
     _refresh_custom_lists(app)
+    apply_patterns(app)
 
 
 def _clear_custom_list(app, clear_type: str):
@@ -178,7 +179,7 @@ def apply_processing(app):
 
     rem_patterns, _ = gather_active_patterns(app.custom_remove, app.custom_replace)
 
-    apply_remove_patterns(lines, rem_patterns)
+    lines = apply_remove_patterns(lines, rem_patterns)
 
     changes_count = 0
     for i, line in enumerate(lines):
@@ -204,52 +205,31 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
     """
     # 1. Pobierz aktywne wzorce
     rem_patterns, repl_patterns = gather_active_patterns(app.custom_remove, app.custom_replace)
-
-    # Zapamiętaj starą listę linii dla celów mapowania metadanych
-    old_lines: LineList = list(app.lines)
-    
-    # Mapowanie tekstu TTS na metadane audio dla linii, które się nie zmieniły
-    # Używamy słownika, gdzie kluczem jest tts_text
-    audio_meta_map = {}
-    for ln in old_lines:
-        current_tts = ln.get_tts_text()
-        if current_tts not in audio_meta_map:
-            audio_meta_map[current_tts] = {
-                'audio_filename': ln.audio_filename,
-                'audio_duration': ln.audio_duration,
-                'audio_similarity': ln.audio_similarity,
-                'audio_status': ln.audio_status,
-                'audio_format': ln.audio_format,
-                'audio_transcribed_text': ln.audio_transcribed_text,
-                'uid': getattr(ln, 'uid', None)
-            }
-
-    # 2. Aplikuj wzorce na kopiach (symulacja końcowego tekstu)
-    # Tworzymy nowe obiekty Line na bazie obecnego stanu (żeby uwzględnić dotychczasowe zmiany)
     processed_objs = []
-    for ln in old_lines:
-        processed_objs.append(Line(
+    
+    base_source_lines = list(app.lines)
+
+    for i, ln in enumerate(base_source_lines):
+        new_ln = Line(
             original_text=ln.original_text,
-            text=ln.get_text(),
-            tts_text=ln.get_tts_text()
-        ))
+            text=ln.original_text,
+            tts_text=ln.original_text
+        )
 
-    # Aplikujemy wzorce usuwające (kończące proces oczyszczania "clean")
-    apply_remove_patterns(processed_objs, rem_patterns)
-    
-    # Aplikujemy wzorce zamiany (kończące proces "replace/tts")
-    apply_replace_patterns(processed_objs, repl_patterns)
+        new_ln.uid = ln.uid
+        new_ln.audio_filename = ln.audio_filename
+        new_ln.audio_duration = ln.audio_duration
+        new_ln.audio_similarity = ln.audio_similarity
+        new_ln.audio_status = ln.audio_status
+        new_ln.audio_format = ln.audio_format
+        new_ln.audio_transcribed_text = ln.audio_transcribed_text
+        new_ln.audio_hallucination = getattr(ln, 'audio_hallucination', 'PENDING')
+        
+        processed_objs.append(new_ln)
 
-    # Aplikujemy edycje ręczne (nadpisują wzorce)
-    for idx, text in app.manual_edits.items():
-        if 0 <= idx < len(processed_objs):
-            processed_objs[idx].text = text
-    
-    for idx, tts_text in app.tts_edits.items():
-        if 0 <= idx < len(processed_objs):
-            processed_objs[idx].tts_text = tts_text
+    apply_remove_patterns(processed_objs, rem_patterns, remove_empty=False)
 
-    # 3. Filtrowanie (Puste linie i Duplikaty)
+
     final_objs = []
     seen_texts = set()
 
@@ -257,27 +237,12 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
         txt = obj.get_text()
         if remove_empty and not txt.strip():
             continue
+            
         if remove_duplicates:
             norm = txt.strip()
             if norm in seen_texts:
                 continue
             seen_texts.add(norm)
-        
-        # 4. PRZENIESIENIE METADANYCH (WERYFIKACJI)
-        # Jeśli tekst do syntezy (tts_text) jest taki sam jak w którejś ze starych linii,
-        # kopiujemy informacje o pliku audio i weryfikacji.
-        new_tts = obj.get_tts_text()
-        if new_tts in audio_meta_map:
-            meta = audio_meta_map[new_tts]
-            obj.audio_filename = meta['audio_filename']
-            obj.audio_duration = meta['audio_duration']
-            obj.audio_similarity = meta['audio_similarity']
-            obj.audio_status = meta['audio_status']
-            obj.audio_format = meta['audio_format']
-            obj.audio_transcribed_text = meta['audio_transcribed_text']
-            # Przenieś UID jeśli istnieje
-            if meta.get('uid'):
-                obj.uid = meta['uid']
             
         final_objs.append(obj)
 
@@ -299,10 +264,6 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
 
     app.loaded_path = new_path
     app.lines = final_objs
-    
-    # Reset edycji po zatwierdzeniu
-    app.manual_edits.clear()
-    app.tts_edits.clear()
 
     # Wyłączamy wzorce usuwające (zostały "wypalone" w tekst)
     for p in app.custom_remove:

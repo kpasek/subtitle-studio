@@ -45,7 +45,6 @@ class AppMenu:
         gen_menu.add_command(label="Dodaj nowe napisy", command=lambda: add_new_subtitles(self.app))
         gen_menu.add_command(label="Zmień plik z danymi", command=lambda: change_subtitle_file(self.app))
         gen_menu.add_separator()
-        gen_menu.add_command(label="Pokaż kolejkę zadań", command=lambda: show_generation_queue(self.app), accelerator="Ctrl+Q")
         gen_menu.add_command(label="Generuj dialogi", command=lambda: enqueue_generate_all(self.app), accelerator="Ctrl+Shift+G")
         gen_menu.add_command(label="Konwertuj audio", command=lambda: enqueue_convert_all(self.app), accelerator="Ctrl+Shift+R")
         gen_menu.add_command(label="Weryfikacja", command=lambda: VerificationWindow(self.app), accelerator="Ctrl+Shift+Y")
