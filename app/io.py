@@ -191,8 +191,8 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
             uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
             out.append(Line(
                 original_text=row.get('original_text', '') or '',
-                text=row.get('text', '') or '',
-                tts_text=row.get('tts_text', '') or '',
+                text=row.get('text', '') or None,
+                tts_text=row.get('tts_text', '') or None,
                 audio_duration=dur,
                 audio_filename=audio_filename,
                 audio_similarity=float(row.get('audio_similarity') or 0.0),

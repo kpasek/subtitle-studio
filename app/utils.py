@@ -91,10 +91,10 @@ def apply_replace_patterns(lines: List[Line], patterns: List[PatternItem]) -> Li
     compiled = [compile_pattern(p) for p in patterns]
 
     for line in lines:
-        s = line.tts_text
+        s = line.get_tts_text()
         for i, pat in enumerate(patterns):
             s = compiled[i].sub(pat.replace, s)
-        line.tts_text = s
+        line.set_tts_text(s)
     return lines
 
 
