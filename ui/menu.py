@@ -64,8 +64,7 @@ class AppMenu:
         # --- AI / Ollama ---
         ai_menu = tk.Menu(menubar, tearoff=0)
         ai_menu.add_command(label="Menedżer Zadań AI", command=lambda: AITaskManagerWindow(self.app))
-        ai_menu.add_command(label="Uruchom na wszystkich wierszach...", command=lambda: self._run_ai_global())
-        ai_menu.add_command(label="Uruchom na zaznaczonych...", command=lambda: self._run_ai_selected())
+        ai_menu.add_command(label="Uruchom zadania AI", command=lambda: self._run_ai_global())
         menubar.add_cascade(label="AI", menu=ai_menu)
         
         # --- Wzorce ---

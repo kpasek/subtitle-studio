@@ -408,3 +408,57 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
 def update_line_in_csv(line: Line, csv_path: Optional[str] = None) -> bool:
     """Aktualizuje pojedynczą linię w pliku CSV (alias dla update_lines_in_csv)."""
     return update_lines_in_csv([line], csv_path) > 0
+
+
+def delete_lines_from_csv(uids_to_delete: List[str], csv_path: Optional[str] = None) -> int:
+    """
+    Usuwa wiersze z pliku CSV na podstawie listy UID.
+    """
+    global _csv_cache_data, _csv_cache_mtime
+    path = _get_effective_csv_path(csv_path)
+    if not path:
+        return 0
+        
+    p = Path(path)
+    if not p.exists():
+        return 0
+
+    _ensure_csv_cache(str(p))
+    
+    uid_set = set(str(uid) for uid in uids_to_delete)
+    
+    initial_count = len(_csv_cache_data)
+    new_cache = [row for row in _csv_cache_data if row.get('uid', '') not in uid_set]
+    
+    deleted_count = initial_count - len(new_cache)
+    if deleted_count == 0:
+        return 0
+
+    _csv_cache_data = new_cache
+    
+    fieldnames = [
+        'original_text', 'text', 'tts_text', 'audio_duration',
+        'audio_similarity', 'audio_format', 'audio_filename',
+        'audio_transcribed_text', 'audio_hallucination', 'status_flag',
+        'uid'
+    ]
+    
+    try:
+        temp_path = p.with_suffix(p.suffix + ".del.tmp")
+        try:
+            with open(temp_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+                writer.writeheader()
+                writer.writerows(new_cache)
+            temp_path.replace(p)
+            
+            _csv_cache_mtime = p.stat().st_mtime
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
+                
+        return deleted_count
+    except Exception as e:
+        print(f"[DELETE_CSV_ERR] {e}")
+        return 0

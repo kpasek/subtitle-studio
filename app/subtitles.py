@@ -15,7 +15,8 @@ import json
 import shutil
 
 from app.formatter import format_percent, normalize_to_percent
-from app.io import (update_line_in_csv, get_primary_audio_path, get_audio_candidates)
+from app.io import (update_line_in_csv, delete_lines_from_csv, 
+                    get_primary_audio_path, get_audio_candidates)
 from app.patterns import (apply_patterns, apply_processing, 
                           add_replace_pattern_from_selection)
 from app.update import download_update
@@ -1568,6 +1569,7 @@ class SubtitlePanel(ctk.CTkFrame):
         self.stop_audio()
 
         deleted_audio_count = 0
+        uids_to_remove_from_db = []
         
         for idx in indices:
             if idx < 0 or idx >= len(self.app.lines):
@@ -1577,6 +1579,7 @@ class SubtitlePanel(ctk.CTkFrame):
             identifier = getattr(line_obj, 'uid', None)
             
             if identifier:
+                uids_to_remove_from_db.append(identifier)
                 found_files = get_audio_candidates(identifier)
                 for file_path, _ in found_files:
                     try:
@@ -1589,6 +1592,13 @@ class SubtitlePanel(ctk.CTkFrame):
             # Usuń wiersz z listy
             del self.app.lines[idx]
 
+        # Trwałe usunięcie z CSV
+        if uids_to_remove_from_db and self.app.loaded_path:
+             try:
+                 delete_lines_from_csv(uids_to_remove_from_db, str(self.app.loaded_path))
+             except Exception as e:
+                 print(f"Błąd podczas usuwania z CSV: {e}")
+
         # Wyczyść zaznaczenie
         self.selected_line_indices = []
         self.app.selected_line_index = None
@@ -1596,5 +1606,5 @@ class SubtitlePanel(ctk.CTkFrame):
 
         # Odśwież UI
         self.set_preview(self.app.lines)
-        self.app.mark_as_unsaved()
+        # self.app.mark_as_unsaved() # Niepotrzebne, bo zapisaliśmy do CSV
         self.app.set_status(f"Usunięto {count} wierszy i {deleted_audio_count} plików audio.")
