@@ -134,6 +134,13 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
 
     def destroy(self):
         """Zamykanie okna."""
+        # Próba odświeżenia tabeli w głównym oknie
+        try:
+            if hasattr(self.master, '_update_subtitle_panel_content'):
+                self.master._update_subtitle_panel_content()
+        except Exception:
+            pass
+
         # Odpinamy obserwatora, ale NIE zatrzymujemy managera (chyba że user kliknął Anuluj)
         if hasattr(self, 'manager') and self.manager:
              self.manager.unregister_progress_observer(self._update_progress_safe)
