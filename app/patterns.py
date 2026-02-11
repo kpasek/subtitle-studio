@@ -205,21 +205,39 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
     """
     # 1. Pobierz aktywne wzorce
     rem_patterns, repl_patterns = gather_active_patterns(app.custom_remove, app.custom_replace)
-
-    # Zapamiętaj starą listę linii dla celów mapowania metadanych
-    old_lines: LineList = list(app.lines)
+    processed_objs = []
     
-    # Aplikujemy wzorce usuwające (kończące proces oczyszczania "clean")
-    clone_lines = apply_remove_patterns(old_lines, rem_patterns)
+    base_source_lines = list(app.lines)
 
-    # 3. Filtrowanie (Puste linie i Duplikaty)
+    for i, ln in enumerate(base_source_lines):
+        new_ln = Line(
+            original_text=ln.original_text,
+            text=ln.original_text,
+            tts_text=ln.original_text
+        )
+
+        new_ln.uid = ln.uid
+        new_ln.audio_filename = ln.audio_filename
+        new_ln.audio_duration = ln.audio_duration
+        new_ln.audio_similarity = ln.audio_similarity
+        new_ln.audio_status = ln.audio_status
+        new_ln.audio_format = ln.audio_format
+        new_ln.audio_transcribed_text = ln.audio_transcribed_text
+        new_ln.audio_hallucination = getattr(ln, 'audio_hallucination', 'PENDING')
+        
+        processed_objs.append(new_ln)
+
+    apply_remove_patterns(processed_objs, rem_patterns, remove_empty=False)
+
+
     final_objs = []
     seen_texts = set()
 
-    for obj in clone_lines:
-        txt = obj.text
+    for obj in processed_objs:
+        txt = obj.get_text()
         if remove_empty and not txt.strip():
             continue
+            
         if remove_duplicates:
             norm = txt.strip()
             if norm in seen_texts:
