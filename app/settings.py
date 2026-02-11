@@ -76,212 +76,138 @@ class SettingsWindow(ctk.CTkToplevel):
                       command=self.save_and_close).pack(side="right")
 
     def _create_global_tab(self, frame: ctk.CTkScrollableFrame):
-        """Populates the 'Global' settings tab."""
+        """Populates the 'Global' settings tab using sub-tabs."""
+        
+        # Create main Tabview
+        self.main_tabs = ctk.CTkTabview(frame)
+        self.main_tabs.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Define tabs
+        tab_general = self.main_tabs.add("Ogólne")
+        tab_tts = self.main_tabs.add("TTS")
+        tab_ai = self.main_tabs.add("AI")
+        tab_filters = self.main_tabs.add("Filtry Audio")
+        tab_theme = self.main_tabs.add("Wygląd")
+        
+        # --- TAB: Ogólne ---
+        tab_general.grid_columnconfigure(1, weight=1)
+        
+        # Start Directory
+        ctk.CTkLabel(tab_general, text="Startowy katalog:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.start_dir_var = tk.StringVar(value=self.master.global_config.get('start_directory', ''))
+        ctk.CTkEntry(tab_general, textvariable=self.start_dir_var).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=10)
+        ctk.CTkButton(tab_general, text="...", width=40, command=self.select_start_dir).grid(row=0, column=2, sticky="e", padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text="Ustawienia Główne", font=("", 16, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 5))
-        frame_main = ctk.CTkFrame(frame)
-        frame_main.grid(row=1, column=0, columnspan=3,
-                        sticky="ew", padx=10, pady=5)
-        frame_main.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(frame_main, text="Startowy katalog:").grid(
-            row=0, column=0, sticky="w", padx=10, pady=10)
-        self.start_dir_var = tk.StringVar(
-            value=self.master.global_config.get('start_directory', ''))
-        entry_dir = ctk.CTkEntry(frame_main, textvariable=self.start_dir_var)
-        entry_dir.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=10)
-        ctk.CTkButton(frame_main, text="...", width=40, command=self.select_start_dir).grid(
-            row=0, column=2, sticky="e", padx=10, pady=10)
-
-        ctk.CTkLabel(frame_main, text="Procesy weryfikacji:").grid(
-            row=1, column=0, sticky="w", padx=10, pady=(0, 10))
-
+        # Workers
+        ctk.CTkLabel(tab_general, text="Procesy weryfikacji:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
         try:
             cpu_count = os.cpu_count()
             default_workers = max(1, cpu_count // 2)
         except:
             cpu_count = "?"
             default_workers = 4
+        self.verification_workers_var = tk.StringVar(value=self.master.global_config.get('verification_workers', self.master.global_config.get('conversion_workers', default_workers)))
+        entry_workers = ctk.CTkEntry(tab_general, textvariable=self.verification_workers_var)
+        entry_workers.grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=10)
+        CreateToolTip(entry_workers, f"Liczba procesów do weryfikacji audio (max: {cpu_count}).", wraplength=300)
 
-        self.verification_workers_var = tk.StringVar(
-            value=self.master.global_config.get('verification_workers', self.master.global_config.get('conversion_workers', default_workers)))
-        entry_workers = ctk.CTkEntry(
-            frame_main, textvariable=self.verification_workers_var)
-        entry_workers.grid(row=1, column=1, sticky="ew",
-                           padx=(0, 10), pady=(0, 10))
-        CreateToolTip(
-            entry_workers,
-            f"Liczba procesów do weryfikacji audio (max: {cpu_count}). Więcej = szybciej, ale większe użycie CPU.",
-            wraplength=300)
+        # Audio Format
+        ctk.CTkLabel(tab_general, text="Format wyjściowy audio:").grid(row=2, column=0, sticky="w", padx=10, pady=10)
+        self.audio_format_var = tk.StringVar(value=self.master.global_config.get('audio_output_format', 'mp3'))
+        ctk.CTkOptionMenu(tab_general, variable=self.audio_format_var, values=["ogg", "mp3"]).grid(row=2, column=1, sticky="w", padx=(0, 10), pady=10)
+        ctk.CTkLabel(tab_general, text="(Format plików w folderze /ready)").grid(row=2, column=2, sticky="w", padx=5)
 
-        ctk.CTkLabel(frame, text="Modele TTS", font=("", 16, "bold")).grid(
-            row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(15, 5))
-        tts_tabview = ctk.CTkTabview(frame)
-        tts_tabview.grid(row=3, column=0, columnspan=3,
-                         sticky="ew", padx=10, pady=5)
-
-        tab_xtts = tts_tabview.add("Local TTS (API)")
-        tab_xtts.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(tab_xtts, text="URL serwera API:").grid(
-            row=0, column=0, sticky="w", padx=10, pady=(10, 5))
-        self.local_api_url_var = tk.StringVar(value=self.master.global_config.get(
-            'local_api_url', 'http://127.0.0.1:8001'))
-        entry_xtts_url = ctk.CTkEntry(
-            tab_xtts, textvariable=self.local_api_url_var)
-        entry_xtts_url.grid(row=0, column=1, columnspan=2,
-                            sticky="ew", padx=10, pady=(10, 5))
-        CreateToolTip(
-            entry_xtts_url, "Adres URL działającego serwera XTTS API.", wraplength=300)
-        ctk.CTkLabel(tab_xtts, text="Ścieżka głosu XTTS (.wav):").grid(
-            row=1, column=0, sticky="w", padx=10, pady=(5, 10))
-        self.xtts_voice_path_var = tk.StringVar(
-            value=self.master.global_config.get('xtts_voice_path', ''))
-        entry_voice = ctk.CTkEntry(
-            tab_xtts, textvariable=self.xtts_voice_path_var)
-        entry_voice.grid(row=1, column=1, sticky="ew",
-                         padx=(0, 10), pady=(5, 10))
-        ctk.CTkButton(tab_xtts, text="...", width=40, command=self.select_voice_file).grid(
-            row=1, column=2, sticky="e", padx=10, pady=(5, 10))
-        CreateToolTip(
-            entry_voice, "Ścieżka do pliku .wav używanego przez XTTS API (jeśli wymagane).", wraplength=300)
-
-        tab_eleven = tts_tabview.add("ElevenLabs")
-        tab_eleven.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(tab_eleven, text="Klucz API:").grid(
-            row=0, column=0, sticky="w", padx=10, pady=(10, 5))
-        self.el_api_key_var = tk.StringVar(
-            value=self.master.global_config.get('elevenlabs_api_key', ''))
-        ctk.CTkEntry(tab_eleven, textvariable=self.el_api_key_var, show="*").grid(
-            row=0, column=1, sticky="ew", padx=10, pady=(10, 5))
-        ctk.CTkLabel(tab_eleven, text="Voice ID:").grid(
-            row=1, column=0, sticky="w", padx=10, pady=(5, 10))
-        self.el_voice_id_var = tk.StringVar(
-            value=self.master.global_config.get('elevenlabs_voice_id', ''))
-        entry_el_voice = ctk.CTkEntry(
-            tab_eleven, textvariable=self.el_voice_id_var)
-        entry_el_voice.grid(row=1, column=1, sticky="ew",
-                            padx=10, pady=(5, 10))
-        CreateToolTip(
-            entry_el_voice, "ID głosu z konta ElevenLabs.", wraplength=300)
-
-        tab_google = tts_tabview.add("Google Cloud TTS")
-        tab_google.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(tab_google, text="Credentials (.json):").grid(
-            row=0, column=0, sticky="w", padx=10, pady=10)
-        self.gcp_creds_var = tk.StringVar(
-            value=self.master.global_config.get('google_credentials_path', ''))
-        entry_gcp = ctk.CTkEntry(tab_google, textvariable=self.gcp_creds_var)
-        entry_gcp.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=10)
-        ctk.CTkButton(tab_google, text="...", width=40, command=self.select_gcp_creds).grid(
-            row=0, column=2, sticky="e", padx=10, pady=10)
-        ctk.CTkLabel(tab_google, text="Nazwa głosu:").grid(
-            row=1, column=0, sticky="w", padx=10, pady=(5, 10))
-        self.gcp_voice_name_var = tk.StringVar(
-            value=self.master.global_config.get('google_voice_name', 'pl-PL-Wavenet-B'))
-        entry_gcp_voice = ctk.CTkEntry(
-            tab_google, textvariable=self.gcp_voice_name_var)
-        entry_gcp_voice.grid(row=1, column=1, sticky="ew",
-                             padx=10, pady=(5, 10))
-        CreateToolTip(entry_gcp_voice, "Np. pl-PL-Wavenet-B", wraplength=300)
-
-        tab_piper = tts_tabview.add("Piper")
-        tab_piper.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(tab_piper, text="Ścieżka modelu Piper (.onnx):").grid(
-            row=0, column=0, sticky="w", padx=10, pady=(10, 5))
-        self.piper_model_path_var = tk.StringVar(
-            value=self.master.global_config.get('piper_model_path', ''))
-        entry_model = ctk.CTkEntry(
-            tab_piper, textvariable=self.piper_model_path_var)
-        entry_model.grid(row=0, column=1, sticky="ew",
-                         padx=(0, 10), pady=(10, 5))
-        ctk.CTkButton(tab_piper, text="...", width=40, command=self.select_model_file).grid(
-            row=0, column=2, sticky="e", padx=10, pady=(10, 5))
-        CreateToolTip(
-            entry_model, "Ścieżka do pliku .onnx używanego przez Piper.", wraplength=300)
-
-        # --- AI / Ollama ---
-        ctk.CTkLabel(frame, text="AI / Ollama", font=("", 16, "bold")).grid(
-            row=4, column=0, columnspan=3, sticky="w", padx=10, pady=(15, 5))
+        # --- TAB: TTS ---
+        tts_inner_tabs = ctk.CTkTabview(tab_tts)
+        tts_inner_tabs.pack(fill="both", expand=True, padx=5, pady=5)
         
-        frame_ai = ctk.CTkFrame(frame)
-        frame_ai.grid(row=5, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
-        frame_ai.grid_columnconfigure(1, weight=1)
+        # XTTS
+        t_xtts = tts_inner_tabs.add("Local TTS (API)")
+        t_xtts.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(t_xtts, text="URL serwera API:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.local_api_url_var = tk.StringVar(value=self.master.global_config.get('local_api_url', 'http://127.0.0.1:8001'))
+        ctk.CTkEntry(t_xtts, textvariable=self.local_api_url_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=10, pady=10)
+        
+        ctk.CTkLabel(t_xtts, text="Ścieżka głosu XTTS (.wav):").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        self.xtts_voice_path_var = tk.StringVar(value=self.master.global_config.get('xtts_voice_path', ''))
+        ctk.CTkEntry(t_xtts, textvariable=self.xtts_voice_path_var).grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=10)
+        ctk.CTkButton(t_xtts, text="...", width=40, command=self.select_voice_file).grid(row=1, column=2, sticky="e", padx=10, pady=10)
 
-        ctk.CTkLabel(frame_ai, text="Url serwera Ollama:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        # ElevenLabs
+        t_eleven = tts_inner_tabs.add("ElevenLabs")
+        t_eleven.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(t_eleven, text="Klucz API:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.el_api_key_var = tk.StringVar(value=self.master.global_config.get('elevenlabs_api_key', ''))
+        ctk.CTkEntry(t_eleven, textvariable=self.el_api_key_var, show="*").grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+        
+        ctk.CTkLabel(t_eleven, text="Voice ID:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        self.el_voice_id_var = tk.StringVar(value=self.master.global_config.get('elevenlabs_voice_id', ''))
+        ctk.CTkEntry(t_eleven, textvariable=self.el_voice_id_var).grid(row=1, column=1, sticky="ew", padx=10, pady=10)
+
+        # Google
+        t_google = tts_inner_tabs.add("Google Cloud TTS")
+        t_google.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(t_google, text="Credentials (.json):").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.gcp_creds_var = tk.StringVar(value=self.master.global_config.get('google_credentials_path', ''))
+        ctk.CTkEntry(t_google, textvariable=self.gcp_creds_var).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=10)
+        ctk.CTkButton(t_google, text="...", width=40, command=self.select_gcp_creds).grid(row=0, column=2, sticky="e", padx=10, pady=10)
+        
+        ctk.CTkLabel(t_google, text="Nazwa głosu:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        self.gcp_voice_name_var = tk.StringVar(value=self.master.global_config.get('google_voice_name', 'pl-PL-Wavenet-B'))
+        ctk.CTkEntry(t_google, textvariable=self.gcp_voice_name_var).grid(row=1, column=1, sticky="ew", padx=10, pady=10)
+
+        # Piper
+        t_piper = tts_inner_tabs.add("Piper")
+        t_piper.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(t_piper, text="Ścieżka modelu Piper (.onnx):").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.piper_model_path_var = tk.StringVar(value=self.master.global_config.get('piper_model_path', ''))
+        ctk.CTkEntry(t_piper, textvariable=self.piper_model_path_var).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=10)
+        ctk.CTkButton(t_piper, text="...", width=40, command=self.select_model_file).grid(row=0, column=2, sticky="e", padx=10, pady=10)
+
+        # --- TAB: AI ---
+        tab_ai.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(tab_ai, text="Url serwera Ollama:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         self.ollama_url_var = tk.StringVar(value=self.master.global_config.get('ollama_url', 'http://localhost:11434'))
-        ctk.CTkEntry(frame_ai, textvariable=self.ollama_url_var).grid(row=0, column=1, sticky="ew", padx=10, pady=10)
-        CreateToolTip(frame_ai, "Adres API Ollama (domyślnie http://localhost:11434)")
+        ctk.CTkEntry(tab_ai, textvariable=self.ollama_url_var).grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+        CreateToolTip(tab_ai, "Adres API Ollama (domyślnie http://localhost:11434)")
         
-        ctk.CTkLabel(frame_ai, text="Model Ollama:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        ctk.CTkLabel(tab_ai, text="Model Ollama:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
         self.ollama_model_var = tk.StringVar(value=self.master.global_config.get('ollama_model', 'gemma2:2b'))
-        ctk.CTkEntry(frame_ai, textvariable=self.ollama_model_var).grid(row=1, column=1, sticky="ew", padx=10, pady=10)
-        CreateToolTip(frame_ai, "Nazwa modelu do użycia (musi być zainstalowana w Ollama)")
+        ctk.CTkEntry(tab_ai, textvariable=self.ollama_model_var).grid(row=1, column=1, sticky="ew", padx=10, pady=10)
+        CreateToolTip(tab_ai, "Nazwa modelu do użycia (musi być zainstalowana w Ollama)")
 
-
-        theme_frame = ctk.CTkFrame(frame)
-        theme_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=6)
-        ctk.CTkLabel(theme_frame, text="Motyw aplikacji:",
-                     font=("", 14, "bold")).pack(anchor="w", padx=10, pady=(5, 0))
-
-        ctk.CTkLabel(theme_frame, text="Wygląd (Jasny/Ciemny/System):").pack(
-            anchor="w", padx=10, pady=(5, 0))
-        self.appearance_mode_var = ctk.StringVar(
-            value=self.master.global_config.get('appearance_mode', 'System'))
-        ctk.CTkOptionMenu(theme_frame, values=["System", "Dark", "Light"],
-                          variable=self.appearance_mode_var).pack(anchor="w", padx=10, pady=(0, 5))
-
-        ctk.CTkLabel(theme_frame, text="Paleta kolorów:").pack(
-            anchor="w", padx=10, pady=(5, 0))
-        self.color_theme_var = ctk.StringVar(
-            value=self.master.global_config.get('color_theme', 'blue'))
-        ctk.CTkOptionMenu(theme_frame,
-                          values=["blue", "green", "dark-blue"],
-                          variable=self.color_theme_var).pack(anchor="w", padx=10, pady=(0, 10))
-
-        ctk.CTkLabel(frame_main, text="Format wyjściowy audio:").grid(
-            row=2, column=0, sticky="w", padx=10, pady=(0, 10))
-
-        self.audio_format_var = tk.StringVar(
-            value=self.master.global_config.get('audio_output_format', 'mp3'))
-
-        format_menu = ctk.CTkOptionMenu(
-            frame_main,
-            variable=self.audio_format_var,
-            values=["ogg", "mp3"]
-        )
-        format_menu.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=(0, 10))
-        CreateToolTip(format_menu, "Format docelowy plików w folderze /ready.", wraplength=300)
-
-        ctk.CTkLabel(frame, text="Filtry Audio (FFmpeg)", font=("", 16, "bold")).grid(
-            row=5, column=0, columnspan=3, sticky="w", padx=10, pady=(20, 5))
-        self.filters_frame = ctk.CTkFrame(frame)
-        self.filters_frame.grid(
-            row=6, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
-        self.filters_frame.grid_columnconfigure(1, weight=1)
-
-
+        # --- TAB: Filtry Audio ---
+        tab_filters.grid_columnconfigure(1, weight=1)
         self.filter_vars = {}
-        current_row = 0
-        filters_config = self.master.global_config.get(
-            'ffmpeg_filters', DEFAULT_FILTERS)
+        filters_config = self.master.global_config.get('ffmpeg_filters', DEFAULT_FILTERS)
+        current_row=0
         for key, default_config in DEFAULT_FILTERS.items():
             current_config = filters_config.get(key, default_config)
             enabled = current_config.get("enabled", True)
             params = current_config.get("params", default_config["params"])
-            params_var = tk.StringVar(value=params)
-            enabled_var = tk.BooleanVar(value=enabled)
-            self.filter_vars[key] = (params_var, enabled_var)
-            lbl = ctk.CTkLabel(self.filters_frame, text=f"{key}:")
+            
+            p_var = tk.StringVar(value=params)
+            e_var = tk.BooleanVar(value=enabled)
+            self.filter_vars[key] = (p_var, e_var)
+            
+            lbl = ctk.CTkLabel(tab_filters, text=f"{key}:")
             lbl.grid(row=current_row, column=0, sticky="w", padx=10, pady=5)
-            CreateToolTip(lbl, text=FILTER_DESCRIPTIONS.get(
-                key, ""), wraplength=400)
-            entry = ctk.CTkEntry(
-                self.filters_frame, textvariable=params_var)
-            entry.grid(row=current_row, column=1, sticky="ew", padx=10, pady=5)
-            cb = ctk.CTkCheckBox(
-                self.filters_frame, text="Włącz", variable=enabled_var)
-            cb.grid(row=current_row, column=2, sticky="e", padx=10, pady=5)
-            current_row += 1
+            CreateToolTip(lbl, text=FILTER_DESCRIPTIONS.get(key, ""), wraplength=400)
+            
+            ctk.CTkEntry(tab_filters, textvariable=p_var).grid(row=current_row, column=1, sticky="ew", padx=10, pady=5)
+            ctk.CTkCheckBox(tab_filters, text="Włącz", variable=e_var).grid(row=current_row, column=2, sticky="e", padx=10, pady=5)
+            current_row+=1
+
+        # --- TAB: Wygląd ---
+        # Appearance Mode
+        ctk.CTkLabel(tab_theme, text="Wygląd (Jasny/Ciemny/System):").pack(anchor="w", padx=10, pady=(10, 0))
+        self.appearance_mode_var = ctk.StringVar(value=self.master.global_config.get('appearance_mode', 'System'))
+        ctk.CTkOptionMenu(tab_theme, values=["System", "Dark", "Light"], variable=self.appearance_mode_var).pack(anchor="w", padx=10, pady=(5, 10))
+
+        # Color Theme
+        ctk.CTkLabel(tab_theme, text="Paleta kolorów:").pack(anchor="w", padx=10, pady=(10, 0))
+        self.color_theme_var = ctk.StringVar(value=self.master.global_config.get('color_theme', 'blue'))
+        ctk.CTkOptionMenu(tab_theme, values=["blue", "green", "dark-blue"], variable=self.color_theme_var).pack(anchor="w", padx=10, pady=(5, 10))
 
     def _create_project_tab(self, frame: ctk.CTkFrame):
         """Populates the 'Project' settings tab."""

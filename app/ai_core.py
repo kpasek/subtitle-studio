@@ -28,8 +28,8 @@ class AITask:
 # Wbudowane prompty
 BUILTIN_TASKS = [
     AITask(
-        name="Tłumaczenie na Polski",
-        system_prompt="Jesteś profesjonalnym tłumaczem napisów filmowych. Przetłumacz podany tekst na język polski, zachowując kontekst i styl wypowiedzi. Zwróć TYLKO przetłumaczony tekst, bez żadnych dodatkowych komentarzy.",
+        name="Liczby i daty na formę fonetyczną",
+        system_prompt="Zamień wszystkie liczby i daty w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy', '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.",
         is_readonly=True
     ),
     AITask(
@@ -43,18 +43,18 @@ BUILTIN_TASKS = [
         is_readonly=True
     ),
     AITask(
-        name="Daty na formę fonetyczną",
-        system_prompt="Zamień wszystkie daty i liczby w tekście na ich pełną formę słowną w języku polskim (np. '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.",
-        is_readonly=True
-    ),
-    AITask(
-        name="Liczby na formę fonetyczną",
-        system_prompt="Zamień wszystkie liczby w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.",
+        name="Tłumaczenie na Polski",
+        system_prompt="Jesteś profesjonalnym tłumaczem napisów filmowych. Przetłumacz podany tekst na język polski, zachowując kontekst i styl wypowiedzi. Zwróć TYLKO przetłumaczony tekst, bez żadnych dodatkowych komentarzy.",
         is_readonly=True
     ),
     AITask(
         name="Korekta językowa",
         system_prompt="Jesteś korektorem. Popraw błędy ortograficzne, interpunkcyjne i stylistyczne w podanym tekście. Nie zmieniaj sensu wypowiedzi. Zwróć TYLKO poprawiony tekst.",
+        is_readonly=True
+    ),
+    AITask(
+        name="Usuń elementy interfejsu",
+        system_prompt="Sprawdzasz napisy wyciągnięte z gry. Mogą one zawierać nazwy interfejsu lub inne elementy gry. Twoim zadaniem jest ustalić czy dany tekst jest elementem interfejsu lub nie. Jeżeli tak zwóć pusty ciąg znaków, jeśli nie zwróć oryginalny tekst bez zmian. Nie dodawaj żadnych komentarzy, zwróć TYLKO oczyszczony tekst.",
         is_readonly=True
     )
 ]
@@ -88,9 +88,10 @@ class OllamaService:
             "prompt": text,
             "stream": False,
             "options": {
-                "temperature": 0.3  # Niski temperature dla bardziej deterministycznych wyników
+                "temperature": 0.3
             }
         }
+        print("Wysyłanie do Ollama:", payload) 
 
         try:
             response = requests.post(url, json=payload, timeout=60)
