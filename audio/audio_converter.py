@@ -5,26 +5,6 @@ from typing import Dict, Optional, Any, Callable
 import threading
 
 
-def _convert_worker(task_args):
-    """
-    Funkcja robocza (top-level) dla puli procesów.
-    Tworzy własną instancję konwertera i wywołuje parse_ogg.
-    """
-    # ZMIANA: Dodano out_format do argumentów
-    input_file, output_file, filter_settings, out_format = task_args
-
-    print(f"[Worker] Przetwarzam: {input_file} -> {output_file} (format: {out_format})")
-
-    try:
-        # ZMIANA: Przekazujemy out_format do konstruktora
-        converter_instance = AudioConverter(filter_settings=filter_settings, out_format=out_format)
-        converter_instance.parse_ogg(input_file, output_file)
-        return (input_file, True, None)
-    except Exception as e:
-        print(f"[Worker] Błąd podczas przetwarzania {input_file}: {e}")
-        return (input_file, False, str(e))
-
-
 class AudioConverter:
     """
     Handles audio conversion, applying FFmpeg filters.

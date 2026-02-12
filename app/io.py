@@ -216,7 +216,7 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                 audio_transcribed_text=transcribed,
                 audio_hallucination=row.get('audio_hallucination', 'PENDING'),
                 status_flag=row.get('status_flag', None),
-                ai_processed=row.get('ai_processed', 'False') == 'True',
+                ai_processed=str(row.get('ai_processed', 'False')).lower() == 'true',
                 uid=uid
             ))
 
@@ -283,7 +283,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                             'audio_transcribed_text': item.audio_transcribed_text,
                             'audio_hallucination': item.audio_hallucination,
                             'status_flag': item.status_flag,
-                            'ai_processed': item.ai_processed,
+                            'ai_processed': str(item.ai_processed),
                             'uid': _cleanup_uid_field(item.uid)  
                         }
                         if not row_dict['uid']:
@@ -362,7 +362,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_transcribed_text': line.audio_transcribed_text,
                 'audio_hallucination': line.audio_hallucination,
                 'status_flag': getattr(line, 'status_flag', None),
-                'ai_processed': getattr(line, 'ai_processed', False),
+                'ai_processed': str(getattr(line, 'ai_processed', False)),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -387,7 +387,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_transcribed_text': line.audio_transcribed_text,
                 'audio_hallucination': line.audio_hallucination,
                 'status_flag': getattr(line, 'status_flag', None),
-                'ai_processed': getattr(line, 'ai_processed', False),
+                'ai_processed': str(getattr(line, 'ai_processed', False)),
                 'uid': uid
             }
             new_cache.append(new_row)
