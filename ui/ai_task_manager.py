@@ -1,11 +1,10 @@
 import customtkinter as ctk
-import tkinter as tk
 from tkinter import messagebox
 from typing import List
-import copy
 
-from app.ai_core import AITask, BUILTIN_TASKS
-from app.tooltip import CreateToolTip
+from app.builtin_tasks import BUILTIN_TASKS, AITask
+
+# from app.ai_core import AITask, BUILTIN_TASKS
 
 class AITaskManagerWindow(ctk.CTkToplevel):
     def __init__(self, master):

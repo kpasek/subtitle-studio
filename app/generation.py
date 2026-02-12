@@ -1,12 +1,11 @@
 from tkinter import messagebox
-from typing import List, Tuple, Dict
+from typing import List, Dict
 from audio.generation_manager import GenerationManager, GenerationJob, ConversionJob
 from pathlib import Path
 from app.utils import ready_dir_from_audio_dir
 from app.entity import Line
 from app.io import get_primary_audio_path
 import os
-import json
 
 
 LineList = List[Line]

@@ -5,10 +5,10 @@ from typing import List, TYPE_CHECKING
 import time
 import threading
 
+from app.builtin_tasks import BUILTIN_TASKS, AITask
 from app.entity import Line
-from app.ai_core import AITask, BUILTIN_TASKS, OllamaService
-from app.tooltip import CreateToolTip
-from app.io import update_line_in_csv, update_lines_in_csv
+from app.ai_core import OllamaService
+from app.io import update_lines_in_csv
 
 if TYPE_CHECKING:
     from app.gui import SubtitleStudioApp
@@ -41,7 +41,6 @@ class AIControl:
         self._paused.wait()
 
 from app.project import save_project, set_project_config
-from app.io import save_lines_to_file
 from pathlib import Path
 import shutil
 import datetime
@@ -105,9 +104,6 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         
         self._refresh_available_list()
         
-        # Select first item if available
-        if self.list_available.size() > 0:
-            self.list_available.selection_set(0)
 
         # Middle: Buttons
         frame_btns = ctk.CTkFrame(self, fg_color="transparent")
@@ -170,6 +166,11 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         
         self.btn_stop_task = ctk.CTkButton(self.frame_progress_controls, text="Anuluj", command=self._cancel_task, fg_color="red", width=100)
         self.btn_stop_task.pack(side="left", padx=5)
+        
+        # Select and add first item if available
+        if self.list_available.size() > 0:
+            self.list_available.selection_set(0)
+            self._add_task()
         
         self.control = AIControl()
 

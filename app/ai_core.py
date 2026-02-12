@@ -1,12 +1,8 @@
 import requests
-import uuid
 import logging
-from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Dict
 
 logger = logging.getLogger(__name__)
 
-from app.builtin_tasks import BUILTIN_TASKS, AITask
 
 class OllamaService:
     def __init__(self, base_url: str, model: str):
