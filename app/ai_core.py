@@ -77,7 +77,7 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
             response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             data = response.json()
-            return data.get("response", "").strip().strip('`')
+            return data.get("response", "").strip()
         except Exception as e:
             logger.error(f"SI Processing error: {e}")
             raise e

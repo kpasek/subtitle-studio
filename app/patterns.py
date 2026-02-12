@@ -224,10 +224,14 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
     base_source_lines = list(app.lines)
 
     for i, ln in enumerate(base_source_lines):
+        # Use current processed text as the new original base
+        # This confirms manual edits, AI changes, and previous pattern applications
+        current_text = ln.text if ln.text is not None else ln.original_text
+        
         new_ln = Line(
-            original_text=ln.original_text,
-            text=ln.original_text,
-            tts_text=ln.original_text
+            original_text=current_text,
+            text=current_text,
+            tts_text=current_text
         )
 
         new_ln.uid = ln.uid
@@ -238,6 +242,12 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
         new_ln.audio_format = ln.audio_format
         new_ln.audio_transcribed_text = ln.audio_transcribed_text
         new_ln.audio_hallucination = getattr(ln, 'audio_hallucination', 'PENDING')
+        
+        # Persistence Fix: Copy saved flags
+        new_ln.ai_processed = ln.ai_processed
+        new_ln.status_flag = ln.status_flag
+        if hasattr(ln, 'speaker'):
+            new_ln.speaker = ln.speaker
         
         processed_objs.append(new_ln)
 
