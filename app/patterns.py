@@ -66,6 +66,9 @@ def apply_patterns(app, force_refresh=False):
 
     lines = apply_remove_patterns(lines, all_remove)
     apply_replace_patterns(lines, all_replace)
+    
+    # Update app lines with the filtered list
+    app.lines = lines
 
     # Aktualizacja widoku
     app._update_subtitle_panel_content()
@@ -190,18 +193,16 @@ def apply_processing(app):
         messagebox.showwarning('Brak pliku', 'Najpierw wczytaj plik z napisami.')
         return
 
-    rem_patterns, _ = gather_active_patterns(app.custom_remove, app.custom_replace)
-
-    lines = apply_remove_patterns(lines, rem_patterns)
-
+    # Count changes based on current app state (assuming apply_patterns ran)
     changes_count = 0
-    for i, line in enumerate(lines):
-        if line.original_text != line.text:
+    for line in lines:
+        # Check if visual text differs from original
+        if line.get_text() != line.original_text:
             changes_count += 1
 
     ProcessingSummaryWindow(
         app, len(lines), changes_count,
-        manual_edits_count=changes_count,
+        manual_edits_count=len(app.manual_edits) + len(app.tts_edits),
         callback=lambda remove_empty, remove_duplicates: _finalize_processing(app, remove_empty, remove_duplicates)
     )
 
@@ -223,10 +224,14 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
     base_source_lines = list(app.lines)
 
     for i, ln in enumerate(base_source_lines):
+        # Use current processed text as the new original base
+        # This confirms manual edits, AI changes, and previous pattern applications
+        current_text = ln.text if ln.text is not None else ln.original_text
+        
         new_ln = Line(
-            original_text=ln.original_text,
-            text=ln.original_text,
-            tts_text=ln.original_text
+            original_text=current_text,
+            text=current_text,
+            tts_text=current_text
         )
 
         new_ln.uid = ln.uid
@@ -237,6 +242,12 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
         new_ln.audio_format = ln.audio_format
         new_ln.audio_transcribed_text = ln.audio_transcribed_text
         new_ln.audio_hallucination = getattr(ln, 'audio_hallucination', 'PENDING')
+        
+        # Persistence Fix: Copy saved flags
+        new_ln.ai_processed = ln.ai_processed
+        new_ln.status_flag = ln.status_flag
+        if hasattr(ln, 'speaker'):
+            new_ln.speaker = ln.speaker
         
         processed_objs.append(new_ln)
 
@@ -277,6 +288,9 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
 
     app.loaded_path = new_path
     app.lines = final_objs
+
+    if app.lbl_filename:
+        app.lbl_filename.configure(text=f"Plik: {new_filename}")
 
     # Wyłączamy wzorce usuwające (zostały "wypalone" w tekst)
     for p in app.custom_remove:

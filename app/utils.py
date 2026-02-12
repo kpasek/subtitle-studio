@@ -101,10 +101,19 @@ def apply_replace_patterns(lines: List[Line], patterns: List[PatternItem]) -> Li
         if getattr(line, 'status_flag', None) == "DONE":
             continue
 
-        s = line.get_tts_text()
+        # 1. Apply to visual text
+        s = line.get_text()
         for i, pat in enumerate(all_enabled):
             s = compiled[i].sub(pat.replace, s)
-        line.set_tts_text(s)
+        line.set_text(s)
+        
+        # 2. Apply to TTS text override if present
+        if line.tts_text is not None:
+            s_tts = line.get_tts_text()
+            for i, pat in enumerate(all_enabled):
+                s_tts = compiled[i].sub(pat.replace, s_tts)
+            line.set_tts_text(s_tts)
+            
     return lines
 
 

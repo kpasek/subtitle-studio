@@ -4,7 +4,7 @@ from app.project import (create_new_project, import_old_project, open_project, s
                          open_recent_projects_window, add_new_subtitles, change_subtitle_file, download_clean, download_replace,
                          delete_all_converted_audio)
 from app.generation import enqueue_generate_all, enqueue_convert_all
-from app.patterns import open_pattern_manager
+from app.patterns import open_pattern_manager, apply_patterns, apply_processing
 from app.ui_helpers import open_shortcuts_window, show_about_window
 from audio.deleter import AudioDeleterWindow
 from ui.verification_window import VerificationWindow
@@ -48,7 +48,6 @@ class AppMenu:
         edit_menu.add_command(label="Oznacz jako Gotowe", command=lambda: self._invoke_panel("set_selected_status", "DONE"))
         edit_menu.add_command(label="Oznacz jako Błędne", command=lambda: self._invoke_panel("set_selected_status", "ERROR"))
         edit_menu.add_command(label="Wyczyść flagi", command=lambda: self._invoke_panel("set_selected_status", None))
-        menubar.add_cascade(label="Edycja", menu=edit_menu)
 
         # --- Dialogi ---
         gen_menu = tk.Menu(menubar, tearoff=0)
@@ -58,6 +57,7 @@ class AppMenu:
         gen_menu.add_command(label="Generuj dialogi", command=lambda: enqueue_generate_all(self.app), accelerator="Ctrl+Shift+G")
         gen_menu.add_command(label="Konwertuj audio", command=lambda: enqueue_convert_all(self.app), accelerator="Ctrl+Shift+R")
         gen_menu.add_command(label="Weryfikacja", command=lambda: VerificationWindow(self.app), accelerator="Ctrl+Shift+Y")
+        gen_menu.add_command(label="Zatwierdź zamiany", command=lambda: apply_processing(self.app))
         gen_menu.add_separator()
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=lambda: delete_all_converted_audio(self.app))
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
@@ -65,7 +65,7 @@ class AppMenu:
         # --- SI / Ollama ---
         ai_menu = tk.Menu(menubar, tearoff=0)
         ai_menu.add_command(label="Menedżer Zadań SI", command=lambda: AITaskManagerWindow(self.app))
-        ai_menu.add_command(label="Uruchom zadania SI", command=lambda: self._run_ai_global())
+        ai_menu.add_command(label="Uruchom zadania SI", command=lambda: self._run_ai_global(), accelerator="Ctrl+Shift+A")
         menubar.add_cascade(label="Zadania SI", menu=ai_menu)
         
         # --- Wzorce ---
@@ -77,6 +77,8 @@ class AppMenu:
         patterns_menu.add_separator()
         patterns_menu.add_command(label="Usuwanie dialogów", command=lambda: self._run_audio_deleter())
         menubar.add_cascade(label="Wzorce", menu=patterns_menu)
+        
+        menubar.add_cascade(label="Edycja", menu=edit_menu)
                 
         export_menu = tk.Menu(menubar, tearoff=0)
         export_menu.add_command(label="Eksportuj napisy", command=lambda: download_clean(self.app))
@@ -104,12 +106,15 @@ class AppMenu:
 
     def _run_audio_deleter(self):
         if not self.app.lines:
-            return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self.app)
-        if not self.app.audio_dir: 
-            return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self.app)
-            messagebox.showerror("Błąd", "Najpierw zapisz/otwórz projekt.", parent=self.app)
+            messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self.app)
             return
-        SettingsWindow(self.app, self.app.torch_installed, mode='project')
+        if not self.app.audio_dir:
+            messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self.app)
+            return
+        
+        win = AudioDeleterWindow(self.app, self.app.lines, str(self.app.audio_dir))
+        win.wait_visibility()
+        win.grab_set()
 
     def _run_ai_global(self):
         if not self.app.lines:
@@ -118,7 +123,7 @@ class AppMenu:
         
         # Select all lines
         all_lines = self.app.lines
-        win = AITaskRunnerWindow(self.app, all_lines, is_global=True)
+        AITaskRunnerWindow(self.app, all_lines, is_global=True)
 
     def _invoke_panel(self, method_name, *args):
         if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, method_name):
@@ -126,26 +131,6 @@ class AppMenu:
             method(*args)
         else:
             print(f"Warning: Cannot invoke {method_name} on subtitle_panel")
-        AITaskRunnerWindow(self.app, self.app.lines, is_global=True) # Pass flag to indicate global run
-
-    def _run_ai_selected(self):
-        if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, 'get_selected_lines'):
-             selected = self.app.subtitle_panel.get_selected_lines()
-        elif self.app.selected_line_index is not None:
-             selected = [self.app.lines[self.app.selected_line_index]]
-        else:
-             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
-             return
-             
-        if not selected:
-             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
-             return
-
-        AITaskRunnerWindow(self.app, selected)
-
-        win = AudioDeleterWindow(self.app, self.app.lines, str(self.app.audio_dir))
-        win.wait_visibility()
-        win.grab_set()
 
     def _open_project_settings(self):
         if not self.app.current_project_path: 

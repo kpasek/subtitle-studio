@@ -1,5 +1,6 @@
 import requests
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,28 @@ class OllamaService:
             logger.error(f"Ollama connection error: {e}")
             return False
 
-    def process_text(self, text: str, system_prompt: str) -> str:
+    def generate_response(self, prompt: str, model: str = None) -> str:
+        """Wysyła prompt do modelu i zwraca odpowiedź. Metoda ogólna."""
+        if not prompt or not prompt.strip():
+            return ""
+
+        url = f"{self.base_url}/api/generate"
+        payload = {
+            "model": model or self.model,
+            "prompt": prompt,
+            "stream": False,
+        }
+
+        try:
+            response = requests.post(url, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "").strip()
+        except Exception as e:
+            logger.error(f"Ollama generate error: {e}")
+            return f"Error: {e}"
+
+    def process_text(self, text: str, system_prompt: str, model: str = None) -> str:
         """Wysyła tekst do modelu i zwraca odpowiedź."""
         if not text or not text.strip():
             return ""
@@ -42,9 +64,8 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
 </text_to_process>
 """
         
-        # Construct full prompt
         payload = {
-            "model": self.model,
+            "model": model or self.model,
             "system": system_prompt,
             "prompt": final_user_prompt,
             "stream": False,
@@ -52,14 +73,21 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
                 "temperature": 0.2
             }
         }
-        print("Wysyłanie do SI:", text) 
 
         try:
             response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             data = response.json()
-            print("Odpowiedź z SI:", data.get("response", ""))
-            return data.get("response", "").strip().strip('`')
+            
+            raw_response = data.get("response", "").strip().strip('`')
+            
+            # Additional cleanup for echoed tags
+            cleaned_response = re.sub(r'</?text_to_process>', '', raw_response, flags=re.IGNORECASE).strip()
+            
+            # Normalize whitespace: replace newlines and multiple spaces with a single space
+            cleaned_response = re.sub(r'\s+', ' ', cleaned_response)
+            
+            return cleaned_response
         except Exception as e:
             logger.error(f"SI Processing error: {e}")
             raise e

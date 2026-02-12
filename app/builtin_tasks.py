@@ -39,7 +39,7 @@ ZASADY KRYTYCZNE (PRZESTRZEGAJ BEZWZGLĘDNIE):
    - Lepiej pozostawić "X wiek" lub "3.14" bez zmian, niż zamienić je błędnie.
 
 3. CZYSZCZENIE:
-   - Usuń onomatopeje (pf, ehh, yyy) i didaskalia w nawiasach opisujące dźwięki.
+   - Usuń onomatopeje (pf, ehh, yyy, łoo, łiii itp) i didaskalia w nawiasach opisujące dźwięki.
    - Usuń znaki specjalne nieistotne dla wymowy (*, #, @, --).
 
 4. FONETYZACJA:
