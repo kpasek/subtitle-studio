@@ -716,10 +716,11 @@ class SubtitlePanel(ctk.CTkFrame):
         
         # Zaktualizuj bezpośrednio w app.lines (nie w manual_edits/tts_edits)
         mode = self.app.view_mode.get()
+        # Use setters! This ensures correct behavior (setting to None if equals parent value)
         if mode == "Napisy":
-            self.app.lines[line_idx].text = new_text
+            self.app.lines[line_idx].set_text(new_text)
         elif mode == "TTS":
-            self.app.lines[line_idx].tts_text = new_text
+            self.app.lines[line_idx].set_tts_text(new_text)
         
         # Zapisz do CSV bezpośrednio
         try:
@@ -831,25 +832,30 @@ class SubtitlePanel(ctk.CTkFrame):
              if 0 <= idx < len(self.app.lines):
                 line = self.app.lines[idx]
                 
-                # Don't touch DONE lines if strictly required, but usually user wants to fix them.
-                # Let's allow restoring even if DONE, or forbid? Usually edit is forbidden if DONE.
+                # Check status
                 if getattr(line, 'status_flag', None) == "DONE":
                     continue
 
                 if mode == "TTS":
                     # Restore TTS from Text
-                    current_src = line.text or ""
-                    # If we really want to simulate 'restore', maybe check if they differ
-                    if line.tts_text != current_src:
-                        line.tts_text = current_src
-                        to_update.append(line)
-                        changed = True
+                    # We want effective TTS to be result of effective Text
+                    target_val = line.get_text()
+                    
+                    # Determine if update is needed:
+                    # 1. Effective values differ (visual change)
+                    # 2. OR explicit override exists (data cleanup)
+                    if line.get_tts_text() != target_val or line.tts_text is not None:
+                         line.set_tts_text(target_val) # Will set tts_text = None
+                         to_update.append(line)
+                         changed = True
+
                 elif mode == "Napisy": # Text View
                     # Restore Text from Original
-                    current_src = line.original_text or ""
-                    if line.text != current_src:
-                        line.text = current_src
-                        line.ai_processed = False # Reset AI flag if restoring to original? Optional.
+                    target_val = line.original_text
+                    
+                    if line.get_text() != target_val or line.text is not None:
+                        line.set_text(target_val) # Will set text = None
+                        line.ai_processed = False # Reset flag on full restore
                         to_update.append(line)
                         changed = True
         
