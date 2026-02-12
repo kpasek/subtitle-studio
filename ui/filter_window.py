@@ -9,7 +9,7 @@ class FilterWindow(ctk.CTkToplevel):
     def __init__(self, master, current_filters: Dict = None, apply_callback: Callable[[Dict], None] = None):
         super().__init__(master)
         self.title("Filtracja")
-        self.geometry("380x280")
+        self.geometry("380x350")
         self.transient(master)
         self.apply_callback = apply_callback
         self.current_filters = current_filters or {}
@@ -56,9 +56,19 @@ class FilterWindow(ctk.CTkToplevel):
         self.status_option = tk.StringVar(value=self.current_filters.get('status', 'Wszystkie'))
         ctk.CTkOptionMenu(frm, variable=self.status_option, values=["Wszystkie", "Gotowe", "Błędne", "Bez flagi"]).grid(row=5, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
 
+        # AI Status filter
+        ctk.CTkLabel(frm, text="AI Przetworzone: ").grid(row=6, column=0, sticky="w", pady=(8,0))
+        self.ai_option = tk.StringVar(value=self.current_filters.get('ai_status', 'Wszystkie'))
+        ctk.CTkOptionMenu(frm, variable=self.ai_option, values=["Wszystkie", "Tak", "Nie"]).grid(row=6, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
+
+        # Diff Status filter (Text != TTS)
+        ctk.CTkLabel(frm, text="Zmiany (Text vs TTS): ").grid(row=7, column=0, sticky="w", pady=(8,0))
+        self.diff_option = tk.StringVar(value=self.current_filters.get('diff_status', 'Wszystkie'))
+        ctk.CTkOptionMenu(frm, variable=self.diff_option, values=["Wszystkie", "Tylko zmienione", "Bez zmian"]).grid(row=7, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
+
         # Buttons
         btn_frame = ctk.CTkFrame(frm, fg_color="transparent")
-        btn_frame.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(12,0))
+        btn_frame.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12,0))
         ctk.CTkButton(btn_frame, text="Wyczyść", command=self._on_clear).pack(side="left", padx=6)
         ctk.CTkButton(btn_frame, text="Zastosuj", command=self._on_apply).pack(side="right", padx=6)
 
@@ -91,6 +101,14 @@ class FilterWindow(ctk.CTkToplevel):
         status_v = self.status_option.get()
         if status_v != "Wszystkie":
             filters['status'] = status_v
+        
+        ai_v = self.ai_option.get()
+        if ai_v != "Wszystkie":
+            filters['ai_status'] = ai_v
+            
+        diff_v = self.diff_option.get()
+        if diff_v != "Wszystkie":
+            filters['diff_status'] = diff_v
 
         if callable(self.apply_callback):
             self.apply_callback(filters)

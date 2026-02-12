@@ -38,6 +38,9 @@ class Line:
     
     # Flagi statusu wiersza (ręczne)
     status_flag: Optional[str] = None  # None, "DONE" (Gotowe), "ERROR" (Błędne)
+    
+    # Flagi automatyczne
+    ai_processed: bool = False  # Czy wiersz został zmieniony przez AI
 
 
     def get_text(self) -> str:

@@ -449,6 +449,22 @@ class SubtitlePanel(ctk.CTkFrame):
                 if status_filter == "Bez flagi" and flag != "":
                     continue
 
+            # Filter by AI Processed flag
+            ai_f = f.get('ai_status', 'Wszystkie')
+            is_ai = getattr(line_obj, 'ai_processed', False)
+            if ai_f == 'Tak' and not is_ai: continue
+            if ai_f == 'Nie' and is_ai: continue
+
+            # Filter by Diff (Text vs TTS)
+            diff_f = f.get('diff_status', 'Wszystkie')
+            if diff_f != 'Wszystkie':
+                t_val = line_obj.get_text()
+                tts_val = line_obj.get_tts_text()
+                is_diff = (t_val != tts_val)
+                
+                if diff_f == 'Tylko zmienione' and not is_diff: continue
+                if diff_f == 'Bez zmian' and is_diff: continue
+
 
             # Budowanie wartości dla wiersza zgodnie z self.columns_config
             row_values = [""] * len(self.columns_config)

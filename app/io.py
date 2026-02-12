@@ -216,6 +216,7 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                 audio_transcribed_text=transcribed,
                 audio_hallucination=row.get('audio_hallucination', 'PENDING'),
                 status_flag=row.get('status_flag', None),
+                ai_processed=row.get('ai_processed', 'False') == 'True',
                 uid=uid
             ))
 
@@ -261,7 +262,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                 fieldnames = [
                     'original_text', 'text', 'tts_text', 'audio_duration',
                     'audio_similarity', 'audio_format', 'audio_filename',
-                    'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'uid'
+                    'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed', 'uid'
                 ]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
                 writer.writeheader()
@@ -282,6 +283,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                             'audio_transcribed_text': item.audio_transcribed_text,
                             'audio_hallucination': item.audio_hallucination,
                             'status_flag': item.status_flag,
+                            'ai_processed': item.ai_processed,
                             'uid': _cleanup_uid_field(item.uid)  
                         }
                         if not row_dict['uid']:

@@ -319,10 +319,20 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
                     break
             
             # Update Object
+            changed = False
             if target_field == "tts":
+                old_val = line.get_tts_text()
                 line.set_tts_text(temp_text)
+                if line.get_tts_text() != old_val:
+                    changed = True
             else:
+                old_val = line.get_text()
                 line.set_text(temp_text)
+                if line.get_text() != old_val:
+                    changed = True
+            
+            if changed:
+                line.ai_processed = True
             
             # Save to CSV immediately
             if app_ref and hasattr(app_ref, 'loaded_path') and app_ref.loaded_path:
