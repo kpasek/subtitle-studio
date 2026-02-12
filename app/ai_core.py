@@ -28,6 +28,16 @@ class AITask:
 # Wbudowane prompty
 BUILTIN_TASKS = [
     AITask(
+        name="Przygotuj pod TTS",
+        system_prompt=(
+"Zamień wszystkie liczby (w tym liczby rzymskie) i daty w tekście na ich pełną formę słowną. Zamień np. '123' na 'sto dwadzieścia trzy', '1999' na 'tysiąc dziewięćset dziewięćdziesiąty'.\n"
+"Usuń wszelkie onomatopeje (np. pf, ehh, yyy), opisy dźwięków w nawiasach oraz znaki nieistotne dla lektora (*, #, @, --). Zamień obce słowa na ich fonetyczne odpowiedniki w języku polskim.\n"
+"Nie zmieniaj kontekstu ani stylu wypowiedzi. Zwróć TYLKO gotowy tekst przygotowany pod TTS, bez żadnych dodatkowych komentarzy.\n"
+"Zwróć uwagę, jeśli masz wątpliwości co do zmian w tekście. Zawsze zwracaj oryginalny tekst bez żadnych przeróbek."
+        ),
+        is_readonly=True
+    ),
+    AITask(
         name="Liczby i daty na formę fonetyczną",
         system_prompt=(
             "Zamień wszystkie liczby (w tym liczby rzymskie) i daty w tekście na ich pełną formę słowną w języku polskim (np. '123' -> 'sto dwadzieścia trzy', '1999' -> 'tysiąc dziewięćset dziewięćdziesiąty dziewiąty'). Resztę tekstu pozostaw bez zmian. Zwróć TYLKO przetworzony tekst.\n"
@@ -52,17 +62,17 @@ BUILTIN_TASKS = [
         is_readonly=True
     ),
     AITask(
-        name="Tłumaczenie na Polski",
+        name="Zamień obce słowa na fonetyczne odpowiedniki",
         system_prompt=(
-            "Jesteś profesjonalnym tłumaczem napisów filmowych. Przetłumacz podany tekst na język polski, zachowując kontekst i styl wypowiedzi. Zwróć TYLKO przetłumaczony tekst, bez żadnych dodatkowych komentarzy.\n"
+            "Jesteś profesjonalnym tłumaczem napisów. Zamień obce słowa na ich fonetyczne odpowiedniki w języku polskim. Zwróć TYLKO gotowy tekst.\n"
             "Jeśli masz wątpliwości co do tego czy dany wyraz powinien zostać przełożony na inny sposób zawsze lepiej zwrócić oryginalny tekst bez żadnych przeróbek."
         ),
         is_readonly=True
     ),
     AITask(
-        name="Zamień obce słowa na fonetyczne odpowiedniki",
+        name="Tłumaczenie na Polski",
         system_prompt=(
-            "Jesteś profesjonalnym tłumaczem napisów. Zamień obce słowa na ich fonetyczne odpowiedniki w języku polskim. Zwróć TYLKO gotowy tekst.\n"
+            "Jesteś profesjonalnym tłumaczem napisów filmowych. Przetłumacz podany tekst na język polski, zachowując kontekst i styl wypowiedzi. Zwróć TYLKO przetłumaczony tekst, bez żadnych dodatkowych komentarzy.\n"
             "Jeśli masz wątpliwości co do tego czy dany wyraz powinien zostać przełożony na inny sposób zawsze lepiej zwrócić oryginalny tekst bez żadnych przeróbek."
         ),
         is_readonly=True

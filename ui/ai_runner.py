@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import messagebox
 from typing import List, TYPE_CHECKING
 import time
+import threading
 
 from app.entity import Line
 from app.ai_core import AITask, BUILTIN_TASKS, OllamaService
@@ -11,6 +12,33 @@ from app.io import update_line_in_csv
 
 if TYPE_CHECKING:
     from app.gui import SubtitleStudioApp
+
+class AIControl:
+    def __init__(self):
+        self._paused = threading.Event()
+        self._paused.set() # Start running (True = running, False = paused)
+        self._stopped = threading.Event()
+
+    @property
+    def is_paused(self):
+        return not self._paused.is_set()
+
+    @property
+    def is_stopped(self):
+        return self._stopped.is_set()
+
+    def pause(self):
+        self._paused.clear()
+
+    def resume(self):
+        self._paused.set()
+
+    def stop(self):
+        self._stopped.set()
+        self.resume() # Ensure we don't hang on pause
+
+    def wait_if_paused(self):
+        self._paused.wait()
 
 class AITaskRunnerWindow(ctk.CTkToplevel):
     def __init__(self, master: 'SubtitleStudioApp', selected_lines: List[Line]):
@@ -118,7 +146,33 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         
         self.lbl_progress = ctk.CTkLabel(self.frame_progress, text="Oczekiwanie na start...")
         self.lbl_progress.pack(pady=5)
+        
+        # Control buttons for active task
+        self.frame_progress_controls = ctk.CTkFrame(self.frame_progress, fg_color="transparent")
+        self.frame_progress_controls.pack(pady=5)
+        
+        self.btn_pause = ctk.CTkButton(self.frame_progress_controls, text="Pauza", command=self._toggle_pause, width=100)
+        self.btn_pause.pack(side="left", padx=5)
+        
+        self.btn_stop_task = ctk.CTkButton(self.frame_progress_controls, text="Anuluj", command=self._cancel_task, fg_color="red", width=100)
+        self.btn_stop_task.pack(side="left", padx=5)
+        
+        self.control = AIControl()
 
+    def _toggle_pause(self):
+        if self.control.is_paused:
+            self.control.resume()
+            self.btn_pause.configure(text="Pauza")
+        else:
+            self.control.pause()
+            self.btn_pause.configure(text="Wznów")
+            
+    def _cancel_task(self):
+        if messagebox.askyesno("Anulowanie", "Czy na pewno chcesz przerwać zadanie?"):
+            self.control.stop()
+            self.lbl_progress.configure(text="Zatrzymywanie...")
+            self.btn_pause.configure(state="disabled")
+            self.btn_stop_task.configure(state="disabled")
 
     def _add_task(self):
         sel = self.list_available.curselection()
@@ -162,6 +216,12 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         if not self.execution_queue:
             return
 
+        # Reset control
+        self.control = AIControl()
+        self.btn_pause.configure(text="Pauza", state="normal")
+        self.btn_stop_task.configure(state="normal")
+        self.frame_progress_controls.pack(pady=5) # Ensure visible
+
         # Prepare parameters
         target = self.target_var.get()
         tasks = list(self.execution_queue) # clone
@@ -193,9 +253,12 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
                 self.progress_bar.set(ratio)
                 self.lbl_progress.configure(text=f"{message} ({current}/{total})")
                 
-                # If complete, show close button
-                if current >= total:
-                   self.lbl_progress.configure(text="Zakończono przetwarzanie.")
+                # Check for special completion signals or completion
+                if message.startswith("Zakończono") or message.startswith("Anulowano"):
+                   final_msg = message
+                   self.lbl_progress.configure(text=final_msg)
+                   self.frame_progress_controls.pack_forget() # Hide controls
+                   
                    btn_close = ctk.CTkButton(self.frame_progress, text="Zamknij", fg_color="green", command=self.destroy)
                    btn_close.pack(pady=5)
                    
@@ -213,11 +276,12 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
             target_field=target,
             service=service,
             app_ref=self.master, 
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            control=self.control
         )
 
 
-def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, service: OllamaService, app_ref, progress_callback=None):
+def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, service: OllamaService, app_ref, progress_callback=None, control: AIControl = None):
     """
     To jest funkcja uruchamiana w wątku Workera.
     """
@@ -228,6 +292,13 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
     if progress_callback: progress_callback(0, total, "Startowanie...")
     
     for i, line in enumerate(lines):
+        # Control checks
+        if control:
+            if control.is_stopped:
+                if progress_callback: progress_callback(i, total, "Anulowano przez użytkownika")
+                return processed_count
+            control.wait_if_paused()
+
         # Notify progress
         if progress_callback: progress_callback(i, total, f"Przetwarzanie linii {line.uid}")
 
