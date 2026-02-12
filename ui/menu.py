@@ -1,18 +1,19 @@
 import tkinter as tk
 from tkinter import messagebox
 from app.project import (create_new_project, import_old_project, open_project, save_project, save_project_as, close_project, 
-                         open_recent_projects_window, save_global_config,
-                         add_new_subtitles, change_subtitle_file, download_clean, download_replace,
+                         open_recent_projects_window, add_new_subtitles, change_subtitle_file, download_clean, download_replace,
                          delete_all_converted_audio)
-from app.generation import enqueue_generate_all, enqueue_convert_all, show_generation_queue
+from app.generation import enqueue_generate_all, enqueue_convert_all
 from app.patterns import open_pattern_manager
 from app.ui_helpers import open_shortcuts_window, show_about_window
 from audio.deleter import AudioDeleterWindow
 from ui.verification_window import VerificationWindow
 from ui.pattern_io import PatternIOWindow
 from ui.game_reader_export import GameReaderExportWindow
-from audio.generation_queue import GenerationQueueWindow
+from ui.ai_task_manager import AITaskManagerWindow
+from ui.ai_runner import AITaskRunnerWindow
 from app.settings import SettingsWindow
+
 
 
 class AppMenu:
@@ -40,6 +41,15 @@ class AppMenu:
         config_menu.add_command(label="Zamknij", command=self.app.on_close)
         menubar.add_cascade(label="Projekt", menu=config_menu)
 
+        # --- Edycja ---
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        edit_menu.add_command(label="Przywróć wartość", command=lambda: self._invoke_panel("restore_selected_values"))
+        edit_menu.add_separator()
+        edit_menu.add_command(label="Oznacz jako Gotowe", command=lambda: self._invoke_panel("set_selected_status", "DONE"))
+        edit_menu.add_command(label="Oznacz jako Błędne", command=lambda: self._invoke_panel("set_selected_status", "ERROR"))
+        edit_menu.add_command(label="Wyczyść flagi", command=lambda: self._invoke_panel("set_selected_status", None))
+        menubar.add_cascade(label="Edycja", menu=edit_menu)
+
         # --- Dialogi ---
         gen_menu = tk.Menu(menubar, tearoff=0)
         gen_menu.add_command(label="Dodaj nowe napisy", command=lambda: add_new_subtitles(self.app))
@@ -50,23 +60,29 @@ class AppMenu:
         gen_menu.add_command(label="Weryfikacja", command=lambda: VerificationWindow(self.app), accelerator="Ctrl+Shift+Y")
         gen_menu.add_separator()
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=lambda: delete_all_converted_audio(self.app))
-        gen_menu.add_separator()
-        gen_menu.add_command(label="Pobierz napisy", command=lambda: download_clean(self.app))
-        gen_menu.add_command(label="Pobierz napisy TTS", command=lambda: download_replace(self.app))
-        gen_menu.add_command(label="Generuj preset", command=lambda: self._open_game_reader_export())
-        
-        # --- Weryfikacja: otwiera dedykowane okno sterujące weryfikacją ---
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
 
-
+        # --- SI / Ollama ---
+        ai_menu = tk.Menu(menubar, tearoff=0)
+        ai_menu.add_command(label="Menedżer Zadań SI", command=lambda: AITaskManagerWindow(self.app))
+        ai_menu.add_command(label="Uruchom zadania SI", command=lambda: self._run_ai_global())
+        menubar.add_cascade(label="Zadania SI", menu=ai_menu)
+        
         # --- Wzorce ---
         patterns_menu = tk.Menu(menubar, tearoff=0)
+
         patterns_menu.add_command(label="Menedżer wzorców", command=lambda: open_pattern_manager(self.app), accelerator="Ctrl+R")
         patterns_menu.add_command(label="Importuj wzorce z CSV", command=lambda: self._open_pattern_io("Import"))
         patterns_menu.add_command(label="Eksportuj wzorce do CSV", command=lambda: self._open_pattern_io("Eksport"))
         patterns_menu.add_separator()
         patterns_menu.add_command(label="Usuwanie dialogów", command=lambda: self._run_audio_deleter())
         menubar.add_cascade(label="Wzorce", menu=patterns_menu)
+                
+        export_menu = tk.Menu(menubar, tearoff=0)
+        export_menu.add_command(label="Eksportuj napisy", command=lambda: download_clean(self.app))
+        export_menu.add_command(label="Eksportuj napisy TTS", command=lambda: download_replace(self.app))
+        export_menu.add_command(label="Generuj preset", command=lambda: self._open_game_reader_export())
+        menubar.add_cascade(label="Eksport", menu=export_menu)
 
         # --- Ustawienia ---
         settings_menu = tk.Menu(menubar, tearoff=0)
@@ -91,6 +107,41 @@ class AppMenu:
             return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self.app)
         if not self.app.audio_dir: 
             return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self.app)
+            messagebox.showerror("Błąd", "Najpierw zapisz/otwórz projekt.", parent=self.app)
+            return
+        SettingsWindow(self.app, self.app.torch_installed, mode='project')
+
+    def _run_ai_global(self):
+        if not self.app.lines:
+             messagebox.showwarning("Brak danych", "Brak wierszy do przetworzenia.", parent=self.app)
+             return
+        
+        # Select all lines
+        all_lines = self.app.lines
+        win = AITaskRunnerWindow(self.app, all_lines, is_global=True)
+
+    def _invoke_panel(self, method_name, *args):
+        if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, method_name):
+            method = getattr(self.app.subtitle_panel, method_name)
+            method(*args)
+        else:
+            print(f"Warning: Cannot invoke {method_name} on subtitle_panel")
+        AITaskRunnerWindow(self.app, self.app.lines, is_global=True) # Pass flag to indicate global run
+
+    def _run_ai_selected(self):
+        if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, 'get_selected_lines'):
+             selected = self.app.subtitle_panel.get_selected_lines()
+        elif self.app.selected_line_index is not None:
+             selected = [self.app.lines[self.app.selected_line_index]]
+        else:
+             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
+             return
+             
+        if not selected:
+             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
+             return
+
+        AITaskRunnerWindow(self.app, selected)
 
         win = AudioDeleterWindow(self.app, self.app.lines, str(self.app.audio_dir))
         win.wait_visibility()
@@ -110,9 +161,5 @@ class AppMenu:
             messagebox.showwarning('Brak audio', 'Nie wybrano katalogu audio w projekcie.', parent=self.app)
             return
 
-        GameReaderExportWindow(self.app)
+        self.export_window = GameReaderExportWindow(self.app)
 
-
-        
-    
-    # def open_verification_window(self):  <-- Usunięte, teraz jest w studio.py

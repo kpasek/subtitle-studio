@@ -25,11 +25,6 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         self.geometry("500x550")
         self.resizable(False, False)
 
-        # Ustawienie okna jako modalne
-        self.transient(app)
-        self.wait_visibility()
-        self.grab_set()
-
         self.grid_columnconfigure(0, weight=1)
 
         # --- SEKCJA 1: Status Plików ---
@@ -104,6 +99,15 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         # Inicjalizacja stanu
         self._check_files_status()
 
+        # Ustawienie okna jako modalne (z opóźnieniem, aby zapobiec problemom z wyświetlaniem)
+        self.after(100, self._make_modal)
+
+    def _make_modal(self):
+        self.transient(self.app)
+        self.grab_set()
+        self.lift()
+        self.focus_force()
+
     def _get_target_file_info(self, uid: str, ready_dir: Path) -> Tuple[Optional[Path], Optional[str]]:
         """Zwraca ścieżkę do przekonwertowanego pliku po uid (preferuje OGG, potem MP3) i jego rozszerzenie."""
         candidates = get_audio_candidates(uid)
@@ -119,46 +123,90 @@ class GameReaderExportWindow(ctk.CTkToplevel):
         return None, None
 
     def _check_files_status(self):
-        """Sprawdza stan plików i aktualizuje etykiety oraz przyciski."""
+        """Sprawdza stan plików i aktualizuje etykiety oraz przyciski (SZYBKO)."""
         if not self.app.audio_dir or not self.app.audio_dir.exists():
             self.lbl_gen_status.configure(text="Błąd: Brak folderu audio", text_color="red")
             self.lbl_conv_status.configure(text="---")
             return
 
-        lines: LineList = self.app.lines
-        expected_count = len(lines)
+        # Szybka informacja dla użytkownika, że liczymy
+        self.lbl_gen_status.configure(text="Liczenie plików...", text_color="orange")
+        self.update_idletasks()
 
-        # 1. Sprawdź generowanie (WAV/MP3)
-        generated_count = 0
-        for i, line in enumerate(lines):
-            uid = line.uid
-            # Sprawdź czy istnieje jakikolwiek kandydat w folderze generated
-            if any(not is_ready for p, is_ready in get_audio_candidates(uid)):
-                generated_count += 1
+        def _count_in_background():
+            try:
+                # 1. Wczytaj nazwy plików do pamięci (o niebo szybsze niż sprawdzanie exists dla każdego UID)
+                gen_dir = self.app.audio_dir
+                ready_dir = ready_dir_from_audio_dir(gen_dir)
+                
+                # Używamy os.listdir dla szybkości
+                import os
+                try:
+                    gen_files = set(os.listdir(gen_dir))
+                except OSError:
+                    gen_files = set()
+                    
+                try:
+                    ready_files = set(os.listdir(ready_dir)) if ready_dir.exists() else set()
+                except OSError:
+                    ready_files = set()
 
-        is_gen_ok = generated_count >= expected_count and expected_count > 0
-        gen_color = "green" if is_gen_ok else "orange" if generated_count > 0 else "red"
-        gen_text = f"Wygenerowano: {generated_count} / {expected_count}"
+                lines: LineList = self.app.lines
+                expected_count = len(lines)
+                
+                generated_count = 0
+                converted_count = 0
+                
+                extensions = ['wav', 'mp3', 'ogg', 'WAV', 'MP3', 'OGG']
 
-        self.lbl_gen_status.configure(text=gen_text, text_color=gen_color)
-        self.btn_generate.configure(state="disabled" if is_gen_ok else "normal")
+                for line in lines:
+                    uid = str(line.uid).strip()
+                    # Zestaw możliwych nazw bazowych (zgodnie z logic z app/io.py)
+                    bases = [f"output1 ({uid})", f"output1({uid})", uid]
+                    
+                    # Sprawdź w wygenerowanych
+                    found_gen = False
+                    for base in bases:
+                        for ext in extensions:
+                            if f"{base}.{ext}" in gen_files:
+                                found_gen = True
+                                break
+                        if found_gen: break
+                    if found_gen: generated_count += 1
+                    
+                    # Sprawdź w skonwertowanych
+                    found_ready = False
+                    for base in bases:
+                        for ext in extensions:
+                            if f"{base}.{ext}" in ready_files:
+                                found_ready = True
+                                break
+                        if found_ready: break
+                    if found_ready: converted_count += 1
 
-        # 2. Sprawdź konwersję (OGG/MP3 w ready)
-        ready_dir = ready_dir_from_audio_dir(self.app.audio_dir)
-        converted_count = 0
-        if ready_dir.exists():
-            for i, line in enumerate(lines):
-                uid = line.uid
-                # Sprawdź czy istnieje jakikolwiek kandydat w folderze ready
-                if any(is_ready for p, is_ready in get_audio_candidates(uid)):
-                    converted_count += 1
+                # Update UI in main thread
+                def _update_ui():
+                    if not self.winfo_exists(): return
+                    
+                    is_gen_ok = generated_count >= expected_count and expected_count > 0
+                    gen_color = "green" if is_gen_ok else "orange" if generated_count > 0 else "red"
+                    gen_text = f"Wygenerowano: {generated_count} / {expected_count}"
+                    self.lbl_gen_status.configure(text=gen_text, text_color=gen_color)
+                    self.btn_generate.configure(state="disabled" if is_gen_ok else "normal")
 
-        is_conv_ok = converted_count >= expected_count and expected_count > 0
-        conv_color = "green" if is_conv_ok else "orange" if converted_count > 0 else "red"
-        conv_text = f"Skonwertowano: {converted_count} / {expected_count}"
+                    is_conv_ok = converted_count >= expected_count and expected_count > 0
+                    conv_color = "green" if is_conv_ok else "orange" if converted_count > 0 else "red"
+                    conv_text = f"Skonwertowano: {converted_count} / {expected_count}"
+                    self.lbl_conv_status.configure(text=conv_text, text_color=conv_color)
+                    self.btn_convert.configure(state="disabled" if is_conv_ok else "normal")
 
-        self.lbl_conv_status.configure(text=conv_text, text_color=conv_color)
-        self.btn_convert.configure(state="disabled" if is_conv_ok else "normal")
+                self.after(0, _update_ui)
+
+            except Exception as e:
+                print(f"Error checking files: {e}")
+
+        # Start background thread
+        threading.Thread(target=_count_in_background, daemon=True).start()
 
     def _run_generation(self):
         from app.generation import enqueue_generate_all

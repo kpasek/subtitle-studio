@@ -38,6 +38,9 @@ class Line:
     
     # Flagi statusu wiersza (ręczne)
     status_flag: Optional[str] = None  # None, "DONE" (Gotowe), "ERROR" (Błędne)
+    
+    # Flagi automatyczne
+    ai_processed: bool = False  # Czy wiersz został zmieniony przez SI
 
 
     def get_text(self) -> str:
@@ -89,10 +92,12 @@ class Line:
         """
         if self.audio_duration > 0:
             txt = self.get_tts_text().strip('.?!')
-            from collections import Counter
-            stats = Counter(txt)
-            short = stats[','] + stats['-']
-            long = stats['.'] + stats['!'] + stats['?']
+            # Optimized: Avoid Counter import and object creation for simple counting
+            short = txt.count(',') + txt.count('-')
+            long = txt.count('.') + txt.count('!') + txt.count('?')
+            
             pauses = (short * 0.4) + (long * 0.6)
-            return len(txt) / (self.audio_duration - pauses) if (self.audio_duration - pauses) > 0 else 0.0
+            denom = self.audio_duration - pauses
+            return len(txt) / denom if denom > 0 else 0.0
+        return 0.0
         return 0.0

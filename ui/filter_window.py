@@ -9,7 +9,7 @@ class FilterWindow(ctk.CTkToplevel):
     def __init__(self, master, current_filters: Dict = None, apply_callback: Callable[[Dict], None] = None):
         super().__init__(master)
         self.title("Filtracja")
-        self.geometry("380x280")
+        self.geometry("600x500")
         self.transient(master)
         self.apply_callback = apply_callback
         self.current_filters = current_filters or {}
@@ -19,46 +19,60 @@ class FilterWindow(ctk.CTkToplevel):
     def _build(self):
         frm = ctk.CTkFrame(self)
         frm.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Configure columns for expansion
+        frm.grid_columnconfigure(1, weight=1)
+        frm.grid_columnconfigure(2, weight=1)
 
         # CPS
-        ctk.CTkLabel(frm, text="CPS (min/max):").grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(frm, text="CPS (min/max):").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         self.min_cps = tk.StringVar(value=str(self.current_filters.get('min_cps', '')))
         self.max_cps = tk.StringVar(value=str(self.current_filters.get('max_cps', '')))
-        ctk.CTkEntry(frm, textvariable=self.min_cps, width=60).grid(row=0, column=1, sticky="w", padx=(6,0))
-        ctk.CTkEntry(frm, textvariable=self.max_cps, width=60).grid(row=0, column=2, sticky="w", padx=(6,0))
+        ctk.CTkEntry(frm, textvariable=self.min_cps).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        ctk.CTkEntry(frm, textvariable=self.max_cps).grid(row=0, column=2, sticky="ew", padx=5, pady=5)
 
         # Text length
-        ctk.CTkLabel(frm, text="Długość tekstu (min/max):").grid(row=1, column=0, sticky="w", pady=(8,0))
+        ctk.CTkLabel(frm, text="Długość tekstu (min/max):").grid(row=1, column=0, sticky="w", padx=5, pady=5)
         self.min_len = tk.StringVar(value=str(self.current_filters.get('min_len', '')))
         self.max_len = tk.StringVar(value=str(self.current_filters.get('max_len', '')))
-        ctk.CTkEntry(frm, textvariable=self.min_len, width=60).grid(row=1, column=1, sticky="w", padx=(6,0), pady=(8,0))
-        ctk.CTkEntry(frm, textvariable=self.max_len, width=60).grid(row=1, column=2, sticky="w", padx=(6,0), pady=(8,0))
+        ctk.CTkEntry(frm, textvariable=self.min_len).grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+        ctk.CTkEntry(frm, textvariable=self.max_len).grid(row=1, column=2, sticky="ew", padx=5, pady=5)
 
         # Similarity
-        ctk.CTkLabel(frm, text="Similarity (min/max):").grid(row=2, column=0, sticky="w", pady=(8,0))
+        ctk.CTkLabel(frm, text="Similarity (min/max):").grid(row=2, column=0, sticky="w", padx=5, pady=5)
         self.min_sim = tk.StringVar(value=self._display_percentage(self.current_filters.get('min_sim')))
         self.max_sim = tk.StringVar(value=self._display_percentage(self.current_filters.get('max_sim')))
-        ctk.CTkEntry(frm, textvariable=self.min_sim, width=60).grid(row=2, column=1, sticky="w", padx=(6,0), pady=(8,0))
-        ctk.CTkEntry(frm, textvariable=self.max_sim, width=60).grid(row=2, column=2, sticky="w", padx=(6,0), pady=(8,0))
+        ctk.CTkEntry(frm, textvariable=self.min_sim).grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+        ctk.CTkEntry(frm, textvariable=self.max_sim).grid(row=2, column=2, sticky="ew", padx=5, pady=5)
 
         # Show audio dropdown
-        ctk.CTkLabel(frm, text="Pokaż: ").grid(row=3, column=0, sticky="w", pady=(8,0))
+        ctk.CTkLabel(frm, text="Pokaż: ").grid(row=3, column=0, sticky="w", padx=5, pady=5)
         self.show_option = tk.StringVar(value=self.current_filters.get('show', 'Wszystkie'))
-        ctk.CTkOptionMenu(frm, variable=self.show_option, values=["Wszystkie", "Wygenerowane", "Niewygenerowane"]).grid(row=3, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
+        ctk.CTkOptionMenu(frm, variable=self.show_option, values=["Wszystkie", "Wygenerowane", "Niewygenerowane"]).grid(row=3, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
 
         # Hallucination filter
-        ctk.CTkLabel(frm, text="Halucynacje: ").grid(row=4, column=0, sticky="w", pady=(8,0))
+        ctk.CTkLabel(frm, text="Halucynacje: ").grid(row=4, column=0, sticky="w", padx=5, pady=5)
         self.hal_option = tk.StringVar(value=self.current_filters.get('halucination', 'Wszystkie'))
-        ctk.CTkOptionMenu(frm, variable=self.hal_option, values=["Wszystkie", "Tylko halucynacje", "Bez halucynacji", "Nieweryfikowane"]).grid(row=4, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
+        ctk.CTkOptionMenu(frm, variable=self.hal_option, values=["Wszystkie", "Tylko halucynacje", "Bez halucynacji", "Nieweryfikowane"]).grid(row=4, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
 
         # Status filter
-        ctk.CTkLabel(frm, text="Status: ").grid(row=5, column=0, sticky="w", pady=(8,0))
+        ctk.CTkLabel(frm, text="Status: ").grid(row=5, column=0, sticky="w", padx=5, pady=5)
         self.status_option = tk.StringVar(value=self.current_filters.get('status', 'Wszystkie'))
-        ctk.CTkOptionMenu(frm, variable=self.status_option, values=["Wszystkie", "Gotowe", "Błędne", "Bez flagi"]).grid(row=5, column=1, columnspan=2, sticky="w", padx=(6,0), pady=(8,0))
+        ctk.CTkOptionMenu(frm, variable=self.status_option, values=["Wszystkie", "Gotowe", "Błędne", "Bez flagi"]).grid(row=5, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
+
+        # SI Status filter
+        ctk.CTkLabel(frm, text=" Przetworzone: ").grid(row=6, column=0, sticky="w", padx=5, pady=5)
+        self.ai_option = tk.StringVar(value=self.current_filters.get('ai_status', 'Wszystkie'))
+        ctk.CTkOptionMenu(frm, variable=self.ai_option, values=["Wszystkie", "Tak", "Nie"]).grid(row=6, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
+
+        # Diff Status filter (Text != TTS)
+        ctk.CTkLabel(frm, text="Zmiany (Text vs TTS): ").grid(row=7, column=0, sticky="w", padx=5, pady=5)
+        self.diff_option = tk.StringVar(value=self.current_filters.get('diff_status', 'Wszystkie'))
+        ctk.CTkOptionMenu(frm, variable=self.diff_option, values=["Wszystkie", "Tylko zmienione", "Bez zmian"]).grid(row=7, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
 
         # Buttons
         btn_frame = ctk.CTkFrame(frm, fg_color="transparent")
-        btn_frame.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(12,0))
+        btn_frame.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12,0))
         ctk.CTkButton(btn_frame, text="Wyczyść", command=self._on_clear).pack(side="left", padx=6)
         ctk.CTkButton(btn_frame, text="Zastosuj", command=self._on_apply).pack(side="right", padx=6)
 
@@ -91,6 +105,14 @@ class FilterWindow(ctk.CTkToplevel):
         status_v = self.status_option.get()
         if status_v != "Wszystkie":
             filters['status'] = status_v
+        
+        ai_v = self.ai_option.get()
+        if ai_v != "Wszystkie":
+            filters['ai_status'] = ai_v
+            
+        diff_v = self.diff_option.get()
+        if diff_v != "Wszystkie":
+            filters['diff_status'] = diff_v
 
         if callable(self.apply_callback):
             self.apply_callback(filters)

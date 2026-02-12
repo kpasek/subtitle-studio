@@ -148,8 +148,14 @@ def _normalize_text_fields(line: Line) -> Tuple[str, str]:
     text_value = line.text or ''
     text_for_csv = text_value if text_value and text_value != original else ''
     base_text = text_for_csv or original
-    tts_value = line.tts_text or ''
-    tts_for_csv = tts_value if tts_value and tts_value != base_text else ''
+    
+    # Obsługa pustego tts_text
+    if line.tts_text == "":
+         tts_for_csv = "<SILENCE>" if base_text != "" else "" 
+    else:
+        tts_value = line.tts_text or ''
+        tts_for_csv = tts_value if tts_value and tts_value != base_text else ''
+        
     return text_for_csv, tts_for_csv
 
 
@@ -186,13 +192,23 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                 dur = round(float(row.get('audio_duration') or 0), 3)
             except Exception:
                 dur = 0.0
+            
+            # Load TTS Text handling Silence
+            tts_raw = row.get('tts_text', '') or ''
+            if tts_raw == '<SILENCE>':
+                tts_final = ""
+            elif tts_raw == '':
+                tts_final = None
+            else:
+                tts_final = tts_raw
+
             transcribed = row.get('audio_transcribed_text', '') or ''
             audio_filename = row.get('audio_filename', '') or ''
             uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
             out.append(Line(
                 original_text=row.get('original_text', '') or '',
                 text=row.get('text', '') or None,
-                tts_text=row.get('tts_text', '') or None,
+                tts_text=tts_final,
                 audio_duration=dur,
                 audio_filename=audio_filename,
                 audio_similarity=float(row.get('audio_similarity') or 0.0),
@@ -200,6 +216,7 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                 audio_transcribed_text=transcribed,
                 audio_hallucination=row.get('audio_hallucination', 'PENDING'),
                 status_flag=row.get('status_flag', None),
+                ai_processed=str(row.get('ai_processed', 'False')).lower() == 'true',
                 uid=uid
             ))
 
@@ -245,7 +262,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                 fieldnames = [
                     'original_text', 'text', 'tts_text', 'audio_duration',
                     'audio_similarity', 'audio_format', 'audio_filename',
-                    'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'uid'
+                    'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed', 'uid'
                 ]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
                 writer.writeheader()
@@ -266,6 +283,7 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                             'audio_transcribed_text': item.audio_transcribed_text,
                             'audio_hallucination': item.audio_hallucination,
                             'status_flag': item.status_flag,
+                            'ai_processed': str(item.ai_processed),
                             'uid': _cleanup_uid_field(item.uid)  
                         }
                         if not row_dict['uid']:
@@ -342,7 +360,9 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_format': line.audio_format,
                 'audio_filename': line.audio_filename,
                 'audio_transcribed_text': line.audio_transcribed_text,
+                'audio_hallucination': line.audio_hallucination,
                 'status_flag': getattr(line, 'status_flag', None),
+                'ai_processed': str(getattr(line, 'ai_processed', False)),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -367,6 +387,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_transcribed_text': line.audio_transcribed_text,
                 'audio_hallucination': line.audio_hallucination,
                 'status_flag': getattr(line, 'status_flag', None),
+                'ai_processed': str(getattr(line, 'ai_processed', False)),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -378,11 +399,12 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
     fieldnames = [
         'original_text', 'text', 'tts_text', 'audio_duration',
         'audio_similarity', 'audio_format', 'audio_filename',
-        'audio_transcribed_text', 'audio_hallucination', 'status_flagename',
-        'audio_transcribed_text', 'audio_hallucination', 'uid'
+        'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed',
+        'uid'
     ]
     
     try:
+
         temp_path = p.with_suffix(p.suffix + ".upd.tmp")
         try:
             with open(temp_path, 'w', encoding='utf-8', newline='') as f:
@@ -407,3 +429,57 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
 def update_line_in_csv(line: Line, csv_path: Optional[str] = None) -> bool:
     """Aktualizuje pojedynczą linię w pliku CSV (alias dla update_lines_in_csv)."""
     return update_lines_in_csv([line], csv_path) > 0
+
+
+def delete_lines_from_csv(uids_to_delete: List[str], csv_path: Optional[str] = None) -> int:
+    """
+    Usuwa wiersze z pliku CSV na podstawie listy UID.
+    """
+    global _csv_cache_data, _csv_cache_mtime
+    path = _get_effective_csv_path(csv_path)
+    if not path:
+        return 0
+        
+    p = Path(path)
+    if not p.exists():
+        return 0
+
+    _ensure_csv_cache(str(p))
+    
+    uid_set = set(str(uid) for uid in uids_to_delete)
+    
+    initial_count = len(_csv_cache_data)
+    new_cache = [row for row in _csv_cache_data if row.get('uid', '') not in uid_set]
+    
+    deleted_count = initial_count - len(new_cache)
+    if deleted_count == 0:
+        return 0
+
+    _csv_cache_data = new_cache
+    
+    fieldnames = [
+        'original_text', 'text', 'tts_text', 'audio_duration',
+        'audio_similarity', 'audio_format', 'audio_filename',
+        'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed',
+        'uid'
+    ]
+    
+    try:
+        temp_path = p.with_suffix(p.suffix + ".del.tmp")
+        try:
+            with open(temp_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+                writer.writeheader()
+                writer.writerows(new_cache)
+            temp_path.replace(p)
+            
+            _csv_cache_mtime = p.stat().st_mtime
+        finally:
+            if temp_path.exists():
+                try: temp_path.unlink()
+                except: pass
+                
+        return deleted_count
+    except Exception as e:
+        print(f"[DELETE_CSV_ERR] {e}")
+        return 0

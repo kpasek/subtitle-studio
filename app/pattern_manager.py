@@ -2,7 +2,7 @@ import re
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk
-from typing import List, TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional
 
 from app.entity import PatternItem
 from app.patterns import apply_processing

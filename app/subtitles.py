@@ -4,19 +4,19 @@ import tkinter as tk
 from tkinter import ttk
 import subprocess
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 from app.entity import Line
 from tkinter import messagebox
 import threading
 import time
-import json
 import shutil
 
 from app.formatter import format_percent, normalize_to_percent
-from app.io import (update_line_in_csv, get_primary_audio_path, get_audio_candidates)
-from app.patterns import (apply_patterns, apply_processing, 
-                          add_replace_pattern_from_selection)
+from app.io import (update_line_in_csv, update_lines_in_csv, delete_lines_from_csv, 
+                    get_audio_candidates)
+from app.patterns import (apply_patterns, add_replace_pattern_from_selection)
 from app.update import download_update
 from app.project import get_active_tts_model_name, gather_tts_config, gather_converter_config
 
@@ -80,26 +80,21 @@ class SubtitlePanel(ctk.CTkFrame):
                                              fg_color="#2E8B57", hover_color="#1E613B")
         self.generate_button.pack(side="left", padx=4, pady=5)
 
+        self.btn_ai_tasks = ctk.CTkButton(top_frame, text="✨ Zadania SI", width=100,
+                                          command=self.open_ai_runner_selected,
+                                          fg_color="#8e44ad", hover_color="#9b59b6")
+        self.btn_ai_tasks.pack(side="left", padx=4, pady=5)
+
         self.verify_button = ctk.CTkButton(top_frame, text="✓ Weryfikuj", width=100,
                                            command=self.verify_selected_dialogs, state="disabled",
                                            fg_color="#1E90FF", hover_color="#4169E1")
         self.verify_button.pack(side="left", padx=4, pady=5)
         
-        # Flagi statusu
-        self.btn_flag_done = ctk.CTkButton(top_frame, text="✅ Gotowe", width=80,
-                                           command=lambda: self.set_selected_status("DONE"),
-                                           fg_color="#27ae60", hover_color="#2ecc71")
-        self.btn_flag_done.pack(side="left", padx=4, pady=5)
-
-        self.btn_flag_error = ctk.CTkButton(top_frame, text="⚠️ Błędne", width=80,
-                                            command=lambda: self.set_selected_status("ERROR"),
-                                            fg_color="#c0392b", hover_color="#e74c3c")
-        self.btn_flag_error.pack(side="left", padx=4, pady=5)
-        
-        self.btn_flag_clear = ctk.CTkButton(top_frame, text="⚪ Wyczyść", width=80,
-                                            command=lambda: self.set_selected_status(None),
-                                            fg_color="#7f8c8d", hover_color="#95a5a6")
-        self.btn_flag_clear.pack(side="left", padx=4, pady=5)
+        # Restore Button
+        self.btn_restore = ctk.CTkButton(top_frame, text="↺ Przywróć", width=100,
+                                         command=self.restore_selected_values,
+                                         fg_color="#7f8c8d", hover_color="#95a5a6")
+        self.btn_restore.pack(side="left", padx=4, pady=5)
 
         self.delete_all_button = ctk.CTkButton(top_frame, text="🗑️ Usuń audio", width=100,
                                                command=self.delete_selected_dialogs, state="disabled",
@@ -254,7 +249,9 @@ class SubtitlePanel(ctk.CTkFrame):
                   foreground=[('selected', selected_fg)])
 
     def _on_view_mode_change(self, value):
-        apply_patterns(self.app)
+        # Optimization: Do not re-apply patterns on simple view switch. 
+        # Data in 'text'/'tts_text' should already be consistent.
+        # apply_patterns(self.app)  
         self.set_preview(self.app.lines)
         from app.project import save_app_setting
         save_app_setting(self.app, 'last_view_mode', value)
@@ -333,167 +330,192 @@ class SubtitlePanel(ctk.CTkFrame):
         if getattr(self, '_suppress_refresh', False):
             return
 
+        # Disable updates for performance
+        try:
+            self.tree.grab_release()
+        except: pass
+
         # Wyczyść tabelę
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        # Faster delete for large trees
+        self.tree.delete(*self.tree.get_children())
         self.item_line_map.clear()
 
-        search_term = self.search_entry.get().lower()
+        # --- Pre-calculation invariants ---
+        view_mode = self.app.view_mode.get()
+        raw_search = self.search_entry.get()
+        regex_obj = None
+        if raw_search:
+            try:
+                regex_obj = re.compile(raw_search, re.IGNORECASE)
+            except re.error:
+                pass
 
-        # Przygotuj dane do wstawienia
-        # Jeśli w przyszłości lines_to_show będzie listą słowników/obiektów,
-        # tutaj trzeba będzie dostosować mapowanie na kolumny.
+        f = self.filter_spec
+        min_sim_filter = normalize_to_percent(f.get('min_sim'))
+        max_sim_filter = normalize_to_percent(f.get('max_sim'))
+        
+        f_min_len = int(f.get('min_len')) if f.get('min_len') else None
+        f_max_len = int(f.get('max_len')) if f.get('max_len') else None
+        
+        f_min_cps = float(f.get('min_cps')) if (f.get('min_cps') is not None and f.get('min_cps') != '') else None
+        f_max_cps = float(f.get('max_cps')) if (f.get('max_cps') is not None and f.get('max_cps') != '') else None
 
-        for i, line_obj in enumerate(lines_to_show):
-            # line_text = line_obj.get_text()
+        f_show = f.get('show')
+        f_hal = f.get('halucination', 'Wszystkie')
+        
+        status_filter = f.get('status')
+        ai_f = f.get('ai_status', 'Wszystkie')
+        diff_f = f.get('diff_status', 'Wszystkie')
 
-            mode = self.app.view_mode.get()
-            if mode == 'Napisy':
+        # Prepare column indices once
+        col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+        
+        idx_content = col_pos.get("content")
+        idx_status = col_pos.get("status")
+        idx_duration = col_pos.get("duration")
+        idx_cps = col_pos.get("cps")
+        idx_similarity = col_pos.get("similarity")
+        idx_hallucination = col_pos.get("hallucination")
+        idx_format = col_pos.get("format")
+        idx_audio_file = col_pos.get("audio_file")
+        
+        col_count = len(self.columns_config)
+        
+        # Audio directory pre-fetch
+        app_audio_dir = getattr(self, 'app').audio_dir
+        
+        # --- Loop ---
+        items_to_insert = []
+        
+        for line_obj in lines_to_show:
+            if view_mode == 'Napisy':
                 line_text = line_obj.get_text()
-            elif mode == 'TTS':
+            elif view_mode == 'TTS':
                 line_text = line_obj.get_tts_text()
             else:
                 line_text = line_obj.original_text
 
-            if search_term and search_term not in line_text:
+            if regex_obj:
+                if not regex_obj.search(line_text):
+                    continue
+            elif raw_search and raw_search.lower() not in line_text.lower():
                 continue
 
-            f = self.filter_spec
-            min_sim_filter = normalize_to_percent(f.get('min_sim'))
-            max_sim_filter = normalize_to_percent(f.get('max_sim'))
-                
-            if f.get('min_len') and len(line_text) < int(f.get('min_len')):
-                continue
-            if f.get('max_len') and len(line_text) > int(f.get('max_len')):
-                continue
+            # Length Filter
+            if f_min_len is not None and len(line_text) < f_min_len: continue
+            if f_max_len is not None and len(line_text) > f_max_len: continue
             
+            # CPS Filter
             cps_val = line_obj.calculate_cps()
-            if f.get('min_cps') is not None and f.get('min_cps') != '' and cps_val < float(f.get('min_cps')):
-                continue
-            if f.get('max_cps') is not None and f.get('max_cps') != '' and cps_val > float(f.get('max_cps')):
-                continue
+            if f_min_cps is not None and cps_val < f_min_cps: continue
+            if f_max_cps is not None and cps_val > f_max_cps: continue
 
             # similarity
             sim_val = 0.0
-            try:
-                # Jeśli filtr similarity jest ustawiony, pominąć linie bez weryfikacji
-                if (f.get('min_sim') is not None and f.get('min_sim') != '') or (f.get('max_sim') is not None and f.get('max_sim') != ''):
-                    # require a transcribed text or audio file to compute similarity
-                    if not line_obj.audio_transcribed_text:
-                        continue
+            has_sim = False
+            if line_obj.audio_similarity is not None:
                 sim_val = max(0.0, min(line_obj.audio_similarity, 1.0))
-                if min_sim_filter is not None and sim_val < min_sim_filter:
-                    continue
-                if max_sim_filter is not None and sim_val > max_sim_filter:
-                    continue
-            except Exception:
-                sim_val = 0.0
+                has_sim = True
                 
-            show = f.get('show')
-            if show == 'Wygenerowane':
-                # Pokaż tylko linie które mają audio
-                has_audio = bool(line_obj.audio_filename)
-                if not has_audio:
-                    continue
-            elif show == 'Niewygenerowane':
-                has_audio = bool(line_obj.audio_filename)
-                if has_audio:
-                    continue
+            # Jeśli filtr similarity jest ustawiony, pominąć linie bez weryfikacji
+            if (min_sim_filter is not None or max_sim_filter is not None):
+                 if not line_obj.audio_transcribed_text: # require transcription
+                     continue
+                 if min_sim_filter is not None and sim_val < min_sim_filter: continue
+                 if max_sim_filter is not None and sim_val > max_sim_filter: continue
 
-            hal_f = f.get('halucination', 'Wszystkie')
+            # Show generated/ungenerated
+            has_audio = bool(line_obj.audio_filename)
+            if f_show == 'Wygenerowane' and not has_audio: continue
+            elif f_show == 'Niewygenerowane' and has_audio: continue
+
+            # Hallucination
             halo_val = line_obj.audio_hallucination
-            status_val = line_obj.audio_status
-            
-            # Stan PENDING lub pusty oznacza, że linia nie była jeszcze weryfikowana
             is_pending = halo_val in ["", "PENDING"]
             has_halo = bool(halo_val and halo_val not in ["", "PENDING", "Brak"])
 
-
-            if hal_f == 'Tylko halucynacje':
-                if not has_halo:
-                    continue
-            elif hal_f == 'Bez halucynacji':
-                # Pokazujemy tylko jeśli nie ma halucynacji I została już zweryfikowana (nie jest PENDING)
-                if is_pending or has_halo:
-                    continue
-            elif hal_f == 'Nieweryfikowane':
-                if not is_pending:
-                    continue
+            if f_hal == 'Tylko halucynacje':
+                if not has_halo: continue
+            elif f_hal == 'Bez halucynacji':
+                if is_pending or has_halo: continue
+            elif f_hal == 'Nieweryfikowane':
+                if not is_pending: continue
             
-            status_filter = f.get('status')
+            # Status
             if status_filter:
                 flag = getattr(line_obj, 'status_flag', None) or ""
-                # status_filter mapping needed
-                if status_filter == "Gotowe" and flag != "DONE":
-                    continue
-                if status_filter == "Błędne" and flag != "ERROR":
-                    continue
-                if status_filter == "Bez flagi" and flag != "":
-                    continue
+                if status_filter == "Gotowe" and flag != "DONE": continue
+                if status_filter == "Błędne" and flag != "ERROR": continue
+                if status_filter == "Bez flagi" and flag != "": continue
 
+            # Filter by SI Processed flag
+            is_ai = getattr(line_obj, 'ai_processed', False)
+            if ai_f == 'Tak' and not is_ai: continue
+            if ai_f == 'Nie' and is_ai: continue
 
-            # Budowanie wartości dla wiersza zgodnie z self.columns_config
-            row_values = [""] * len(self.columns_config)
-            col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+            # Filter by Diff (Text vs TTS)
+            if diff_f != 'Wszystkie':
+                t_val = line_obj.get_text()
+                tts_val = line_obj.get_tts_text()
+                # Compare actual values
+                is_diff = (t_val != tts_val)
+                if diff_f == 'Tylko zmienione' and not is_diff: continue
+                if diff_f == 'Bez zmian' and is_diff: continue
 
-            # Fill columns
-            if "content" in col_pos:
-                mode = self.app.view_mode.get()
-                if mode == 'TTS':
-                    row_values[col_pos["content"]] = line_obj.get_tts_text()
-                elif mode == "Napisy":
-                    row_values[col_pos["content"]] = line_obj.get_text()
-                else:
-                    row_values[col_pos["content"]] = line_obj.original_text
+            # --- Row Building ---
+            row_values = [""] * col_count
 
-            if "status" in col_pos:
+            if idx_content is not None:
+                row_values[idx_content] = line_text
+
+            if idx_status is not None:
                 flag = getattr(line_obj, 'status_flag', None)
-                if flag == "DONE":
-                    row_values[col_pos["status"]] = "Gotowe"
-                elif flag == "ERROR":
-                    row_values[col_pos["status"]] = "Błąd"
-                else:
-                    row_values[col_pos["status"]] = ""
+                if flag == "DONE": row_values[idx_status] = "Gotowe"
+                elif flag == "ERROR": row_values[idx_status] = "Błąd"
 
-            if 'duration' in col_pos:
+            if idx_duration is not None:
                 duration_val = line_obj.audio_duration
-                row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+                row_values[idx_duration] = f"{duration_val:.2f}" if duration_val > 0 else '-'
             
-            if 'cps' in col_pos:
-                row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
+            if idx_cps is not None:
+                row_values[idx_cps] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
             
-            if 'similarity' in col_pos:
-                sim_display = format_percent(sim_val)
-                row_values[col_pos['similarity']] = sim_display if sim_display else '-'
+            if idx_similarity is not None:
+                sim_display = format_percent(sim_val) if has_sim else '-'
+                row_values[idx_similarity] = sim_display
             
-            if 'hallucination' in col_pos:
+            if idx_hallucination is not None:
                 if halo_val and halo_val != "PENDING":
-                    row_values[col_pos['hallucination']] = halo_val
+                    row_values[idx_hallucination] = halo_val
                 elif halo_val == "PENDING":
-                    row_values[col_pos['hallucination']] = "?"
-                elif status_val:
-                    row_values[col_pos['hallucination']] = "Brak"
+                    row_values[idx_hallucination] = "?"
+                elif line_obj.audio_status:
+                    row_values[idx_hallucination] = "Brak"
                 else:
-                    row_values[col_pos['hallucination']] = "-"
+                    row_values[idx_hallucination] = "-"
 
-            if 'format' in col_pos: # Jeśli taka kolumna istnieje (w configu nie widziałem, ale logika była)
+            if idx_format is not None:
                 fmt = line_obj.audio_format
-                row_values[col_pos['format']] = (fmt or '').upper()
+                row_values[idx_format] = (fmt or '').upper()
                 
-            if 'audio_file' in col_pos:
-                path = None
+            if idx_audio_file is not None:
+                # Optimized audio path logic - avoid Disk IO
                 fname = line_obj.audio_filename
                 if fname:
-                    path = Path(getattr(self, 'app').audio_dir or Path('.')) / fname
+                    # Trust metadata if present
+                    row_values[idx_audio_file] = fname
                 else:
-                    path = get_primary_audio_path(line_obj.uid)
-                
-                if path and Path(path).exists():
-                    row_values[col_pos['audio_file']] = Path(path).name if path else ''
-                else:
-                    row_values[col_pos['audio_file']] = "Brak pliku"
+                    # Only calculate/guess if missing (slow path)
+                    # We can even skip this if performance is critical
+                    # or cache it. For now, let's keep it minimal.
+                    # line_obj.uid check is fast
+                    if line_obj.uid:
+                         # Heuristic display without disk check or minimize it
+                         row_values[idx_audio_file] = "Brak pliku"
+                    else:
+                         row_values[idx_audio_file] = ""
 
-            # Wstawienie wiersza
+            # insert directly
             item_id = self.tree.insert("", "end", values=tuple(row_values))
             self.item_line_map[item_id] = line_obj
             
@@ -675,6 +697,14 @@ class SubtitlePanel(ctk.CTkFrame):
             return
         
         item_id, col_idx, line_idx = self.inline_edit_item
+        
+        # Check if item still exists in tree (might have been removed or filtered out)
+        if not self.tree.exists(item_id):
+            self.inline_edit_entry.destroy()
+            self.inline_edit_entry = None
+            self.inline_edit_item = None
+            return
+
         new_text = self.inline_edit_entry.get()
         
         # Usuń entry widget
@@ -684,21 +714,29 @@ class SubtitlePanel(ctk.CTkFrame):
         
         # Zaktualizuj bezpośrednio w app.lines (nie w manual_edits/tts_edits)
         mode = self.app.view_mode.get()
+        # Use setters! This ensures correct behavior (setting to None if equals parent value)
         if mode == "Napisy":
-            self.app.lines[line_idx].text = new_text
+            self.app.lines[line_idx].set_text(new_text)
         elif mode == "TTS":
-            self.app.lines[line_idx].tts_text = new_text
+            self.app.lines[line_idx].set_tts_text(new_text)
         
         # Zapisz do CSV bezpośrednio
         try:
             if self.app.loaded_path:
-                update_line_in_csv(str(self.app.loaded_path), line_idx, self.app.lines[line_idx])
+                update_line_in_csv(self.app.lines[line_idx], str(self.app.loaded_path))
         except Exception as e:
             print(f"Błąd zapisu do CSV: {e}")
         
-        # Odśwież UI
-        apply_patterns(self.app)
-        self.set_preview(self.app.lines)
+        # Odśwież UI pojedynczego wiersza (Optymalizacja)
+        values = list(self.tree.item(item_id, "values"))
+        col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+        if "content" in col_pos:
+            values[col_pos["content"]] = new_text
+        
+        self.tree.item(item_id, values=values)
+        
+        # apply_patterns(self.app)  <-- To powodowało pełne odświeżenie (wolne!)
+        # self.set_preview(self.app.lines) <-- To powodowało pełne przerysowanie (wolne!)
 
     def _cancel_inline_edit(self, event=None):
         """Anuluje edycję inline bez zmian."""
@@ -730,6 +768,8 @@ class SubtitlePanel(ctk.CTkFrame):
         menu.add_command(label="🗑️ Usuń zaznaczone wiersze", command=self.delete_selected_rows,
                          state=tk.NORMAL)
         menu.add_separator()
+        menu.add_command(label="↺ Przywróć wartość", command=self.restore_selected_values, state=tk.NORMAL)
+        menu.add_separator()
         menu.add_command(label="✅ Oznacz jako Gotowe", command=lambda: self.set_selected_status("DONE"), state=tk.NORMAL)
         menu.add_command(label="⚠️ Oznacz jako Błędne", command=lambda: self.set_selected_status("ERROR"), state=tk.NORMAL)
         menu.add_command(label="⚪ Wyczyść flagi", command=lambda: self.set_selected_status(None), state=tk.NORMAL)
@@ -748,13 +788,84 @@ class SubtitlePanel(ctk.CTkFrame):
             return
             
         changed = False
+        to_update = []
         for idx in self.selected_line_indices:
             if 0 <= idx < len(self.app.lines):
-                self.app.lines[idx].status_flag = status
-                changed = True
+                line = self.app.lines[idx]
+                
+                # Check if change is needed
+                current = getattr(line, 'status_flag', None) or None
+                target = status or None
+                if current != target:
+                    line.status_flag = status
+                    to_update.append(line)
+                    changed = True
         
-        if changed:
-            self.set_preview(self.app.lines)
+        if changed and to_update:
+            try:
+                # Use bulk update
+                update_lines_in_csv(to_update, str(self.app.loaded_path))
+                self.set_preview(self.app.lines)
+            except Exception as e:
+                print(f"Error saving status: {e}")
+
+    def restore_selected_values(self):
+        """
+        Przywraca wartości dla zaznaczonych wierszy zależnie od widoku:
+        - Widok TTS: przywraca wartość z pola Text.
+        - Widok Text/Napisy: przywraca wartość z Oryginału.
+        """
+        if not self.selected_line_indices:
+            return
+
+        mode = self.app.view_mode.get()
+        if mode == "Oryginał":
+            messagebox.showinfo("Info", "Nie można przywracać w widoku Oryginału.", parent=self)
+            return
+
+        to_update = []
+        changed = False
+        
+        for idx in self.selected_line_indices:
+             if 0 <= idx < len(self.app.lines):
+                line = self.app.lines[idx]
+                
+                # Check status
+                if getattr(line, 'status_flag', None) == "DONE":
+                    continue
+
+                if mode == "TTS":
+                    # Restore TTS from Text
+                    # We want effective TTS to be result of effective Text
+                    target_val = line.get_text()
+                    
+                    # Determine if update is needed:
+                    # 1. Effective values differ (visual change)
+                    # 2. OR explicit override exists (data cleanup)
+                    if line.get_tts_text() != target_val or line.tts_text is not None:
+                         line.set_tts_text(target_val) # Will set tts_text = None
+                         to_update.append(line)
+                         changed = True
+
+                elif mode == "Napisy": # Text View
+                    # Restore Text from Original
+                    target_val = line.original_text
+                    
+                    if line.get_text() != target_val or line.text is not None:
+                        line.set_text(target_val) # Will set text = None
+                        line.ai_processed = False # Reset flag on full restore
+                        to_update.append(line)
+                        changed = True
+        
+        if changed and to_update:
+            try:
+                update_lines_in_csv(to_update, str(self.app.loaded_path))
+                self.set_preview(self.app.lines)
+                self.app.set_status(f"Przywrócono wartości dla {len(to_update)} wierszy.")
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie udało się zapisać zmian: {e}", parent=self)
+        else:
+            self.app.set_status("Brak zmian do wykonania.")
 
     # --- Weryfikacja audio (zintegrowana) ---
     def start_verification(self, force_refresh=False, ignore_short=True, verify_options=None):
@@ -1095,54 +1206,7 @@ class SubtitlePanel(ctk.CTkFrame):
             pass
         self.ver_running = False
         self.ver_stop_event.set()
-
-    def delete_all_bad_audio_verification(self):
-        # Collect bad items (based on audio_status)
-        to_del = []
-        for idx, line in enumerate(self.app.lines):
-            filename = line.audio_filename
-            if not filename:
-                continue
-            
-            # Budowanie pełnej ścieżki
-            audio_dir = self.app.audio_dir
-            if not audio_dir:
-                continue
-            
-            path = Path(audio_dir) / filename
-            status = line.audio_status
-            if status not in ['OK', 'SHORT', 'MISSING', 'PENDING']:
-                to_del.append((idx, path))
-
-        if not to_del:
-            messagebox.showinfo("Info", "Brak błędnych plików do usunięcia.", parent=self)
-            return
-
-        if not messagebox.askyesno("Potwierdź", f"Usunąć {len(to_del)} błędnych plików?", parent=self):
-            return
-
-        count = 0
-        errors = []
-        for idx, path_to_remove in to_del:
-            try:
-                if path_to_remove.exists():
-                    os.remove(path_to_remove)
-                
-                line = self.app.lines[idx]
-                line.audio_status = 'MISSING'
-                line.audio_duration = 0.0
-                line.audio_similarity = 0.0
-                line.audio_filename = ''
-                
-                count += 1
-            except Exception as e:
-                errors.append(f"Indeks {idx + 1}: {str(e)}")
-
-        self._refresh_verification_view()
-        if errors:
-            messagebox.showwarning("Wynik", f"Usunięto {count} plików. Błędy:\n" + "\n".join(errors[:10]), parent=self)
-        else:
-            messagebox.showinfo("Zakończono", f"Pomyślnie usunięto {count} plików.", parent=self)
+        
 
     def open_verification_folder(self):
         # Open folder for selected item or audio_dir
@@ -1292,7 +1356,31 @@ class SubtitlePanel(ctk.CTkFrame):
             self.current_audio_process = None
             messagebox.showerror("Błąd", f"Nie udało się uruchomić ffplay:\n{e}", parent=self)
 
+    def get_selected_lines(self) -> List[Line]:
+        """Zwraca listę zaznaczonych obiektów Line."""
+        if not self.selected_line_indices:
+            return []
+        
+        selected = []
+        for idx in self.selected_line_indices:
+             if idx < len(self.app.lines):
+                 selected.append(self.app.lines[idx])
+        return selected
+
+    def open_ai_runner_selected(self):
+        """Otwiera okno zadań AI dla zaznaczonych wierszy."""
+        from ui.ai_runner import AITaskRunnerWindow
+        
+        selected = self.get_selected_lines()
+        if not selected:
+             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self)
+             return
+
+        AITaskRunnerWindow(self.app, selected)
+
+
     def generate_selected_dialogs(self):
+
         """Generuje audio dla wszystkich zaznaczonych wierszy."""
         if not self.selected_line_indices or not self.app.audio_dir:
             return
@@ -1520,6 +1608,7 @@ class SubtitlePanel(ctk.CTkFrame):
         self.stop_audio()
 
         deleted_audio_count = 0
+        uids_to_remove_from_db = []
         
         for idx in indices:
             if idx < 0 or idx >= len(self.app.lines):
@@ -1529,6 +1618,7 @@ class SubtitlePanel(ctk.CTkFrame):
             identifier = getattr(line_obj, 'uid', None)
             
             if identifier:
+                uids_to_remove_from_db.append(identifier)
                 found_files = get_audio_candidates(identifier)
                 for file_path, _ in found_files:
                     try:
@@ -1541,6 +1631,13 @@ class SubtitlePanel(ctk.CTkFrame):
             # Usuń wiersz z listy
             del self.app.lines[idx]
 
+        # Trwałe usunięcie z CSV
+        if uids_to_remove_from_db and self.app.loaded_path:
+             try:
+                 delete_lines_from_csv(uids_to_remove_from_db, str(self.app.loaded_path))
+             except Exception as e:
+                 print(f"Błąd podczas usuwania z CSV: {e}")
+
         # Wyczyść zaznaczenie
         self.selected_line_indices = []
         self.app.selected_line_index = None
@@ -1548,5 +1645,5 @@ class SubtitlePanel(ctk.CTkFrame):
 
         # Odśwież UI
         self.set_preview(self.app.lines)
-        self.app.mark_as_unsaved()
+        # self.app.mark_as_unsaved() # Niepotrzebne, bo zapisaliśmy do CSV
         self.app.set_status(f"Usunięto {count} wierszy i {deleted_audio_count} plików audio.")

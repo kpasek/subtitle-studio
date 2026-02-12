@@ -12,7 +12,7 @@ class RecentProjectsWindow(ctk.CTkToplevel):
     def __init__(self, parent, recent_paths: list[str], on_open_callback, on_delete_callback, on_clear_callback):
         super().__init__(parent)
         self.title("Ostatnie projekty")
-        self.geometry("600x400")
+        self.geometry("700500")
         self.transient(parent)
         self.wait_visibility()
         self.grab_set()
@@ -86,8 +86,6 @@ class RecentProjectsWindow(ctk.CTkToplevel):
 
     def _delete_entry(self, path):
         self.on_delete(path)
-        # Callback zaktualizował listę w app, ale musimy odświeżyć ją tutaj lokalnie
-        # (Zakładamy, że on_delete modyfikuje listę w studio.py, ale my operujemy na self.recent_paths)
         if path in self.recent_paths:
             self.recent_paths.remove(path)
         self._refresh_list()

@@ -231,7 +231,10 @@ def open_project(app, path: Optional[str] = None):
         app.save_app_setting('last_project', path)
         app.has_unsaved_changes = False
         if app.lbl_filename:
-            app.lbl_filename.configure(text=os.path.basename(path))
+            if app.loaded_path:
+                app.lbl_filename.configure(text=f"Plik: {app.loaded_path.name}")
+            else:
+                app.lbl_filename.configure(text="Brak wczytanego pliku")
 
         app.subtitle_panel.update_audio_buttons_state()
 
@@ -285,6 +288,7 @@ def set_project_config(app, param, value):
         app.project_config = {}
     if app.project_config.get(param) != value:
         app.project_config[param] = value
+        # Ensure that if we set subtitle_path, loaded_path is also consistent or we trust the caller updates loaded_path
         app.mark_as_unsaved()
         if app.current_project_path:
             save_project(app)

@@ -93,7 +93,8 @@ def apply_replace_patterns(lines: List[Line], patterns: List[PatternItem]) -> Li
     Returns:
         A new list of processed lines.
     """
-    compiled = [compile_pattern(p) for p in patterns]
+    all_enabled = [p for p in patterns if p.enabled]
+    compiled = [compile_pattern(p) for p in all_enabled]
 
     for line in lines:
         # Skip DONE lines
@@ -101,7 +102,7 @@ def apply_replace_patterns(lines: List[Line], patterns: List[PatternItem]) -> Li
             continue
 
         s = line.get_tts_text()
-        for i, pat in enumerate(patterns):
+        for i, pat in enumerate(all_enabled):
             s = compiled[i].sub(pat.replace, s)
         line.set_tts_text(s)
     return lines

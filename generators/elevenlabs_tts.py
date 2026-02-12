@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional
 from .tts_base import TTSBase
 from app.utils import is_installed
 
@@ -48,14 +48,6 @@ class ElevenLabsTTS(TTSBase):
             "api_key": self.api_key,
             "voice_id": self.voice_id
         }
-
-    @property
-    def available_voices(self) -> List[Voice]:
-        """Lazily fetches the list of available voices from the API."""
-        if self._voices is None:
-            response = self.client.voices.get_all()
-            self._voices = response.voices
-        return self._voices
 
     def tts(self, text: str, output_path: str) -> str:
         """

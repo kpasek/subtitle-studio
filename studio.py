@@ -2,7 +2,6 @@ import multiprocessing
 import os.path
 import customtkinter as ctk
 import tkinter as tk
-import re
 import sys
 import os
 import shutil
@@ -12,43 +11,33 @@ import ctypes
 
 from pathlib import Path
 from typing import List, Optional, Tuple
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 
 # --- Importy z modułów aplikacji ---
 from app.pattern_manager import PatternManagerWindow
-from app.settings import SettingsWindow
-from app.utils import resource_path, is_installed, ready_dir_from_audio_dir
+from app.utils import resource_path, is_installed
 from app.entity import Line, PatternItem
 from app.subtitles import SubtitlePanel
+from app.worker import Worker
 from ui.menu import AppMenu
 
 # Refaktoryzacja IO -> app.io
-from app.io import load_subtitle_file, save_lines_to_file, set_project_path_provider
+from app.io import set_project_path_provider
+
 from app.patterns import (apply_patterns as patterns_apply, BUILTIN_REMOVE, BUILTIN_REPLACE, 
-                          apply_processing, _finalize_processing, open_pattern_manager,
+                          open_pattern_manager,
                           open_add_remove_pattern, open_add_replace_pattern, open_edit_pattern,
                           handle_pattern_update, add_remove_pattern_from_selection,
                           add_replace_pattern_from_selection, _clear_custom_list)
-from app.project import (create_new_project, import_old_project, open_project, close_project, save_project, save_project_as, 
-                         set_project_config, _gather_project_config, _load_app_config, 
+from app.project import (open_project, save_project, set_project_config, _load_app_config, 
                          save_app_setting, save_global_config, _check_unsaved_changes, 
-                         _update_recent_projects, open_recent_projects_window, 
-                         _remove_recent_project, _clear_recent_projects, 
-                         add_new_subtitles, change_subtitle_file, download_clean, 
-                         download_replace, delete_all_converted_audio,
+                         open_recent_projects_window, 
                          gather_tts_config as _gather_tts_config,
                          gather_converter_config as _gather_converter_config)
-from app.generation import (enqueue_generate_all, _execute_generate_all, 
-                            enqueue_convert_all, _execute_convert_all, show_generation_queue)
-from app.update import check_for_updates, show_update_button, download_update
-from app.ui_helpers import open_shortcuts_window, show_about_window, show_editor_context_menu
+from app.generation import (enqueue_generate_all, enqueue_convert_all)
+from app.update import check_for_updates
 
-from audio.generation_queue import GenerationQueueWindow
-from audio.pattern_editor import PatternEditorWindow
-from audio.deleter import AudioDeleterWindow
 from ui.verification_window import VerificationWindow
-from ui.game_reader_export import GameReaderExportWindow
-from ui.pattern_io import PatternIOWindow
 
 from importlib import util as _import_util
 
@@ -139,8 +128,10 @@ class SubtitleStudioApp(ctk.CTk):
         self.project_config = {}
         self.torch_installed = is_installed('torch')
 
+        self.worker = Worker(name="StudioWorker", num_threads=2)
+
         self.queue = queue.Queue()
-        self.queue_window: Optional[GenerationQueueWindow] = None
+
         self.pattern_manager_window: Optional[PatternManagerWindow] = None
 
         self.audio_dir: Optional[Path] = None
@@ -171,7 +162,6 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-e>", lambda e: open_recent_projects_window(self))
         self.bind("<Control-s>", lambda e: save_project(self))
         self.bind("<Control-f>", lambda e: self.subtitle_panel.search_entry.focus_set())
-        self.bind("<Control-q>", lambda e: show_generation_queue(self))
         self.bind("<Tab>", self._cycle_view_mode)
         self.bind("<Escape>", self._on_escape_key)
 
@@ -336,7 +326,7 @@ class SubtitleStudioApp(ctk.CTk):
         try:
             from app.io import update_line_in_csv
             if self.loaded_path:
-                update_line_in_csv(str(self.loaded_path), idx, lines[idx])
+                update_line_in_csv(lines[idx], str(self.loaded_path))
         except Exception as e:
             print(f"Błąd zapisu do CSV: {e}")
 
@@ -443,9 +433,6 @@ class SubtitleStudioApp(ctk.CTk):
     def enqueue_convert_all(self):
         enqueue_convert_all(self)
 
-    def show_generation_queue(self):
-        show_generation_queue(self)
-
     def _gather_tts_config(self):
         return _gather_tts_config(self)
 
@@ -458,10 +445,13 @@ class SubtitleStudioApp(ctk.CTk):
         if _check_unsaved_changes(self):
             if hasattr(self, 'subtitle_panel'):
                 self.subtitle_panel.stop_audio()
+            if hasattr(self, 'worker'):
+                self.worker.stop()
             self.quit()
 
     def check_queue(self):
         try:
+
             task = self.queue.get_nowait()
             task()
         except queue.Empty:
