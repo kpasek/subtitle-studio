@@ -15,7 +15,7 @@ import json
 import shutil
 
 from app.formatter import format_percent, normalize_to_percent
-from app.io import (update_line_in_csv, delete_lines_from_csv, 
+from app.io import (update_line_in_csv, update_lines_in_csv, delete_lines_from_csv, 
                     get_primary_audio_path, get_audio_candidates)
 from app.patterns import (apply_patterns, apply_processing, 
                           add_replace_pattern_from_selection)
