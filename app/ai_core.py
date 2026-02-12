@@ -1,5 +1,6 @@
 import requests
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,13 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
             response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             data = response.json()
-            return data.get("response", "").strip()
+            
+            raw_response = data.get("response", "").strip().strip('`')
+            
+            # Additional cleanup for echoed tags
+            cleaned_response = re.sub(r'</?text_to_process>', '', raw_response, flags=re.IGNORECASE).strip()
+            
+            return cleaned_response
         except Exception as e:
             logger.error(f"SI Processing error: {e}")
             raise e
