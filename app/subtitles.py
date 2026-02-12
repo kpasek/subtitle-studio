@@ -1374,14 +1374,23 @@ class SubtitlePanel(ctk.CTkFrame):
 
     def open_ai_runner_selected(self):
         """Otwiera okno zadań AI dla zaznaczonych wierszy."""
-        from ui.ai_runner import AITaskRunnerWindow
-        
-        selected = self.get_selected_lines()
-        if not selected:
-             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self)
-             return
+        try:
+            from ui.ai_runner import AITaskRunnerWindow
+            
+            selected = self.get_selected_lines()
+            if not selected:
+                 # Try to use current selection index if get_selected_lines fails or is empty for single selection
+                 if self.selected_line_indices:
+                     selected = [self.app.lines[i] for i in self.selected_line_indices if i < len(self.app.lines)]
+            
+            if not selected:
+                 messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
+                 return
 
-        AITaskRunnerWindow(self.app, selected)
+            AITaskRunnerWindow(self.app, selected, is_global=False)
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Nie można otworzyć okna zadań AI: {e}", parent=self.app)
+            print(f"Error opening AI runner: {e}")
 
 
     def generate_selected_dialogs(self):

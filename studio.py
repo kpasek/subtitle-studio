@@ -130,6 +130,8 @@ class SubtitleStudioApp(ctk.CTk):
         self.torch_installed = is_installed('torch')
 
         self.worker = Worker(name="StudioWorker", num_threads=2)
+        # Przechowywanie stanu zadania AI w celu przywrócenia okna
+        self.ai_state = None 
 
         self.queue = queue.Queue()
 
@@ -174,15 +176,16 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-r>", lambda e: open_pattern_manager(self))
         self.bind("<Control-G>", lambda e: enqueue_generate_all(self))  # Shift+Ctrl+g
         
-        # AI Tasks
-        self.bind("<Control-A>", lambda e: self.open_ai_runner_global()) # Shift+Ctrl+a
+        self.bind("<Control-Alt-a>", lambda e: self.open_ai_runner_selected())
 
         # Kontekstowe (Linia) - bindujemy do root, ale sprawdzamy kontekst w metodach
         self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())
+        self.bind("<Control-d>", lambda e: self.subtitle_panel.restore_selected_values())
         self.bind("<Control-g>", lambda e: self.subtitle_panel.generate_selected_dialogs())
 
         # Ctrl+X (Usuń audio) - uwaga na konflikt z wycinaniem tekstu
         self.bind("<Control-x>", self._on_ctrl_x)
+
         self.bind("<Control-c>", self._on_ctrl_c)
 
         # Klawisz Delete (Usuń treść)
@@ -210,6 +213,13 @@ class SubtitleStudioApp(ctk.CTk):
              return
         
         AITaskRunnerWindow(self, self.lines, is_global=True)
+
+    def open_ai_runner_selected(self):
+        """Otwiera okno zadań AI dla zaznaczonych linii."""
+        if hasattr(self, 'subtitle_panel'):
+             self.subtitle_panel.open_ai_runner_selected()
+        else:
+             messagebox.showwarning("Błąd", "Panel napisów nie jest dostępny.", parent=self)
 
     def _on_ctrl_c(self, event=None):
         """

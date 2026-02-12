@@ -36,6 +36,10 @@ class ShortcutsWindow(ctk.CTkToplevel):
             ]),
             ("SI (Zadania)", [
                 ("Ctrl + Shift + A", "Uruchom zadania SI (wszystkie)"),
+                ("Ctrl + Alt + A", "Uruchom zadania SI (zaznaczone)"),
+            ]),
+            ("Inne", [
+                ("Ctrl + D", "Przywróć wartość (Oryginał -> Text/TTS)"),
             ]),
             ("Audio (Globalne)", [
                 ("Ctrl + Shift + G", "Generuj wszystkie audio"),

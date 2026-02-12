@@ -105,12 +105,15 @@ class AppMenu:
 
     def _run_audio_deleter(self):
         if not self.app.lines:
-            return messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self.app)
-        if not self.app.audio_dir: 
-            return messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self.app)
-            messagebox.showerror("Błąd", "Najpierw zapisz/otwórz projekt.", parent=self.app)
+            messagebox.showwarning("Brak danych", "Najpierw przetwórz.", parent=self.app)
             return
-        SettingsWindow(self.app, self.app.torch_installed, mode='project')
+        if not self.app.audio_dir:
+            messagebox.showwarning("Brak katalogu", "Ustaw katalog audio.", parent=self.app)
+            return
+        
+        win = AudioDeleterWindow(self.app, self.app.lines, str(self.app.audio_dir))
+        win.wait_visibility()
+        win.grab_set()
 
     def _run_ai_global(self):
         if not self.app.lines:
@@ -119,7 +122,7 @@ class AppMenu:
         
         # Select all lines
         all_lines = self.app.lines
-        win = AITaskRunnerWindow(self.app, all_lines, is_global=True)
+        AITaskRunnerWindow(self.app, all_lines, is_global=True)
 
     def _invoke_panel(self, method_name, *args):
         if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, method_name):
@@ -127,26 +130,6 @@ class AppMenu:
             method(*args)
         else:
             print(f"Warning: Cannot invoke {method_name} on subtitle_panel")
-        AITaskRunnerWindow(self.app, self.app.lines, is_global=True) # Pass flag to indicate global run
-
-    def _run_ai_selected(self):
-        if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, 'get_selected_lines'):
-             selected = self.app.subtitle_panel.get_selected_lines()
-        elif self.app.selected_line_index is not None:
-             selected = [self.app.lines[self.app.selected_line_index]]
-        else:
-             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
-             return
-             
-        if not selected:
-             messagebox.showwarning("Brak zaznaczenia", "Zaznacz wiersze w edytorze.", parent=self.app)
-             return
-
-        AITaskRunnerWindow(self.app, selected)
-
-        win = AudioDeleterWindow(self.app, self.app.lines, str(self.app.audio_dir))
-        win.wait_visibility()
-        win.grab_set()
 
     def _open_project_settings(self):
         if not self.app.current_project_path: 
