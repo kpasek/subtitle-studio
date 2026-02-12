@@ -6,7 +6,7 @@ import concurrent.futures
 import subprocess
 from pathlib import Path
 
-
+# WINDOWS ONLY
 def convert_file(input_file: Path, output_dir: Path, filters: dict, out_format: str):
     """Konwertuje pojedynczy plik audio do OGG lub MP3 z filtrami FFmpeg."""
 

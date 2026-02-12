@@ -2,22 +2,16 @@ import threading
 import queue
 import os
 import time
-import tempfile
-import uuid
-import json
-import multiprocessing
 import subprocess
-import csv
 import warnings
 import shutil
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List, Dict, Any, Tuple
-from collections import Counter
 
 from app.entity import Line
-from app.io import get_audio_candidates, get_primary_audio_path, set_audio_dir, get_audio_dir
+from app.io import get_audio_candidates, set_audio_dir, get_audio_dir
 from app.worker import Worker, BatchResultTracker
 from dataclasses import asdict
 

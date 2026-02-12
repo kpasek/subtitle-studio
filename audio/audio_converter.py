@@ -1,8 +1,6 @@
 from pydub import AudioSegment
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import Dict, Optional, Any, Callable
-import threading
+from typing import Dict, Optional, Any
 
 
 class AudioConverter:

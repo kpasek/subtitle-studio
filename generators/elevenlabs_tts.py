@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional
 from .tts_base import TTSBase
 from app.utils import is_installed
 

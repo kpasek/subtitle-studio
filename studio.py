@@ -34,10 +34,9 @@ from app.project import (open_project, save_project, set_project_config, _load_a
                          open_recent_projects_window, 
                          gather_tts_config as _gather_tts_config,
                          gather_converter_config as _gather_converter_config)
-from app.generation import (enqueue_generate_all, enqueue_convert_all, show_generation_queue)
+from app.generation import (enqueue_generate_all, enqueue_convert_all)
 from app.update import check_for_updates
 
-from audio.generation_queue import GenerationQueueWindow
 from ui.verification_window import VerificationWindow
 
 from importlib import util as _import_util
@@ -132,7 +131,6 @@ class SubtitleStudioApp(ctk.CTk):
         self.worker = Worker(name="StudioWorker", num_threads=2)
 
         self.queue = queue.Queue()
-        self.queue_window: Optional[GenerationQueueWindow] = None
 
         self.pattern_manager_window: Optional[PatternManagerWindow] = None
 
@@ -164,7 +162,6 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-e>", lambda e: open_recent_projects_window(self))
         self.bind("<Control-s>", lambda e: save_project(self))
         self.bind("<Control-f>", lambda e: self.subtitle_panel.search_entry.focus_set())
-        self.bind("<Control-q>", lambda e: show_generation_queue(self))
         self.bind("<Tab>", self._cycle_view_mode)
         self.bind("<Escape>", self._on_escape_key)
 
@@ -435,9 +432,6 @@ class SubtitleStudioApp(ctk.CTk):
 
     def enqueue_convert_all(self):
         enqueue_convert_all(self)
-
-    def show_generation_queue(self):
-        show_generation_queue(self)
 
     def _gather_tts_config(self):
         return _gather_tts_config(self)

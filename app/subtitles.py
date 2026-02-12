@@ -11,14 +11,12 @@ from app.entity import Line
 from tkinter import messagebox
 import threading
 import time
-import json
 import shutil
 
 from app.formatter import format_percent, normalize_to_percent
 from app.io import (update_line_in_csv, update_lines_in_csv, delete_lines_from_csv, 
-                    get_primary_audio_path, get_audio_candidates)
-from app.patterns import (apply_patterns, apply_processing, 
-                          add_replace_pattern_from_selection)
+                    get_audio_candidates)
+from app.patterns import (apply_patterns, add_replace_pattern_from_selection)
 from app.update import download_update
 from app.project import get_active_tts_model_name, gather_tts_config, gather_converter_config
 

@@ -1,10 +1,9 @@
 import tkinter as tk
 from tkinter import messagebox
 from app.project import (create_new_project, import_old_project, open_project, save_project, save_project_as, close_project, 
-                         open_recent_projects_window, save_global_config,
-                         add_new_subtitles, change_subtitle_file, download_clean, download_replace,
+                         open_recent_projects_window, add_new_subtitles, change_subtitle_file, download_clean, download_replace,
                          delete_all_converted_audio)
-from app.generation import enqueue_generate_all, enqueue_convert_all, show_generation_queue
+from app.generation import enqueue_generate_all, enqueue_convert_all
 from app.patterns import open_pattern_manager
 from app.ui_helpers import open_shortcuts_window, show_about_window
 from audio.deleter import AudioDeleterWindow
@@ -13,7 +12,6 @@ from ui.pattern_io import PatternIOWindow
 from ui.game_reader_export import GameReaderExportWindow
 from ui.ai_task_manager import AITaskManagerWindow
 from ui.ai_runner import AITaskRunnerWindow
-from audio.generation_queue import GenerationQueueWindow
 from app.settings import SettingsWindow
 
 
@@ -131,18 +129,6 @@ class AppMenu:
         AITaskRunnerWindow(self.app, self.app.lines, is_global=True) # Pass flag to indicate global run
 
     def _run_ai_selected(self):
-        # Pobierz zaznaczone
-        panel = self.app.subtitle_panel  # Assuming SubtitlePanel is accessible via app.subtitle_panel
-        # SubtitlePanel usually has a selection mechanism.
-        # If not easily accessible, we might need a workaround or check how "lines" are stored.
-        # But looking at studio.py, app contains "lines" list. 
-        # Getting *selected* lines usually requires asking the UI component.
-        
-        # Checking studio.py, "self.selected_line_index" is stored. But multiple selection?
-        # If multiple selection isn't supported in current architecture, fallback to single or global.
-        # Let's assume for now we use the main lines list or try to fetch from panel if possible. 
-        # For safety in this iteration, I'll fetch 'selected' if implemented, else warn.
-        
         if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, 'get_selected_lines'):
              selected = self.app.subtitle_panel.get_selected_lines()
         elif self.app.selected_line_index is not None:
@@ -177,7 +163,3 @@ class AppMenu:
 
         self.export_window = GameReaderExportWindow(self.app)
 
-
-        
-    
-    # def open_verification_window(self):  <-- Usunięte, teraz jest w studio.py

@@ -1,14 +1,8 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk
-import threading
-import time
-from pathlib import Path
-from dataclasses import asdict
 
-from audio.verification_manager import VerificationManager
 from app.tooltip import CreateToolTip
-from app.io import update_line_in_csv, get_primary_audio_path, get_audio_candidates
 
 class VerificationWindow(ctk.CTkToplevel):
     """Window with Start / Stop / Ignore cache and progress bar for verification."""

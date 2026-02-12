@@ -25,16 +25,6 @@ def prepare_job_dependencies(app) -> bool:
     return True
 
 
-def _audio_path(audio_dir: Path, uid: str, ext: str) -> Path:
-    """Konstruuje pełną ścieżkę do pliku audio na podstawie uid"""
-    path = get_primary_audio_path(uid)
-    if path and path.suffix.lower() == f'.{ext}':
-        return path
-    # Fallback jeśli chcemy konkretne rozszerzenie inne niż domyślne wav
-    return audio_dir / f"output1 ({uid}).{ext}"
-
-
-
 
 def enqueue_generate_all(app):
     # Check for active job first
@@ -61,9 +51,8 @@ def enqueue_generate_all(app):
         if getattr(line, 'status_flag', None) == "ERROR":
             error_items += 1
             
-        raw_wav = _audio_path(app.audio_dir, uid, 'wav')
-        raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
-        if raw_wav.exists() or raw_mp3.exists():
+        existing_audio = get_primary_audio_path(uid)
+        if existing_audio and existing_audio.exists():
             existing_items += 1
 
     from ui.generation_summary import GenerationSummaryWindow
@@ -104,23 +93,9 @@ def _execute_generate_all(app, overwrite: bool, only_errors: bool = False):
 
         if not overwrite and not only_errors:
             # Check existing only if NOT overwriting AND NOT explicitly regenerating errors
-            # (If checking errors, we assume we want to regenerate them regardless of file existence?)
-            # Actually user requirement: "Błędne - musi być możliwość wybrania szybkiej generacji". 
-            # Usually implies reprocessing.
-            # safe logic: if only_errors is True, we regenerate even if exists (it's flagged error after all)
-            raw_wav = _audio_path(app.audio_dir, uid, 'wav')
-            raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
-            if raw_wav.exists() or raw_mp3.exists():
-                # But wait, if overwrite is False, we typically skip existing.
-                # If "Generuj tylko błędne" is checked, we probably expect regeneration.
-                # Let's say: if only_errors is TRUE, we treat overwrite as TRUE for these items locally.
-                pass
-            else:
-                pass # Doesn't exist, so generate.
-        elif not overwrite and not only_errors: # Standard incremental
-             raw_wav = _audio_path(app.audio_dir, uid, 'wav')
-             raw_mp3 = _audio_path(app.audio_dir, uid, 'mp3')
-             if raw_wav.exists() or raw_mp3.exists():
+            # if only_errors is True, we regenerate even if exists (it's flagged error after all)
+            existing_audio = get_primary_audio_path(uid)
+            if existing_audio and existing_audio.exists():
                  continue
 
         dialogs_to_generate.append((uid, text))
@@ -156,26 +131,6 @@ def _execute_generate_all(app, overwrite: bool, only_errors: bool = False):
                     pass
         except Exception as e:
             print(f"Error update line: {e}")
-
-    # Build job
-    # ... rest of function ... we need to construct job, but function continues in original file.
-    # I replaced the beginning of `_execute_generate_all` and `enqueue_generate_all`.
-    # Wait `_execute_generate_all` in original file continues after `lines: LineList = app.lines`.
-    # I should be careful with replacement scope.
-    
-    # Original:
-    # def _execute_generate_all(app, overwrite: bool):
-    #   ...
-    #   for i, line in enumerate(lines):
-    #       uid = line.uid
-    #       text = ...
-    #       if not text: continue
-    #       if not overwrite:
-    #           ...
-    #       dialogs_to_generate.append...
-    
-    # I need to match carefully.
-
             try:
                 from app.io import save_lines_to_file
                 if getattr(app, 'loaded_path', None):
@@ -234,13 +189,6 @@ def enqueue_convert_all(app):
     )
 
 
-def show_generation_queue(app):
-    from audio.generation_queue import GenerationQueueWindow
-    if app.queue_window is None or not app.queue_window.winfo_exists():
-        app.queue_window = GenerationQueueWindow(app)
-    app.queue_window.lift()
-
-
 def _execute_convert_all(app, overwrite: bool):
     if overwrite:
         ready_dir = ready_dir_from_audio_dir(app.audio_dir)
@@ -263,6 +211,5 @@ def _execute_convert_all(app, overwrite: bool):
         converter_config=app._gather_converter_config()
     )
     GenerationManager.get_instance().add_job(job)
-    # show_generation_queue(app) # Moved to dedicated window progress
     app.set_status("Dodano zadanie konwersji audio do kolejki.")
     return True

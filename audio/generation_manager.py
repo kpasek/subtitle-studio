@@ -9,7 +9,6 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Tuple, Callable, Optional, Union, Dict, Any
 
-# Importy logiki TTS
 from generators.google_cloud_tts import GoogleCloudTTS
 from generators.elevenlabs_tts import ElevenLabsTTS
 from generators.tts_base import TTSBase
@@ -205,13 +204,6 @@ class GenerationManager:
             model_name_lower = job.tts_model_name.lower()
 
             if model_name_lower in ['xtts', 'stylish', 'piper']:
-                # Wywołanie API (wymaga instancji managera lub metody statycznej, tutaj wydzieliliśmy logikę)
-                # Ponieważ _call_local_api jest w managerze, a to jest metoda statyczna, musimy to obsłużyć.
-                # Najlepiej jeśli tts_model_instance zawiera wszystko co potrzebne.
-                # W _load_tts_model tts_model_instance dla API to dict z sesją i urlem.
-                
-                # Użyjemy metody klasy pomocniczej lub duplikacji logiki wywołania API, 
-                # ale logiczniej jest przekazać self, lub po prostu przenieść _call_local_api do statycznej.
                 GenerationManager._call_local_api_static(tts_model_instance, text, str(output_path), job.tts_config)
             
             elif isinstance(tts_model_instance, TTSBase):
@@ -359,8 +351,6 @@ class GenerationManager:
         out_fmt = converter_cfg.get("audio_output_format", "mp3")
         filters = converter_cfg.get("ffmpeg_filters", {})
         
-        # Tymczasowa instancja do budowania ścieżek
-        # (ewentualnie można przenieść logikę tu, ale użycie klasy jest czystsze)
         temp_converter = AudioConverter(filter_settings=filters, out_format=out_fmt)
 
         tasks = []
@@ -399,19 +389,6 @@ class GenerationManager:
             if self.cancel_event.is_set():
                 break
                 
-            def on_done(res):
-                 tracker.add_result(res, None) # res here is just boolean/result, not identifier. 
-                 # Wait, BatchResultTracker.add_result takes (identifier, data, is_modified).
-                 # Tracker expects an identifier to map results.
-                 # Let's fix this in manager usage. None is fine for data if we don't care.
-
-            # Important: tracker.add_result needs some identifier if we want valid buffer
-            # With `add_result(res, None)` -> identifier=res (which is True/False/tuple from worker)
-            # Worker returns (True, None) or (False, Error) in static method.
-            # Let's pass 'outp' as identifier to tracker via closure in on_done, wait.
-            # Tracker.add_result(identifier, data).
-            
-            # Correction:
             def on_done_corrected(worker_res):
                 # worker_res is return from _worker_convert_task_static -> (success, error)
                 tracker.add_result(outp, {"success": worker_res[0], "error": worker_res[1]})
@@ -428,10 +405,6 @@ class GenerationManager:
         # 4. Oczekiwanie
         while not tracker.is_done and not self.cancel_event.is_set():
             time.sleep(0.5)
-            # trackera nie musimy flushować bo w workerze (w on_done) jest add_result -> flush_if_needed
-            
-            # W przypadku pauzy worker jest zapauzowany, więc zadania nie schodzą, on_complete nie jest wołany
-            # więc pętla tutaj czeka. Jest OK.
             
         if self.cancel_event.is_set():
             if self.worker:

@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 import os  # Dodano
 
 from app.tooltip import CreateToolTip
-from app.utils import is_installed
 
 if TYPE_CHECKING:
     from app.gui import SubtitleStudioApp
