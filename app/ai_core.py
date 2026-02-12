@@ -40,7 +40,7 @@ class OllamaService:
             logger.error(f"Ollama generate error: {e}")
             return f"Error: {e}"
 
-    def process_text(self, text: str, system_prompt: str) -> str:
+    def process_text(self, text: str, system_prompt: str, model: str = None) -> str:
         """Wysyła tekst do modelu i zwraca odpowiedź."""
         if not text or not text.strip():
             return ""
@@ -63,9 +63,8 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
 </text_to_process>
 """
         
-        # Construct full prompt
         payload = {
-            "model": self.model,
+            "model": model or self.model,
             "system": system_prompt,
             "prompt": final_user_prompt,
             "stream": False,
@@ -73,13 +72,11 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
                 "temperature": 0.2
             }
         }
-        print("SI  IN: ", text) 
 
         try:
             response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             data = response.json()
-            print("SI OUT: ", data.get("response", ""))
             return data.get("response", "").strip().strip('`')
         except Exception as e:
             logger.error(f"SI Processing error: {e}")

@@ -66,6 +66,9 @@ def apply_patterns(app, force_refresh=False):
 
     lines = apply_remove_patterns(lines, all_remove)
     apply_replace_patterns(lines, all_replace)
+    
+    # Update app lines with the filtered list
+    app.lines = lines
 
     # Aktualizacja widoku
     app._update_subtitle_panel_content()
@@ -190,18 +193,16 @@ def apply_processing(app):
         messagebox.showwarning('Brak pliku', 'Najpierw wczytaj plik z napisami.')
         return
 
-    rem_patterns, _ = gather_active_patterns(app.custom_remove, app.custom_replace)
-
-    lines = apply_remove_patterns(lines, rem_patterns)
-
+    # Count changes based on current app state (assuming apply_patterns ran)
     changes_count = 0
-    for i, line in enumerate(lines):
-        if line.original_text != line.text:
+    for line in lines:
+        # Check if visual text differs from original
+        if line.get_text() != line.original_text:
             changes_count += 1
 
     ProcessingSummaryWindow(
         app, len(lines), changes_count,
-        manual_edits_count=changes_count,
+        manual_edits_count=len(app.manual_edits) + len(app.tts_edits),
         callback=lambda remove_empty, remove_duplicates: _finalize_processing(app, remove_empty, remove_duplicates)
     )
 

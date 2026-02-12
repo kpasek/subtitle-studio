@@ -50,10 +50,10 @@ class TestPatterns(unittest.TestCase):
         
         apply_replace_patterns([line], [pat])
         
-        self.assertEqual(line.tts_text, "I cannot do that.")
-        # Ensure original text is untouched
-        self.assertIsNone(line.text)
-        self.assertEqual(line.original_text, "I can't do that.")
+        # Now apply_replace_patterns updates the text (and tts inherits)
+        self.assertEqual(line.get_tts_text(), "I cannot do that.")
+        # text should update too
+        self.assertEqual(line.get_text(), "I cannot do that.")
 
     def test_replace_pattern_chaining(self):
         """Test multiple patterns applied in order."""
@@ -64,7 +64,7 @@ class TestPatterns(unittest.TestCase):
         
         apply_replace_patterns([line], [p1, p2])
         
-        self.assertEqual(line.tts_text, "hi earth")
+        self.assertEqual(line.get_tts_text(), "hi earth")
 
     def test_disabled_pattern(self):
         """Test that disabled patterns are ignored."""

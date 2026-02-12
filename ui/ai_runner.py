@@ -1,8 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
-from typing import List, TYPE_CHECKING, Optional, Dict, Any
-import time
+from typing import List, TYPE_CHECKING
 import threading
 import datetime
 import shutil
@@ -11,7 +10,7 @@ from pathlib import Path
 from app.builtin_tasks import BUILTIN_TASKS, AITask
 from app.entity import Line
 from app.ai_core import OllamaService
-from app.io import update_lines_in_csv, update_line_in_csv
+from app.io import update_lines_in_csv
 from app.project import save_project, set_project_config
 
 if TYPE_CHECKING:
@@ -396,21 +395,37 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
     # --- Execution ---
     def _toggle_pause(self):
         if self.state_ref.control.is_paused:
-            self.state_ref.control.pause()
-            self.btn_pause.configure(text="Wznów")
-        else:
             self.state_ref.control.resume()
             self.btn_pause.configure(text="Pauza")
+        else:
+            self.state_ref.control.pause()
+            self.btn_pause.configure(text="Wznów")
 
     def _stop_task(self):
         if not self.winfo_exists(): return
-        if messagebox.askyesno("Potwierdzenie", "Czy na pewno chcesz przerwać przetwarzanie?"):
+        
+        # Pause execution so the background worker effectively stops at the next checkpoint
+        # while user decides
+        was_paused = self.state_ref.control.is_paused
+        if not was_paused:
+            self.state_ref.control.pause()
+            
+        if messagebox.askyesno("Potwierdzenie", "Czy na pewno chcesz przerwać przetwarzanie?", parent=self):
             try:
                 if self.winfo_exists() and hasattr(self, 'btn_stop_task'):
                     self.btn_stop_task.configure(state="disabled")
             except Exception:
                 pass
             self.state_ref.control.stop()
+        else:
+            # User cancelled stop -> Resume (unless it was already paused?)
+            # User requirement: "Jeżeli nie potwierdzi to wznawia" (If not confirmed, it resumes)
+            # So we force resume even if it was paused before? 
+            # Usually strict adherence means force resume.
+            self.state_ref.control.resume()
+            # Update button text just in case
+            if self.winfo_exists() and hasattr(self, 'btn_pause'):
+                self.btn_pause.configure(text="Pauza")
 
     def _reset_to_start(self):
         """Resets the view (not the data) to allow new run configuration."""
@@ -454,7 +469,7 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
 
     def _run_process(self):
         if not self.execution_queue:
-            messagebox.showwarning("Brak zadań", "Dodaj zadania do kolejki.")
+            # messagebox.showwarning("Brak zadań", "Dodaj zadania do kolejki.")
             return
 
         # Backup Logic for Global Processing
@@ -585,16 +600,27 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
         
         try:
             for task in tasks:
-                # Resolve prompt (using system_prompt from AITask)
-                prompt = getattr(task, 'system_prompt', '') or '' 
-                prompt = prompt.replace("{text}", result_text)
-                prompt = prompt.replace("{original}", line.original_text)
-                prompt = prompt.replace("{speaker}", context["speaker"])
-                prompt = prompt.replace("{prev}", context["previous_line"])
+                # Check for pause/stop between individual tasks
+                if control.is_stopped: break
+                control.wait_if_paused()
+                
+                # Use raw system prompt from task definition - do NOT inject text yet
+                sys_prompt = getattr(task, 'system_prompt', '') or ''
                 
                 # Check for optional model attribute in task, fallback to None (service uses default)
                 task_model = getattr(task, 'model', None)
-                response = service.generate_response(prompt, model=task_model)
+                
+                print(f"SI IN: {result_text}")
+                
+                # Use standard 'process_text' which includes the security wrapper
+                response = service.process_text(
+                    text=result_text,
+                    system_prompt=sys_prompt,
+                    model=task_model
+                )
+                
+                print(f"SI OUT: {response}")
+                
                 if response:
                     result_text = response.strip()
                 

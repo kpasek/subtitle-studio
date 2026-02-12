@@ -31,14 +31,20 @@ app_entity_mock = MagicMock()
 audio_verification_mock = MagicMock()
 
 # Patch sys.modules
+# Essential UI libs
 sys.modules['customtkinter'] = ctk_mock
-sys.modules['app.io'] = app_io_mock
-sys.modules['app.patterns'] = app_patterns_mock
-sys.modules['app.project'] = app_project_mock
-sys.modules['app.update'] = app_update_mock
-sys.modules['app.formatter'] = app_formatter_mock
-sys.modules['app.entity'] = app_entity_mock
+# sys.modules['app.io'] = app_io_mock  # Removed to avoid poisoning other tests
+# sys.modules['app.patterns'] = app_patterns_mock # Removed
+# sys.modules['app.project'] = app_project_mock # Removed
+# sys.modules['app.update'] = app_update_mock # Removed
+# sys.modules['app.formatter'] = app_formatter_mock # Removed
+# sys.modules['app.entity'] = app_entity_mock # CRITICAL FIX: Do NOT mock entity, as it breaks other tests using Line
 sys.modules['audio.verification_manager'] = audio_verification_mock
+
+# Create explicit mock for tkinter
+tk_mock = MagicMock()
+sys.modules['tkinter'] = tk_mock
+# sys.modules['tkinter.ttk'] = MagicMock() # Optional if needed
 
 # Now we can attempt to import app.subtitles
 # We might need to mock tkinter too if it's used at module level
@@ -101,26 +107,26 @@ class TestContextLogic(unittest.TestCase):
              event.y_root = 0
              
              # Run method
-             with patch('tkinter.Menu') as mock_menu_cls:
-                 panel._show_context_menu(event)
-                 
-                 # 1. Verify on_tree_select called (Fix for Copy Row bug)
-                 panel.on_tree_select.assert_called_with(None)
-                 panel.tree.selection_set.assert_called_with("item1")
-                 
-                 # 2. Verify AI menu item exists
-                 mock_menu = mock_menu_cls.return_value
-                 # Retrieve all calls to add_command
-                 calls = mock_menu.add_command.call_args_list
-                 labels = [c.kwargs.get('label', '') for c in calls]
-                 
-                 print("Menu items found:", labels)
-                 
-                 ai_found = any("✨ Zadania SI" in l for l in labels)
-                 self.assertTrue(ai_found, "Opcja '✨ Zadania SI' powinna być w menu")
-                 
-                 copy_found = any("Kopiuj linię" in l for l in labels)
-                 self.assertTrue(copy_found, "Opcja 'Kopiuj linię' powinna być w menu")
+             panel._show_context_menu(event)
+             
+             # 1. Verify on_tree_select called (Fix for Copy Row bug)
+             panel.on_tree_select.assert_called_with(None)
+             panel.tree.selection_set.assert_called_with("item1")
+             
+             # 2. Verify AI menu item exists
+             # Since we mocked sys.modules['tkinter'], tk.Menu is our mock
+             mock_menu_cls = tk.Menu
+             mock_menu = mock_menu_cls.return_value
+             
+             # Retrieve all calls to add_command
+             calls = mock_menu.add_command.call_args_list
+             labels = [c.kwargs.get('label', '') for c in calls]
+             
+             ai_found = any("Zadania SI" in l for l in labels)
+             self.assertTrue(ai_found, f"Opcja 'Zadania SI' powinna być w menu. Znaleziono: {labels}")
+             
+             copy_found = any("Kopiuj linię" in l for l in labels)
+             self.assertTrue(copy_found, "Opcja 'Kopiuj linię' powinna być w menu")
 
 if __name__ == '__main__':
     unittest.main()

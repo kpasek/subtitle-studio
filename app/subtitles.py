@@ -766,7 +766,7 @@ class SubtitlePanel(ctk.CTkFrame):
                          state=tk.NORMAL if can_gen else tk.DISABLED)
         menu.add_command(label="✓ Weryfikuj audio (Ctrl+V)", command=self.verify_selected_dialogs,
                          state=tk.NORMAL if can_verify else tk.DISABLED)
-        menu.add_command(label="✨ Zadania SI", command=self.open_ai_runner_selected,
+        menu.add_command(label="✨ Zadania SI (Ctrl+Alt+A)", command=self.open_ai_runner_selected,
                          state=tk.NORMAL)
         menu.add_command(label="🗑️ Usuń audio (Ctrl+X)", command=self.delete_selected_dialogs,
                          state=tk.NORMAL if can_del else tk.DISABLED)

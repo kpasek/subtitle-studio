@@ -61,9 +61,6 @@ class TestAILogic(unittest.TestCase):
         mock_service.generate_response.assert_called_with("Translate: Hello", model="llama2")
         
         # Verify Line update
-        # If target_field is "Text", run_ai_pipeline sets line.text AND calls update_line_in_csv
-        # In mock, setattr(line1, 'text', ...) happens?
-        # run_ai_pipeline does: line.text = result_text
         self.assertEqual(line1.text, "Translated Text")
         self.assertTrue(line1.ai_processed)
         
@@ -88,6 +85,52 @@ class TestAILogic(unittest.TestCase):
         )
         
         mock_service.generate_response.assert_not_called()
+
+    def test_run_ai_pipeline_none_values(self):
+        """Test pipeline robustness against None values in Line attributes"""
+        mock_task = MagicMock(spec=AITask)
+        mock_task.name = "Test Task"
+        mock_task.system_prompt = "Ref: {original} Text: {text}"
+        mock_task.model = "default"
+        
+        mock_service = MagicMock(spec=OllamaService)
+        # return same text to simulate no change, or something else
+        mock_service.generate_response.side_effect = lambda p, model: f"Processed: {p}"
+
+        mock_app = MagicMock()
+        
+        line = MagicMock()
+        line.text = "Current"
+        line.original_text = None # This caused the crash
+        line.speaker = None
+        line.ai_processed = False
+        
+        control = AIControl()
+        
+        run_ai_pipeline(
+            lines=[line],
+            tasks=[mock_task],
+            target_field="Text",
+            skip_processed=False,
+            service=mock_service,
+            app_ref=mock_app,
+            progress_callback=lambda c, t, m: None,
+            control=control
+        )
+        
+        # If it failed silently inside try-except and didn't update text:
+        # line.text would remain "Current".
+        # If it worked: line.text should be "Processed: Ref:  Text: Current" (assuming None -> empty string)
+        
+        # check if generate_response was called at all
+        self.assertTrue(mock_service.generate_response.called, "Service should be called even if original_text is None")
+        
+        # Check if replacement handled None correctly (replaced with empty string)
+        args, _ = mock_service.generate_response.call_args
+        prompt_sent = args[0]
+        self.assertIn("Ref: ", prompt_sent) 
+        self.assertNotIn("None", prompt_sent)
+        self.assertNotIn("{original}", prompt_sent) # Should be replaced
 
 if __name__ == '__main__':
     unittest.main()

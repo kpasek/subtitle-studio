@@ -176,7 +176,10 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-r>", lambda e: open_pattern_manager(self))
         self.bind("<Control-G>", lambda e: enqueue_generate_all(self))  # Shift+Ctrl+g
         
+        # AI Tasks
+        self.bind("<Control-A>", lambda e: self.open_ai_runner_global()) # Ctrl+Shift+A
         self.bind("<Control-Alt-a>", lambda e: self.open_ai_runner_selected())
+        self.bind("<Control-Alt-A>", lambda e: self.open_ai_runner_selected()) # Dla pewności CapsLock/Shift
 
         # Kontekstowe (Linia) - bindujemy do root, ale sprawdzamy kontekst w metodach
         self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())

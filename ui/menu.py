@@ -4,7 +4,7 @@ from app.project import (create_new_project, import_old_project, open_project, s
                          open_recent_projects_window, add_new_subtitles, change_subtitle_file, download_clean, download_replace,
                          delete_all_converted_audio)
 from app.generation import enqueue_generate_all, enqueue_convert_all
-from app.patterns import open_pattern_manager
+from app.patterns import open_pattern_manager, apply_patterns, apply_processing
 from app.ui_helpers import open_shortcuts_window, show_about_window
 from audio.deleter import AudioDeleterWindow
 from ui.verification_window import VerificationWindow
@@ -48,7 +48,6 @@ class AppMenu:
         edit_menu.add_command(label="Oznacz jako Gotowe", command=lambda: self._invoke_panel("set_selected_status", "DONE"))
         edit_menu.add_command(label="Oznacz jako Błędne", command=lambda: self._invoke_panel("set_selected_status", "ERROR"))
         edit_menu.add_command(label="Wyczyść flagi", command=lambda: self._invoke_panel("set_selected_status", None))
-        menubar.add_cascade(label="Edycja", menu=edit_menu)
 
         # --- Dialogi ---
         gen_menu = tk.Menu(menubar, tearoff=0)
@@ -58,7 +57,7 @@ class AppMenu:
         gen_menu.add_command(label="Generuj dialogi", command=lambda: enqueue_generate_all(self.app), accelerator="Ctrl+Shift+G")
         gen_menu.add_command(label="Konwertuj audio", command=lambda: enqueue_convert_all(self.app), accelerator="Ctrl+Shift+R")
         gen_menu.add_command(label="Weryfikacja", command=lambda: VerificationWindow(self.app), accelerator="Ctrl+Shift+Y")
-        gen_menu.add_command(label="Zatwierdź zamiany", command=lambda: VerificationWindow(self.app))
+        gen_menu.add_command(label="Zatwierdź zamiany", command=lambda: apply_processing(self.app))
         gen_menu.add_separator()
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=lambda: delete_all_converted_audio(self.app))
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
@@ -78,6 +77,8 @@ class AppMenu:
         patterns_menu.add_separator()
         patterns_menu.add_command(label="Usuwanie dialogów", command=lambda: self._run_audio_deleter())
         menubar.add_cascade(label="Wzorce", menu=patterns_menu)
+        
+        menubar.add_cascade(label="Edycja", menu=edit_menu)
                 
         export_menu = tk.Menu(menubar, tearoff=0)
         export_menu.add_command(label="Eksportuj napisy", command=lambda: download_clean(self.app))
