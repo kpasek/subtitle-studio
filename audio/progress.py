@@ -41,13 +41,6 @@ class GenerationProgressWindow(ctk.CTkToplevel):
         self.label.configure(text=f"{message}\n{current} / {total} ({percent}%)")
         self.update_idletasks()
 
-    def set_indeterminate(self, message: str):
-        """Ustawia pasek w tryb nieokreślony (np. na czas konwersji)."""
-        self.label.configure(text=message)
-        self.progress_bar.configure(mode="indeterminate")
-        self.progress_bar.start()
-        self.update_idletasks()
-
     def on_cancel(self):
         """Ustawia flagę anulowania i blokuje przycisk."""
         self.label.configure(text="Zatrzymywanie...")

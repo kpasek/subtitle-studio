@@ -49,14 +49,6 @@ class ElevenLabsTTS(TTSBase):
             "voice_id": self.voice_id
         }
 
-    @property
-    def available_voices(self) -> List[Voice]:
-        """Lazily fetches the list of available voices from the API."""
-        if self._voices is None:
-            response = self.client.voices.get_all()
-            self._voices = response.voices
-        return self._voices
-
     def tts(self, text: str, output_path: str) -> str:
         """
         Generates speech and saves it as an audio file.

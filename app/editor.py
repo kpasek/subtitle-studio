@@ -24,16 +24,6 @@ class LineEditor(ctk.CTkFrame):
         self.entry.bind("<FocusOut>", self._on_save)
         self.entry.bind("<Return>", self._on_save)
 
-    def set_content(self, text: str, read_only: bool = False):
-        """Ustawia tekst w polu edycji i zarządza jego stanem."""
-        self.last_saved_text = text
-        self.entry.delete(0, tk.END)
-        self.entry.insert(0, text)
-
-        if read_only:
-            self.entry.configure(state="disabled", placeholder_text="Edycja niedostępna w trybie oryginału")
-        else:
-            self.entry.configure(state="normal", placeholder_text="(pusta linia)")
 
     def clear(self):
         """Czyści pole edycji i przywraca domyślny placeholder."""

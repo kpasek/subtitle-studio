@@ -1208,54 +1208,7 @@ class SubtitlePanel(ctk.CTkFrame):
             pass
         self.ver_running = False
         self.ver_stop_event.set()
-
-    def delete_all_bad_audio_verification(self):
-        # Collect bad items (based on audio_status)
-        to_del = []
-        for idx, line in enumerate(self.app.lines):
-            filename = line.audio_filename
-            if not filename:
-                continue
-            
-            # Budowanie pełnej ścieżki
-            audio_dir = self.app.audio_dir
-            if not audio_dir:
-                continue
-            
-            path = Path(audio_dir) / filename
-            status = line.audio_status
-            if status not in ['OK', 'SHORT', 'MISSING', 'PENDING']:
-                to_del.append((idx, path))
-
-        if not to_del:
-            messagebox.showinfo("Info", "Brak błędnych plików do usunięcia.", parent=self)
-            return
-
-        if not messagebox.askyesno("Potwierdź", f"Usunąć {len(to_del)} błędnych plików?", parent=self):
-            return
-
-        count = 0
-        errors = []
-        for idx, path_to_remove in to_del:
-            try:
-                if path_to_remove.exists():
-                    os.remove(path_to_remove)
-                
-                line = self.app.lines[idx]
-                line.audio_status = 'MISSING'
-                line.audio_duration = 0.0
-                line.audio_similarity = 0.0
-                line.audio_filename = ''
-                
-                count += 1
-            except Exception as e:
-                errors.append(f"Indeks {idx + 1}: {str(e)}")
-
-        self._refresh_verification_view()
-        if errors:
-            messagebox.showwarning("Wynik", f"Usunięto {count} plików. Błędy:\n" + "\n".join(errors[:10]), parent=self)
-        else:
-            messagebox.showinfo("Zakończono", f"Pomyślnie usunięto {count} plików.", parent=self)
+        
 
     def open_verification_folder(self):
         # Open folder for selected item or audio_dir

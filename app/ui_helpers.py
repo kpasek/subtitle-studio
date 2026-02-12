@@ -85,11 +85,3 @@ def _create_help_section(parent, title, content):
     
     ctk.CTkLabel(frame, text=title, font=("", 16, "bold"), anchor="w").pack(fill="x")
     ctk.CTkLabel(frame, text=content, font=("", 13), anchor="w", justify="left", wraplength=450).pack(fill="x", pady=(2, 0))
-
-
-def show_editor_context_menu(app, event):
-    menu = tk.Menu(app, tearoff=0)
-    menu.add_command(label="Wytnij", command=lambda: app.subtitle_panel.editor.entry.event_generate("<<Cut>>"))
-    menu.add_command(label="Kopiuj", command=lambda: app.subtitle_panel.editor.entry.event_generate("<<Copy>>"))
-    menu.add_command(label="Wklej", command=lambda: app.subtitle_panel.editor.entry.event_generate("<<Paste>>"))
-    menu.tk_popup(event.x_root, event.y_root)

@@ -41,11 +41,6 @@ def gather_active_patterns(custom_remove: List[PatternItem], custom_replace: Lis
     return remove_patterns, replace_patterns
 
 
-def get_patterns_signature(patterns: List[PatternItem]):
-    """Tworzy sygnaturę (hashowalną krotkę) dla listy wzorców."""
-    return tuple((p.pattern, p.replace, p.case_sensitive, p.enabled) for p in patterns)
-
-
 def apply_patterns(app, force_refresh=False):
     """Aplikuje wzorce usuwania i zamiany na liniach aplikacji."""
     lines: LineList = app.lines

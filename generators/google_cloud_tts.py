@@ -48,11 +48,6 @@ class GoogleCloudTTS(TTSBase):
             "language_code": self.language_code
         }
 
-    def get_available_voices(self):
-        """Fetches available voices for the configured language."""
-        response = self.client.list_voices(language_code=self.language_code)
-        return response.voices
-
     def tts(self, text: str, output_path: str) -> str:
         """
         Generates speech and saves it as a .wav file.
