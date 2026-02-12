@@ -8,7 +8,7 @@ import threading
 from app.entity import Line
 from app.ai_core import AITask, BUILTIN_TASKS, OllamaService
 from app.tooltip import CreateToolTip
-from app.io import update_line_in_csv
+from app.io import update_line_in_csv, update_lines_in_csv
 
 if TYPE_CHECKING:
     from app.gui import SubtitleStudioApp
@@ -53,7 +53,7 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         self.selected_lines = selected_lines
         self.is_global = is_global
         self.title("Uruchom Zadania SI")
-        self.geometry("900x700")
+        self.geometry("1000x700")
         
         # Load tasks initial
         self.all_tasks = []
@@ -128,6 +128,9 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         self.target_var = tk.StringVar(value="tts")
         ctk.CTkRadioButton(frame_opts, text="Tekst TTS (Domyślne)", variable=self.target_var, value="tts").pack(side="left", padx=10)
         ctk.CTkRadioButton(frame_opts, text="Tekst Oryginalny (Napisy)", variable=self.target_var, value="text").pack(side="left", padx=10)
+
+        self.skip_processed_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(frame_opts, text="Pomiń przetworzone (AI)", variable=self.skip_processed_var).pack(side="left", padx=10)
 
         # Info about Ollama
         url = self.master.global_config.get('ollama_url', 'http://localhost:11434')
@@ -307,6 +310,7 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
 
         # Prepare parameters
         target = self.target_var.get()
+        skip_processed = self.skip_processed_var.get()
         tasks = list(self.execution_queue) # clone
         
         ollama_url = self.master.global_config.get('ollama_url', 'http://localhost:11434')
@@ -370,6 +374,7 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
             lines=self.selected_lines,
             tasks=tasks,
             target_field=target,
+            skip_processed=skip_processed,
             service=service,
             app_ref=self.master, 
             progress_callback=progress_callback,
@@ -377,13 +382,16 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         )
 
 
-def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, service: OllamaService, app_ref, progress_callback=None, control: AIControl = None):
+def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, service: OllamaService, app_ref, skip_processed: bool = False, progress_callback=None, control: AIControl = None):
     """
     To jest funkcja uruchamiana w wątku Workera.
     """
     processed_count = 0
     total = len(lines)
     
+    last_save_time = time.time()
+    modified_lines_buffer = []
+
     # Notify start
     if progress_callback: progress_callback(0, total, "Startowanie...")
     
@@ -392,8 +400,17 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
         if control:
             if control.is_stopped:
                 if progress_callback: progress_callback(i, total, "Anulowano przez użytkownika")
+                # Try to save pending changes before exit
+                if modified_lines_buffer and app_ref and hasattr(app_ref, 'loaded_path') and app_ref.loaded_path:
+                    try:
+                        update_lines_in_csv(modified_lines_buffer, str(app_ref.loaded_path))
+                    except: pass
                 return processed_count
             control.wait_if_paused()
+        
+        # Check skip processed
+        if skip_processed and getattr(line, 'ai_processed', False):
+            continue
 
         # Notify progress
         if progress_callback: progress_callback(i, total, f"Przetwarzanie linii {line.uid}")
@@ -422,19 +439,31 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
                 line.set_text(temp_text)
             
             line.ai_processed = True
+            modified_lines_buffer.append(line)
             
-            # Save to CSV immediately
-            if app_ref and hasattr(app_ref, 'loaded_path') and app_ref.loaded_path:
-                try:
-                    update_line_in_csv(line, str(app_ref.loaded_path))
-                except Exception as db_err:
-                    print(f"Error saving line {line.uid}: {db_err}")
+            # Periodic Save (30 sec)
+            if time.time() - last_save_time >= 30:
+                 if app_ref and hasattr(app_ref, 'loaded_path') and app_ref.loaded_path and modified_lines_buffer:
+                    try:
+                        update_lines_in_csv(modified_lines_buffer, str(app_ref.loaded_path))
+                        # Clear buffer only if save successful
+                        modified_lines_buffer = []
+                        last_save_time = time.time()
+                    except Exception as db_err:
+                        print(f"Error saving batch: {db_err}")
 
             processed_count += 1
             
         except Exception as e:
             print(f"Error processing line {line.uid}: {e}")
             
+    # Final save
+    if modified_lines_buffer and app_ref and hasattr(app_ref, 'loaded_path') and app_ref.loaded_path:
+        try:
+            update_lines_in_csv(modified_lines_buffer, str(app_ref.loaded_path))
+        except Exception as e:
+            print(f"Error final save: {e}")
+
     # Final update
     if progress_callback: progress_callback(total, total, "Zakończono")
         
