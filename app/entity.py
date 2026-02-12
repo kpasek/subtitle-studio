@@ -40,7 +40,7 @@ class Line:
     status_flag: Optional[str] = None  # None, "DONE" (Gotowe), "ERROR" (Błędne)
     
     # Flagi automatyczne
-    ai_processed: bool = False  # Czy wiersz został zmieniony przez AI
+    ai_processed: bool = False  # Czy wiersz został zmieniony przez SI
 
 
     def get_text(self) -> str:

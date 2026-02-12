@@ -55,11 +55,11 @@ class AppMenu:
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=lambda: delete_all_converted_audio(self.app))
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
 
-        # --- AI / Ollama ---
+        # --- SI / Ollama ---
         ai_menu = tk.Menu(menubar, tearoff=0)
-        ai_menu.add_command(label="Menedżer Zadań AI", command=lambda: AITaskManagerWindow(self.app))
-        ai_menu.add_command(label="Uruchom zadania AI", command=lambda: self._run_ai_global())
-        menubar.add_cascade(label="Zadania AI", menu=ai_menu)
+        ai_menu.add_command(label="Menedżer Zadań SI", command=lambda: AITaskManagerWindow(self.app))
+        ai_menu.add_command(label="Uruchom zadania SI", command=lambda: self._run_ai_global())
+        menubar.add_cascade(label="Zadania SI", menu=ai_menu)
         
         # --- Wzorce ---
         patterns_menu = tk.Menu(menubar, tearoff=0)

@@ -85,7 +85,7 @@ class SettingsWindow(ctk.CTkToplevel):
         # Define tabs
         tab_general = self.main_tabs.add("Ogólne")
         tab_tts = self.main_tabs.add("TTS")
-        tab_ai = self.main_tabs.add("AI")
+        tab_ai = self.main_tabs.add("SI")
         tab_filters = self.main_tabs.add("Filtry Audio")
         tab_theme = self.main_tabs.add("Wygląd")
         
@@ -164,7 +164,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(t_piper, textvariable=self.piper_model_path_var).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=10)
         ctk.CTkButton(t_piper, text="...", width=40, command=self.select_model_file).grid(row=0, column=2, sticky="e", padx=10, pady=10)
 
-        # --- TAB: AI ---
+        # --- TAB: SI ---
         tab_ai.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(tab_ai, text="Url serwera Ollama:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
         self.ollama_url_var = tk.StringVar(value=self.master.global_config.get('ollama_url', 'http://localhost:11434'))

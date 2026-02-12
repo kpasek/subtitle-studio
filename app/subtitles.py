@@ -82,7 +82,7 @@ class SubtitlePanel(ctk.CTkFrame):
                                              fg_color="#2E8B57", hover_color="#1E613B")
         self.generate_button.pack(side="left", padx=4, pady=5)
 
-        self.btn_ai_tasks = ctk.CTkButton(top_frame, text="✨ Zadania AI", width=100,
+        self.btn_ai_tasks = ctk.CTkButton(top_frame, text="✨ Zadania SI", width=100,
                                           command=self.open_ai_runner_selected,
                                           fg_color="#8e44ad", hover_color="#9b59b6")
         self.btn_ai_tasks.pack(side="left", padx=4, pady=5)
@@ -449,7 +449,7 @@ class SubtitlePanel(ctk.CTkFrame):
                 if status_filter == "Bez flagi" and flag != "":
                     continue
 
-            # Filter by AI Processed flag
+            # Filter by SI Processed flag
             ai_f = f.get('ai_status', 'Wszystkie')
             is_ai = getattr(line_obj, 'ai_processed', False)
             if ai_f == 'Tak' and not is_ai: continue

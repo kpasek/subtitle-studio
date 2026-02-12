@@ -11,7 +11,7 @@ class AITaskManagerWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self.master = master
-        self.title("Menedżer Zadań AI")
+        self.title("Menedżer Zadań SI")
         self.geometry("1100x800")
         
         # Load custom tasks from config

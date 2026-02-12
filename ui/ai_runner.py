@@ -52,7 +52,7 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         self.master = master
         self.selected_lines = selected_lines
         self.is_global = is_global
-        self.title("Uruchom Zadania AI")
+        self.title("Uruchom Zadania SI")
         self.geometry("900x700")
         
         # Load tasks initial

@@ -28,7 +28,7 @@ def show_about_window(app):
     # --- Zakładka 1: Start (Import, Wprowadzenie) ---
     _create_help_section(tab_intro, "Wprowadzenie", 
         "Subtitle Studio to narzędzie do zarządzania, edycji i generowania ścieżek lektorskich (TTS) do filmów.\n"
-        "Pozwala na pracę z plikami wideo i napisami, umożliwiając tworzenie dubbingu AI.")
+        "Pozwala na pracę z plikami wideo i napisami, umożliwiając tworzenie dubbingu SI.")
     
     _create_help_section(tab_intro, "Menu Projekt", 
         "• Nowy projekt: Tworzy czystą przestrzeń roboczą.\n"

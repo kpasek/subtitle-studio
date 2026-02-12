@@ -60,8 +60,8 @@ class FilterWindow(ctk.CTkToplevel):
         self.status_option = tk.StringVar(value=self.current_filters.get('status', 'Wszystkie'))
         ctk.CTkOptionMenu(frm, variable=self.status_option, values=["Wszystkie", "Gotowe", "Błędne", "Bez flagi"]).grid(row=5, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
 
-        # AI Status filter
-        ctk.CTkLabel(frm, text="AI Przetworzone: ").grid(row=6, column=0, sticky="w", padx=5, pady=5)
+        # SI Status filter
+        ctk.CTkLabel(frm, text=" Przetworzone: ").grid(row=6, column=0, sticky="w", padx=5, pady=5)
         self.ai_option = tk.StringVar(value=self.current_filters.get('ai_status', 'Wszystkie'))
         ctk.CTkOptionMenu(frm, variable=self.ai_option, values=["Wszystkie", "Tak", "Nie"]).grid(row=6, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
 
