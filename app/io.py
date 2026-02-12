@@ -360,7 +360,9 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_format': line.audio_format,
                 'audio_filename': line.audio_filename,
                 'audio_transcribed_text': line.audio_transcribed_text,
+                'audio_hallucination': line.audio_hallucination,
                 'status_flag': getattr(line, 'status_flag', None),
+                'ai_processed': getattr(line, 'ai_processed', False),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -385,6 +387,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_transcribed_text': line.audio_transcribed_text,
                 'audio_hallucination': line.audio_hallucination,
                 'status_flag': getattr(line, 'status_flag', None),
+                'ai_processed': getattr(line, 'ai_processed', False),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -396,7 +399,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
     fieldnames = [
         'original_text', 'text', 'tts_text', 'audio_duration',
         'audio_similarity', 'audio_format', 'audio_filename',
-        'audio_transcribed_text', 'audio_hallucination', 'status_flag',
+        'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed',
         'uid'
     ]
     
@@ -457,7 +460,7 @@ def delete_lines_from_csv(uids_to_delete: List[str], csv_path: Optional[str] = N
     fieldnames = [
         'original_text', 'text', 'tts_text', 'audio_duration',
         'audio_similarity', 'audio_format', 'audio_filename',
-        'audio_transcribed_text', 'audio_hallucination', 'status_flag',
+        'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed',
         'uid'
     ]
     
