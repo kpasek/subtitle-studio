@@ -175,11 +175,21 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
             self.btn_pause.configure(text="Wznów")
             
     def _cancel_task(self):
-        if messagebox.askyesno("Anulowanie", "Czy na pewno chcesz przerwać zadanie?"):
+        # Pause explicitly if running
+        was_paused = self.control.is_paused
+        
+        if not was_paused:
+            self.control.pause()
+            
+        if messagebox.askyesno("Anulowanie", "Czy na pewno chcesz przerwać zadanie?", parent=self):
             self.control.stop()
             self.lbl_progress.configure(text="Zatrzymywanie...")
             self.btn_pause.configure(state="disabled")
             self.btn_stop_task.configure(state="disabled")
+        else:
+            # Restore state if user cancelled the cancellation
+            if not was_paused:
+                self.control.resume()
 
     def _add_task(self):
         sel = self.list_available.curselection()
@@ -218,6 +228,17 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         self.list_queue.delete(0, "end")
         for t in self.execution_queue:
             self.list_queue.insert("end", t.name)
+
+    def _reset_to_start(self):
+        """Resets the UI to initial state, hiding progress and showing options."""
+        self.frame_progress.grid_remove()
+        self.frame_actions.grid()
+        
+        # Hide result buttons if they exist
+        if hasattr(self, 'frame_result_buttons'):
+            self.frame_result_buttons.pack_forget()
+            for widget in self.frame_result_buttons.winfo_children():
+                widget.destroy()
 
     def _run_process(self):
         if not self.execution_queue:
@@ -321,8 +342,21 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
                    self.lbl_progress.configure(text=final_msg)
                    self.frame_progress_controls.pack_forget() # Hide controls
                    
-                   btn_close = ctk.CTkButton(self.frame_progress, text="Zamknij", fg_color="green", command=self.destroy)
-                   btn_close.pack(pady=5)
+                   # Create a frame for result buttons to keep them organized and removable
+                   if not hasattr(self, 'frame_result_buttons'):
+                       self.frame_result_buttons = ctk.CTkFrame(self.frame_progress, fg_color="transparent")
+                       self.frame_result_buttons.pack(pady=5)
+                   else:
+                       # Clear previous buttons if any
+                       for widget in self.frame_result_buttons.winfo_children():
+                           widget.destroy()
+                       self.frame_result_buttons.pack(pady=5)
+                   
+                   btn_close = ctk.CTkButton(self.frame_result_buttons, text="Zamknij", fg_color="green", command=self.destroy)
+                   btn_close.pack(side="left", padx=5)
+
+                   btn_retry = ctk.CTkButton(self.frame_result_buttons, text="Wróć", fg_color="gray", command=self._reset_to_start)
+                   btn_retry.pack(side="left", padx=5)
                    
                    # Trigger refresh in main window
                    if hasattr(self.master, '_update_subtitle_panel_content'):
