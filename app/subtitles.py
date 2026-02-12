@@ -92,21 +92,11 @@ class SubtitlePanel(ctk.CTkFrame):
                                            fg_color="#1E90FF", hover_color="#4169E1")
         self.verify_button.pack(side="left", padx=4, pady=5)
         
-        # Flagi statusu
-        self.btn_flag_done = ctk.CTkButton(top_frame, text="✅ Gotowe", width=80,
-                                           command=lambda: self.set_selected_status("DONE"),
-                                           fg_color="#27ae60", hover_color="#2ecc71")
-        self.btn_flag_done.pack(side="left", padx=4, pady=5)
-
-        self.btn_flag_error = ctk.CTkButton(top_frame, text="⚠️ Błędne", width=80,
-                                            command=lambda: self.set_selected_status("ERROR"),
-                                            fg_color="#c0392b", hover_color="#e74c3c")
-        self.btn_flag_error.pack(side="left", padx=4, pady=5)
-        
-        self.btn_flag_clear = ctk.CTkButton(top_frame, text="⚪ Wyczyść", width=80,
-                                            command=lambda: self.set_selected_status(None),
-                                            fg_color="#7f8c8d", hover_color="#95a5a6")
-        self.btn_flag_clear.pack(side="left", padx=4, pady=5)
+        # Restore Button
+        self.btn_restore = ctk.CTkButton(top_frame, text="↺ Przywróć", width=100,
+                                         command=self.restore_selected_values,
+                                         fg_color="#7f8c8d", hover_color="#95a5a6")
+        self.btn_restore.pack(side="left", padx=4, pady=5)
 
         self.delete_all_button = ctk.CTkButton(top_frame, text="🗑️ Usuń audio", width=100,
                                                command=self.delete_selected_dialogs, state="disabled",
@@ -779,6 +769,8 @@ class SubtitlePanel(ctk.CTkFrame):
         menu.add_command(label="🗑️ Usuń zaznaczone wiersze", command=self.delete_selected_rows,
                          state=tk.NORMAL)
         menu.add_separator()
+        menu.add_command(label="↺ Przywróć wartość", command=self.restore_selected_values, state=tk.NORMAL)
+        menu.add_separator()
         menu.add_command(label="✅ Oznacz jako Gotowe", command=lambda: self.set_selected_status("DONE"), state=tk.NORMAL)
         menu.add_command(label="⚠️ Oznacz jako Błędne", command=lambda: self.set_selected_status("ERROR"), state=tk.NORMAL)
         menu.add_command(label="⚪ Wyczyść flagi", command=lambda: self.set_selected_status(None), state=tk.NORMAL)
@@ -797,13 +789,79 @@ class SubtitlePanel(ctk.CTkFrame):
             return
             
         changed = False
+        to_update = []
         for idx in self.selected_line_indices:
             if 0 <= idx < len(self.app.lines):
-                self.app.lines[idx].status_flag = status
-                changed = True
+                line = self.app.lines[idx]
+                
+                # Check if change is needed
+                current = getattr(line, 'status_flag', None) or None
+                target = status or None
+                if current != target:
+                    line.status_flag = status
+                    to_update.append(line)
+                    changed = True
         
-        if changed:
-            self.set_preview(self.app.lines)
+        if changed and to_update:
+            try:
+                # Use bulk update
+                update_lines_in_csv(to_update, str(self.app.loaded_path))
+                self.set_preview(self.app.lines)
+            except Exception as e:
+                print(f"Error saving status: {e}")
+
+    def restore_selected_values(self):
+        """
+        Przywraca wartości dla zaznaczonych wierszy zależnie od widoku:
+        - Widok TTS: przywraca wartość z pola Text.
+        - Widok Text/Napisy: przywraca wartość z Oryginału.
+        """
+        if not self.selected_line_indices:
+            return
+
+        mode = self.app.view_mode.get()
+        if mode == "Oryginał":
+            messagebox.showinfo("Info", "Nie można przywracać w widoku Oryginału.", parent=self)
+            return
+
+        to_update = []
+        changed = False
+        
+        for idx in self.selected_line_indices:
+             if 0 <= idx < len(self.app.lines):
+                line = self.app.lines[idx]
+                
+                # Don't touch DONE lines if strictly required, but usually user wants to fix them.
+                # Let's allow restoring even if DONE, or forbid? Usually edit is forbidden if DONE.
+                if getattr(line, 'status_flag', None) == "DONE":
+                    continue
+
+                if mode == "TTS":
+                    # Restore TTS from Text
+                    current_src = line.text or ""
+                    # If we really want to simulate 'restore', maybe check if they differ
+                    if line.tts_text != current_src:
+                        line.tts_text = current_src
+                        to_update.append(line)
+                        changed = True
+                elif mode == "Napisy": # Text View
+                    # Restore Text from Original
+                    current_src = line.original_text or ""
+                    if line.text != current_src:
+                        line.text = current_src
+                        line.ai_processed = False # Reset AI flag if restoring to original? Optional.
+                        to_update.append(line)
+                        changed = True
+        
+        if changed and to_update:
+            try:
+                update_lines_in_csv(to_update, str(self.app.loaded_path))
+                self.set_preview(self.app.lines)
+                self.app.set_status(f"Przywrócono wartości dla {len(to_update)} wierszy.")
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie udało się zapisać zmian: {e}", parent=self)
+        else:
+            self.app.set_status("Brak zmian do wykonania.")
 
     # --- Weryfikacja audio (zintegrowana) ---
     def start_verification(self, force_refresh=False, ignore_short=True, verify_options=None):

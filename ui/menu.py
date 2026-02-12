@@ -43,6 +43,15 @@ class AppMenu:
         config_menu.add_command(label="Zamknij", command=self.app.on_close)
         menubar.add_cascade(label="Projekt", menu=config_menu)
 
+        # --- Edycja ---
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        edit_menu.add_command(label="Przywróć wartość", command=lambda: self._invoke_panel("restore_selected_values"))
+        edit_menu.add_separator()
+        edit_menu.add_command(label="Oznacz jako Gotowe", command=lambda: self._invoke_panel("set_selected_status", "DONE"))
+        edit_menu.add_command(label="Oznacz jako Błędne", command=lambda: self._invoke_panel("set_selected_status", "ERROR"))
+        edit_menu.add_command(label="Wyczyść flagi", command=lambda: self._invoke_panel("set_selected_status", None))
+        menubar.add_cascade(label="Edycja", menu=edit_menu)
+
         # --- Dialogi ---
         gen_menu = tk.Menu(menubar, tearoff=0)
         gen_menu.add_command(label="Dodaj nowe napisy", command=lambda: add_new_subtitles(self.app))
@@ -108,6 +117,17 @@ class AppMenu:
         if not self.app.lines:
              messagebox.showwarning("Brak danych", "Brak wierszy do przetworzenia.", parent=self.app)
              return
+        
+        # Select all lines
+        all_lines = self.app.lines
+        win = AITaskRunnerWindow(self.app, all_lines, is_global=True)
+
+    def _invoke_panel(self, method_name, *args):
+        if hasattr(self.app, 'subtitle_panel') and hasattr(self.app.subtitle_panel, method_name):
+            method = getattr(self.app.subtitle_panel, method_name)
+            method(*args)
+        else:
+            print(f"Warning: Cannot invoke {method_name} on subtitle_panel")
         AITaskRunnerWindow(self.app, self.app.lines, is_global=True) # Pass flag to indicate global run
 
     def _run_ai_selected(self):
