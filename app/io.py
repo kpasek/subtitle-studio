@@ -148,8 +148,14 @@ def _normalize_text_fields(line: Line) -> Tuple[str, str]:
     text_value = line.text or ''
     text_for_csv = text_value if text_value and text_value != original else ''
     base_text = text_for_csv or original
-    tts_value = line.tts_text or ''
-    tts_for_csv = tts_value if tts_value and tts_value != base_text else ''
+    
+    # Obsługa pustego tts_text
+    if line.tts_text == "":
+         tts_for_csv = "<SILENCE>" if base_text != "" else "" 
+    else:
+        tts_value = line.tts_text or ''
+        tts_for_csv = tts_value if tts_value and tts_value != base_text else ''
+        
     return text_for_csv, tts_for_csv
 
 
@@ -186,13 +192,23 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                 dur = round(float(row.get('audio_duration') or 0), 3)
             except Exception:
                 dur = 0.0
+            
+            # Load TTS Text handling Silence
+            tts_raw = row.get('tts_text', '') or ''
+            if tts_raw == '<SILENCE>':
+                tts_final = ""
+            elif tts_raw == '':
+                tts_final = None
+            else:
+                tts_final = tts_raw
+
             transcribed = row.get('audio_transcribed_text', '') or ''
             audio_filename = row.get('audio_filename', '') or ''
             uid = _ensure_uid((row.get('uid') or '').strip(), row_count, audio_dir, audio_filename)
             out.append(Line(
                 original_text=row.get('original_text', '') or '',
                 text=row.get('text', '') or None,
-                tts_text=row.get('tts_text', '') or None,
+                tts_text=tts_final,
                 audio_duration=dur,
                 audio_filename=audio_filename,
                 audio_similarity=float(row.get('audio_similarity') or 0.0),
