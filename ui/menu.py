@@ -108,7 +108,7 @@ class AppMenu:
         if not self.app.lines:
              messagebox.showwarning("Brak danych", "Brak wierszy do przetworzenia.", parent=self.app)
              return
-        AITaskRunnerWindow(self.app, self.app.lines)
+        AITaskRunnerWindow(self.app, self.app.lines, is_global=True) # Pass flag to indicate global run
 
     def _run_ai_selected(self):
         # Pobierz zaznaczone

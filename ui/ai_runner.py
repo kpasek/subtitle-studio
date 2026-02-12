@@ -40,11 +40,18 @@ class AIControl:
     def wait_if_paused(self):
         self._paused.wait()
 
+from app.project import save_project, set_project_config
+from app.io import save_lines_to_file
+from pathlib import Path
+import shutil
+import datetime
+
 class AITaskRunnerWindow(ctk.CTkToplevel):
-    def __init__(self, master: 'SubtitleStudioApp', selected_lines: List[Line]):
+    def __init__(self, master: 'SubtitleStudioApp', selected_lines: List[Line], is_global: bool = False):
         super().__init__(master)
         self.master = master
         self.selected_lines = selected_lines
+        self.is_global = is_global
         self.title("Uruchom Zadania AI")
         self.geometry("900x700")
         
@@ -216,6 +223,61 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         if not self.execution_queue:
             return
 
+        # Jeśli globalny przebieg - zrób backup i nowy plik
+        if self.is_global and self.master.loaded_path:
+            try:
+                current_p = Path(self.master.loaded_path)
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_name = f"{current_p.stem}_backup_{timestamp}{current_p.suffix}"
+                backup_path = current_p.parent / backup_name
+                
+                # Copy current file to backup
+                shutil.copy2(current_p, backup_path)
+                print(f"Created backup at {backup_path}")
+                
+                # For processing we continue on current file, but first save any pending state
+                # The user requirement: "create a new file ... and assign as current".
+                # Usually "backup" implies the OLD state is saved aside, and we work on the main file.
+                # OR we create a "v2" file and switch to it. 
+                # "tworzyć nowy plik z danymi (taki backup) oraz przypisaywać jako aktualny plik"
+                # This phrasing is slightly ambiguous. Usually a "backup" is the old copy. 
+                # If I want to work on a fresh copy, I should copy current -> new_work_file, and switch app to new_work_file.
+                
+                # Let's assume:
+                # 1. Save current state to `filename_timestamp.csv` (this becomes the "backup" / "snapshot").
+                # 2. Assign this new file as the current loaded path.
+                # 3. Process AI on this NEW file.
+                # This way the original file remains untouched (as pre-AI state). 
+                
+                # Wait, "create new file (backup) and assign as current". 
+                # If I assign backup as current, I am modification the backup.
+                # That means the original file is safe.
+                
+                # Let's do this: 
+                # 1. Copy `original.csv` -> `original_ai_TIMESTAMP.csv`
+                # 2. Switch app to `original_ai_TIMESTAMP.csv`
+                # 3. Run AI on the app (which now points to the new file).
+                
+                new_filename = f"{current_p.stem}_AI_{timestamp}{current_p.suffix}"
+                new_path = current_p.parent / new_filename
+                shutil.copy2(current_p, new_path)
+                
+                # Switch app context
+                self.master.loaded_path = new_path
+                self.master.lbl_filename.configure(text=new_filename)
+                
+                # Update project config to remember this new file
+                set_project_config(self.master, "subtitle_path", str(new_path))
+                save_project(self.master)
+                
+                # Note: self.selected_lines still points to objects in memory. 
+                # Since we just copied the file, the objects in memory match the new file content.
+                # We can proceed modifying them.
+                
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie udało się utworzyć kopii zapasowej:\n{e}")
+                return
+
         # Reset control
         self.control = AIControl()
         self.btn_pause.configure(text="Pauza", state="normal")
@@ -319,20 +381,13 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
                     break
             
             # Update Object
-            changed = False
+            # Always mark as AI processed if it went through processing, even if text is same
             if target_field == "tts":
-                old_val = line.get_tts_text()
                 line.set_tts_text(temp_text)
-                if line.get_tts_text() != old_val:
-                    changed = True
             else:
-                old_val = line.get_text()
                 line.set_text(temp_text)
-                if line.get_text() != old_val:
-                    changed = True
             
-            if changed:
-                line.ai_processed = True
+            line.ai_processed = True
             
             # Save to CSV immediately
             if app_ref and hasattr(app_ref, 'loaded_path') and app_ref.loaded_path:
