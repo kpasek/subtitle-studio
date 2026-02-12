@@ -332,11 +332,18 @@ class SubtitlePanel(ctk.CTkFrame):
         if getattr(self, '_suppress_refresh', False):
             return
 
+        # Disable updates for performance
+        try:
+            self.tree.grab_release()
+        except: pass
+
         # Wyczyść tabelę
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        # Faster delete for large trees
+        self.tree.delete(*self.tree.get_children())
         self.item_line_map.clear()
 
+        # --- Pre-calculation invariants ---
+        view_mode = self.app.view_mode.get()
         raw_search = self.search_entry.get()
         regex_obj = None
         if raw_search:
@@ -345,17 +352,47 @@ class SubtitlePanel(ctk.CTkFrame):
             except re.error:
                 pass
 
-        # Przygotuj dane do wstawienia
-        # Jeśli w przyszłości lines_to_show będzie listą słowników/obiektów,
-        # tutaj trzeba będzie dostosować mapowanie na kolumny.
+        f = self.filter_spec
+        min_sim_filter = normalize_to_percent(f.get('min_sim'))
+        max_sim_filter = normalize_to_percent(f.get('max_sim'))
+        
+        f_min_len = int(f.get('min_len')) if f.get('min_len') else None
+        f_max_len = int(f.get('max_len')) if f.get('max_len') else None
+        
+        f_min_cps = float(f.get('min_cps')) if (f.get('min_cps') is not None and f.get('min_cps') != '') else None
+        f_max_cps = float(f.get('max_cps')) if (f.get('max_cps') is not None and f.get('max_cps') != '') else None
 
-        for i, line_obj in enumerate(lines_to_show):
-            # line_text = line_obj.get_text()
+        f_show = f.get('show')
+        f_hal = f.get('halucination', 'Wszystkie')
+        
+        status_filter = f.get('status')
+        ai_f = f.get('ai_status', 'Wszystkie')
+        diff_f = f.get('diff_status', 'Wszystkie')
 
-            mode = self.app.view_mode.get()
-            if mode == 'Napisy':
+        # Prepare column indices once
+        col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+        
+        idx_content = col_pos.get("content")
+        idx_status = col_pos.get("status")
+        idx_duration = col_pos.get("duration")
+        idx_cps = col_pos.get("cps")
+        idx_similarity = col_pos.get("similarity")
+        idx_hallucination = col_pos.get("hallucination")
+        idx_format = col_pos.get("format")
+        idx_audio_file = col_pos.get("audio_file")
+        
+        col_count = len(self.columns_config)
+        
+        # Audio directory pre-fetch
+        app_audio_dir = getattr(self, 'app').audio_dir
+        
+        # --- Loop ---
+        items_to_insert = []
+        
+        for line_obj in lines_to_show:
+            if view_mode == 'Napisy':
                 line_text = line_obj.get_text()
-            elif mode == 'TTS':
+            elif view_mode == 'TTS':
                 line_text = line_obj.get_tts_text()
             else:
                 line_text = line_obj.original_text
@@ -366,158 +403,121 @@ class SubtitlePanel(ctk.CTkFrame):
             elif raw_search and raw_search.lower() not in line_text.lower():
                 continue
 
-            f = self.filter_spec
-            min_sim_filter = normalize_to_percent(f.get('min_sim'))
-            max_sim_filter = normalize_to_percent(f.get('max_sim'))
-                
-            if f.get('min_len') and len(line_text) < int(f.get('min_len')):
-                continue
-            if f.get('max_len') and len(line_text) > int(f.get('max_len')):
-                continue
+            # Length Filter
+            if f_min_len is not None and len(line_text) < f_min_len: continue
+            if f_max_len is not None and len(line_text) > f_max_len: continue
             
+            # CPS Filter
             cps_val = line_obj.calculate_cps()
-            if f.get('min_cps') is not None and f.get('min_cps') != '' and cps_val < float(f.get('min_cps')):
-                continue
-            if f.get('max_cps') is not None and f.get('max_cps') != '' and cps_val > float(f.get('max_cps')):
-                continue
+            if f_min_cps is not None and cps_val < f_min_cps: continue
+            if f_max_cps is not None and cps_val > f_max_cps: continue
 
             # similarity
             sim_val = 0.0
-            try:
-                # Jeśli filtr similarity jest ustawiony, pominąć linie bez weryfikacji
-                if (f.get('min_sim') is not None and f.get('min_sim') != '') or (f.get('max_sim') is not None and f.get('max_sim') != ''):
-                    # require a transcribed text or audio file to compute similarity
-                    if not line_obj.audio_transcribed_text:
-                        continue
+            has_sim = False
+            if line_obj.audio_similarity is not None:
                 sim_val = max(0.0, min(line_obj.audio_similarity, 1.0))
-                if min_sim_filter is not None and sim_val < min_sim_filter:
-                    continue
-                if max_sim_filter is not None and sim_val > max_sim_filter:
-                    continue
-            except Exception:
-                sim_val = 0.0
+                has_sim = True
                 
-            show = f.get('show')
-            if show == 'Wygenerowane':
-                # Pokaż tylko linie które mają audio
-                has_audio = bool(line_obj.audio_filename)
-                if not has_audio:
-                    continue
-            elif show == 'Niewygenerowane':
-                has_audio = bool(line_obj.audio_filename)
-                if has_audio:
-                    continue
+            # Jeśli filtr similarity jest ustawiony, pominąć linie bez weryfikacji
+            if (min_sim_filter is not None or max_sim_filter is not None):
+                 if not line_obj.audio_transcribed_text: # require transcription
+                     continue
+                 if min_sim_filter is not None and sim_val < min_sim_filter: continue
+                 if max_sim_filter is not None and sim_val > max_sim_filter: continue
 
-            hal_f = f.get('halucination', 'Wszystkie')
+            # Show generated/ungenerated
+            has_audio = bool(line_obj.audio_filename)
+            if f_show == 'Wygenerowane' and not has_audio: continue
+            elif f_show == 'Niewygenerowane' and has_audio: continue
+
+            # Hallucination
             halo_val = line_obj.audio_hallucination
-            status_val = line_obj.audio_status
-            
-            # Stan PENDING lub pusty oznacza, że linia nie była jeszcze weryfikowana
             is_pending = halo_val in ["", "PENDING"]
             has_halo = bool(halo_val and halo_val not in ["", "PENDING", "Brak"])
 
-
-            if hal_f == 'Tylko halucynacje':
-                if not has_halo:
-                    continue
-            elif hal_f == 'Bez halucynacji':
-                # Pokazujemy tylko jeśli nie ma halucynacji I została już zweryfikowana (nie jest PENDING)
-                if is_pending or has_halo:
-                    continue
-            elif hal_f == 'Nieweryfikowane':
-                if not is_pending:
-                    continue
+            if f_hal == 'Tylko halucynacje':
+                if not has_halo: continue
+            elif f_hal == 'Bez halucynacji':
+                if is_pending or has_halo: continue
+            elif f_hal == 'Nieweryfikowane':
+                if not is_pending: continue
             
-            status_filter = f.get('status')
+            # Status
             if status_filter:
                 flag = getattr(line_obj, 'status_flag', None) or ""
-                # status_filter mapping needed
-                if status_filter == "Gotowe" and flag != "DONE":
-                    continue
-                if status_filter == "Błędne" and flag != "ERROR":
-                    continue
-                if status_filter == "Bez flagi" and flag != "":
-                    continue
+                if status_filter == "Gotowe" and flag != "DONE": continue
+                if status_filter == "Błędne" and flag != "ERROR": continue
+                if status_filter == "Bez flagi" and flag != "": continue
 
             # Filter by SI Processed flag
-            ai_f = f.get('ai_status', 'Wszystkie')
             is_ai = getattr(line_obj, 'ai_processed', False)
             if ai_f == 'Tak' and not is_ai: continue
             if ai_f == 'Nie' and is_ai: continue
 
             # Filter by Diff (Text vs TTS)
-            diff_f = f.get('diff_status', 'Wszystkie')
             if diff_f != 'Wszystkie':
                 t_val = line_obj.get_text()
                 tts_val = line_obj.get_tts_text()
+                # Compare actual values
                 is_diff = (t_val != tts_val)
-                
                 if diff_f == 'Tylko zmienione' and not is_diff: continue
                 if diff_f == 'Bez zmian' and is_diff: continue
 
+            # --- Row Building ---
+            row_values = [""] * col_count
 
-            # Budowanie wartości dla wiersza zgodnie z self.columns_config
-            row_values = [""] * len(self.columns_config)
-            col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
+            if idx_content is not None:
+                row_values[idx_content] = line_text
 
-            # Fill columns
-            if "content" in col_pos:
-                mode = self.app.view_mode.get()
-                if mode == 'TTS':
-                    row_values[col_pos["content"]] = line_obj.get_tts_text()
-                elif mode == "Napisy":
-                    row_values[col_pos["content"]] = line_obj.get_text()
-                else:
-                    row_values[col_pos["content"]] = line_obj.original_text
-
-            if "status" in col_pos:
+            if idx_status is not None:
                 flag = getattr(line_obj, 'status_flag', None)
-                if flag == "DONE":
-                    row_values[col_pos["status"]] = "Gotowe"
-                elif flag == "ERROR":
-                    row_values[col_pos["status"]] = "Błąd"
-                else:
-                    row_values[col_pos["status"]] = ""
+                if flag == "DONE": row_values[idx_status] = "Gotowe"
+                elif flag == "ERROR": row_values[idx_status] = "Błąd"
 
-            if 'duration' in col_pos:
+            if idx_duration is not None:
                 duration_val = line_obj.audio_duration
-                row_values[col_pos['duration']] = f"{duration_val:.2f}" if duration_val > 0 else '-'
+                row_values[idx_duration] = f"{duration_val:.2f}" if duration_val > 0 else '-'
             
-            if 'cps' in col_pos:
-                row_values[col_pos['cps']] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
+            if idx_cps is not None:
+                row_values[idx_cps] = f"{cps_val:.1f}" if (cps_val and cps_val > 0) else '-'
             
-            if 'similarity' in col_pos:
-                sim_display = format_percent(sim_val)
-                row_values[col_pos['similarity']] = sim_display if sim_display else '-'
+            if idx_similarity is not None:
+                sim_display = format_percent(sim_val) if has_sim else '-'
+                row_values[idx_similarity] = sim_display
             
-            if 'hallucination' in col_pos:
+            if idx_hallucination is not None:
                 if halo_val and halo_val != "PENDING":
-                    row_values[col_pos['hallucination']] = halo_val
+                    row_values[idx_hallucination] = halo_val
                 elif halo_val == "PENDING":
-                    row_values[col_pos['hallucination']] = "?"
-                elif status_val:
-                    row_values[col_pos['hallucination']] = "Brak"
+                    row_values[idx_hallucination] = "?"
+                elif line_obj.audio_status:
+                    row_values[idx_hallucination] = "Brak"
                 else:
-                    row_values[col_pos['hallucination']] = "-"
+                    row_values[idx_hallucination] = "-"
 
-            if 'format' in col_pos: # Jeśli taka kolumna istnieje (w configu nie widziałem, ale logika była)
+            if idx_format is not None:
                 fmt = line_obj.audio_format
-                row_values[col_pos['format']] = (fmt or '').upper()
+                row_values[idx_format] = (fmt or '').upper()
                 
-            if 'audio_file' in col_pos:
-                path = None
+            if idx_audio_file is not None:
+                # Optimized audio path logic - avoid Disk IO
                 fname = line_obj.audio_filename
                 if fname:
-                    path = Path(getattr(self, 'app').audio_dir or Path('.')) / fname
+                    # Trust metadata if present
+                    row_values[idx_audio_file] = fname
                 else:
-                    path = get_primary_audio_path(line_obj.uid)
-                
-                if path and Path(path).exists():
-                    row_values[col_pos['audio_file']] = Path(path).name if path else ''
-                else:
-                    row_values[col_pos['audio_file']] = "Brak pliku"
+                    # Only calculate/guess if missing (slow path)
+                    # We can even skip this if performance is critical
+                    # or cache it. For now, let's keep it minimal.
+                    # line_obj.uid check is fast
+                    if line_obj.uid:
+                         # Heuristic display without disk check or minimize it
+                         row_values[idx_audio_file] = "Brak pliku"
+                    else:
+                         row_values[idx_audio_file] = ""
 
-            # Wstawienie wiersza
+            # insert directly
             item_id = self.tree.insert("", "end", values=tuple(row_values))
             self.item_line_map[item_id] = line_obj
             
