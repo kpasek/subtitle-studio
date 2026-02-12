@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.entity import Line
 from app.io import (save_lines_to_file, _ensure_csv_cache, 
-                    update_lines_in_csv, delete_lines_from_csv)
+                    update_lines_in_csv, delete_lines_from_csv, load_subtitle_file)
 
 class TestIO(unittest.TestCase):
     
@@ -147,6 +147,63 @@ class TestIO(unittest.TestCase):
         with open(self.csv_path, 'r', encoding='utf-8') as f:
             row = list(csv.DictReader(f))[0]
         self.assertEqual(row['text'], "Now Set")
+
+    def test_ai_processed_persistence(self):
+        """Test persistence of ai_processed flag (True/False/Case-insensitivity)."""
+        # 1. Save line with ai_processed=True
+        line = Line(uid="100", original_text="Test AI", ai_processed=True)
+        save_lines_to_file(self.csv_path, [line])
+        
+        # Verify manually that it's written as "True"
+        with open(self.csv_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            self.assertIn('"True"', content)
+            
+        # Verify load
+        loaded = load_subtitle_file(self.csv_path)
+        self.assertTrue(loaded[0].ai_processed)
+
+        # 2. Update to False
+        line.ai_processed = False
+        update_lines_in_csv([line], self.csv_path)
+        
+        loaded = load_subtitle_file(self.csv_path)
+        self.assertFalse(loaded[0].ai_processed)
+        
+        # 3. Test resilience to case (manual file edit)
+        with open(self.csv_path, 'w', newline='', encoding='utf-8') as f:
+            # Manually write headers + row with "TRUE"
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(['original_text', 'uid', 'ai_processed'])
+            writer.writerow(['Case Test', '101', 'TRUE'])
+            writer.writerow(['Case Test 2', '102', 'true'])
+            
+        loaded = load_subtitle_file(self.csv_path)
+        self.assertTrue(loaded[0].ai_processed, "Should handle TRUE")
+        self.assertTrue(loaded[1].ai_processed, "Should handle true")
+
+    def test_legacy_ai_flag_migration(self):
+        """Test loading legacy files without ai_processed column."""
+        with open(self.csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerow(['original_text', 'uid']) # No ai_processed
+            writer.writerow(['Legacy Line', '99'])
+            
+        loaded = load_subtitle_file(self.csv_path)
+        self.assertEqual(len(loaded), 1)
+        self.assertFalse(loaded[0].ai_processed, "Should default to False if missing")
+        
+        # Save back and verify column added
+        loaded[0].ai_processed = True
+        update_lines_in_csv(loaded, self.csv_path)
+        
+        with open(self.csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            headers = reader.fieldnames
+            row = next(reader)
+            
+        self.assertIn('ai_processed', headers)
+        self.assertEqual(str(row['ai_processed']).lower(), 'true')
 
 if __name__ == '__main__':
     unittest.main()
