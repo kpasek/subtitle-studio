@@ -10,3 +10,4 @@ nuitka
 pydub
 rapidfuzz
 openai-whisper
+pyinstaller
