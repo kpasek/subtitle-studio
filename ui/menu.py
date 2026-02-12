@@ -58,6 +58,7 @@ class AppMenu:
         gen_menu.add_command(label="Generuj dialogi", command=lambda: enqueue_generate_all(self.app), accelerator="Ctrl+Shift+G")
         gen_menu.add_command(label="Konwertuj audio", command=lambda: enqueue_convert_all(self.app), accelerator="Ctrl+Shift+R")
         gen_menu.add_command(label="Weryfikacja", command=lambda: VerificationWindow(self.app), accelerator="Ctrl+Shift+Y")
+        gen_menu.add_command(label="Zatwierdź zamiany", command=lambda: VerificationWindow(self.app))
         gen_menu.add_separator()
         gen_menu.add_command(label="Usuń przekonwertowane pliki", command=lambda: delete_all_converted_audio(self.app))
         menubar.add_cascade(label="Dialogi", menu=gen_menu)
@@ -65,7 +66,7 @@ class AppMenu:
         # --- SI / Ollama ---
         ai_menu = tk.Menu(menubar, tearoff=0)
         ai_menu.add_command(label="Menedżer Zadań SI", command=lambda: AITaskManagerWindow(self.app))
-        ai_menu.add_command(label="Uruchom zadania SI", command=lambda: self._run_ai_global())
+        ai_menu.add_command(label="Uruchom zadania SI", command=lambda: self._run_ai_global(), accelerator="Ctrl+Shift+A")
         menubar.add_cascade(label="Zadania SI", menu=ai_menu)
         
         # --- Wzorce ---

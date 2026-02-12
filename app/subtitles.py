@@ -749,6 +749,9 @@ class SubtitlePanel(ctk.CTkFrame):
         item_id = self.tree.identify_row(event.y)
         if item_id:
             self.tree.selection_set(item_id)
+            # Force update of selection state immediately, because selection_set
+            # does not always trigger <<TreeviewSelect>> immediately or at all in some conditions
+            self.on_tree_select(None)
 
         if not self.tree.selection() or self.app.selected_line_index is None:
             return
@@ -763,6 +766,8 @@ class SubtitlePanel(ctk.CTkFrame):
                          state=tk.NORMAL if can_gen else tk.DISABLED)
         menu.add_command(label="✓ Weryfikuj audio (Ctrl+V)", command=self.verify_selected_dialogs,
                          state=tk.NORMAL if can_verify else tk.DISABLED)
+        menu.add_command(label="✨ Zadania SI", command=self.open_ai_runner_selected,
+                         state=tk.NORMAL)
         menu.add_command(label="🗑️ Usuń audio (Ctrl+X)", command=self.delete_selected_dialogs,
                          state=tk.NORMAL if can_del else tk.DISABLED)
         menu.add_command(label="🗑️ Usuń zaznaczone wiersze", command=self.delete_selected_rows,

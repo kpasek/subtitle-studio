@@ -34,6 +34,9 @@ class ShortcutsWindow(ctk.CTkToplevel):
                 ("Ctrl + Y", "Weryfikuj ZAZNACZONE audio"),
                 ("Ctrl + Shift + Y", "Otwórz okno weryfikacji"),
             ]),
+            ("SI (Zadania)", [
+                ("Ctrl + Shift + A", "Uruchom zadania SI (wszystkie)"),
+            ]),
             ("Audio (Globalne)", [
                 ("Ctrl + Shift + G", "Generuj wszystkie audio"),
                 ("Ctrl + Shift + R", "Konwersja plików audio"),

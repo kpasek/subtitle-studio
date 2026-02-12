@@ -52,13 +52,13 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
                 "temperature": 0.2
             }
         }
-        print("Wysyłanie do SI:", text) 
+        print("SI  IN: ", text) 
 
         try:
             response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             data = response.json()
-            print("Odpowiedź z SI:", data.get("response", ""))
+            print("SI OUT: ", data.get("response", ""))
             return data.get("response", "").strip().strip('`')
         except Exception as e:
             logger.error(f"SI Processing error: {e}")

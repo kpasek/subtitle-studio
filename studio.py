@@ -38,6 +38,7 @@ from app.generation import (enqueue_generate_all, enqueue_convert_all)
 from app.update import check_for_updates
 
 from ui.verification_window import VerificationWindow
+from ui.ai_runner import AITaskRunnerWindow
 
 from importlib import util as _import_util
 
@@ -172,6 +173,9 @@ class SubtitleStudioApp(ctk.CTk):
                   lambda e: enqueue_convert_all(self))  # Shift+Ctrl+r (Tkinter widzi Shift jako wielką literę)
         self.bind("<Control-r>", lambda e: open_pattern_manager(self))
         self.bind("<Control-G>", lambda e: enqueue_generate_all(self))  # Shift+Ctrl+g
+        
+        # AI Tasks
+        self.bind("<Control-A>", lambda e: self.open_ai_runner_global()) # Shift+Ctrl+a
 
         # Kontekstowe (Linia) - bindujemy do root, ale sprawdzamy kontekst w metodach
         self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())
@@ -198,6 +202,14 @@ class SubtitleStudioApp(ctk.CTk):
         # Wywołujemy metodę zmiany widoku w panelu
         self.subtitle_panel._on_view_mode_change("TTS" if current == "Napisy" else "Napisy")
         return "break"
+
+    def open_ai_runner_global(self):
+        """Otwiera okno zadań AI dla wszystkich linii."""
+        if not self.lines:
+             messagebox.showwarning("Brak danych", "Brak wierszy do przetworzenia.", parent=self)
+             return
+        
+        AITaskRunnerWindow(self, self.lines, is_global=True)
 
     def _on_ctrl_c(self, event=None):
         """
