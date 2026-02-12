@@ -561,20 +561,17 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
     
     total = len(lines)
     processed_count = 0
+    lines_since_save = 0
     
     for i, line in enumerate(lines):
         # 1. check control
-        if control.is_stopped:
-            progress_callback(processed_count, total, "Anulowano przez użytkownika.")
-            return
+        if control.is_stopped: break
 
         # Wait if paused. If stopped while paused, stop() calls resume() to unblock this.
         control.wait_if_paused()
         
         # Check stopped again
-        if control.is_stopped:
-             progress_callback(processed_count, total, "Anulowano przez użytkownika.")
-             return
+        if control.is_stopped: break
             
         progress_callback(processed_count, total, f"Przetwarzanie wiersza {i+1}...")
 
@@ -610,7 +607,7 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
                 # Check for optional model attribute in task, fallback to None (service uses default)
                 task_model = getattr(task, 'model', None)
                 
-                print(f"SI IN: {result_text}")
+                print(f"SI  IN: {result_text}")
                 
                 # Use standard 'process_text' which includes the security wrapper
                 response = service.process_text(
@@ -640,19 +637,26 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
             
             line.ai_processed = True
             
-            # Save line (using update_line_in_csv might incur IO overhead per line)
-            # Maybe save every 10 lines?
-            # update_line_in_csv(line, str(app_ref.loaded_path))
-            
             processed_count += 1
+            lines_since_save += 1
             progress_callback(processed_count, total, f"Ukończono wiersz {i+1}")
+
+            # Batch save every 5 lines
+            if lines_since_save >= 5:
+                try:
+                    if app_ref.loaded_path:
+                        update_lines_in_csv(lines, str(app_ref.loaded_path))
+                        lines_since_save = 0
+                except: pass
             
     # End
-    if not control.is_stopped:
-        # Bulk save
-        try:
-            if app_ref.loaded_path:
-                update_lines_in_csv(lines, str(app_ref.loaded_path))
-        except: pass
-        
+    # Always try to save pending changes, even if stopped
+    try:
+        if app_ref.loaded_path:
+            update_lines_in_csv(lines, str(app_ref.loaded_path))
+    except: pass
+
+    if control.is_stopped:
+        progress_callback(processed_count, total, "Anulowano przez użytkownika.")
+    else:
         progress_callback(processed_count, total, "Zakończono pomyślnie.")
