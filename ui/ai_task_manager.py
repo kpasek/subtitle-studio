@@ -41,7 +41,7 @@ class AITaskManagerWindow(ctk.CTkToplevel):
 
         ctk.CTkLabel(self.frame_left, text="Dostępne Zadania", font=("", 14, "bold")).pack(pady=5)
         
-        self.scroll_list = ctk.CTkScrollableFrame(self.frame_left)
+        self.scroll_list = ctk.CTkScrollableFrame(self.frame_left, width=450)
         self.scroll_list.pack(fill="both", expand=True, padx=5, pady=5)
 
         btn_add = ctk.CTkButton(self.frame_left, text="+ Nowe Zadanie", command=self._add_task)
@@ -90,7 +90,7 @@ class AITaskManagerWindow(ctk.CTkToplevel):
 
             btn = ctk.CTkButton(
                 self.scroll_list, 
-                text=f"{task.name} {'(Wbudowane)' if task.is_readonly else ''}",
+                text=f"{task.name} {'(RO)' if task.is_readonly else ''}",
                 command=make_cmd(task),
                 fg_color=["#3B8ED0", "#1F6AA5"] if is_selected else "transparent",
                 text_color="white" if is_selected else ("#DCE4EE", "#DCE4EE"),

@@ -264,7 +264,7 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
                 
                 # Switch app context
                 self.master.loaded_path = new_path
-                self.master.lbl_filename.configure(text=new_filename)
+                self.master.lbl_filename.configure(text=f"Plik: {new_filename}")
                 
                 # Update project config to remember this new file
                 set_project_config(self.master, "subtitle_path", str(new_path))

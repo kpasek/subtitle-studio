@@ -91,7 +91,7 @@ Wyjście: "Spotkajmy się na kolu." (Usunięto opis, spolszczono popularne słow
         is_readonly=True
     ),
     AITask(
-        name="Zamień obce słowa na fonetyczne odpowiedniki",
+        name="Fonetyczne odpowiedniki obcych słów",
         system_prompt=(
             "Jesteś profesjonalnym tłumaczem napisów. Zamień obce słowa na ich fonetyczne odpowiedniki w języku polskim. Zwróć TYLKO gotowy tekst.\n"
             "Jeśli masz wątpliwości co do tego czy dany wyraz powinien zostać przełożony na inny sposób zawsze lepiej zwrócić oryginalny tekst bez żadnych przeróbek."
