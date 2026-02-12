@@ -279,6 +279,9 @@ def _finalize_processing(app, remove_empty: bool, remove_duplicates: bool):
     app.loaded_path = new_path
     app.lines = final_objs
 
+    if app.lbl_filename:
+        app.lbl_filename.configure(text=f"Plik: {new_filename}")
+
     # Wyłączamy wzorce usuwające (zostały "wypalone" w tekst)
     for p in app.custom_remove:
         p.enabled = False

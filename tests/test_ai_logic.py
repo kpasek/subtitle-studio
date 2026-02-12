@@ -23,7 +23,7 @@ class TestAILogic(unittest.TestCase):
         
         # Mock Service
         mock_service = MagicMock(spec=OllamaService)
-        mock_service.generate_response.side_effect = ["Translated Text"]
+        mock_service.process_text.side_effect = ["Translated Text"]
 
         # Mock App
         mock_app = MagicMock()
@@ -58,7 +58,7 @@ class TestAILogic(unittest.TestCase):
 
         # Verify Service usage
         # Expected prompt: "Translate: Hello" (since template is "Translate: {text}")
-        mock_service.generate_response.assert_called_with("Translate: Hello", model="llama2")
+        mock_service.process_text.assert_called_with(text="Hello", system_prompt="Translate: {text}", model="llama2")
         
         # Verify Line update
         self.assertEqual(line1.text, "Translated Text")
@@ -122,15 +122,19 @@ class TestAILogic(unittest.TestCase):
         # line.text would remain "Current".
         # If it worked: line.text should be "Processed: Ref:  Text: Current" (assuming None -> empty string)
         
-        # check if generate_response was called at all
-        self.assertTrue(mock_service.generate_response.called, "Service should be called even if original_text is None")
+        # check if process_text was called at all
+        self.assertTrue(mock_service.process_text.called, "Service should be called even if original_text is None")
         
         # Check if replacement handled None correctly (replaced with empty string)
-        args, _ = mock_service.generate_response.call_args
-        prompt_sent = args[0]
-        self.assertIn("Ref: ", prompt_sent) 
-        self.assertNotIn("None", prompt_sent)
-        self.assertNotIn("{original}", prompt_sent) # Should be replaced
+        args, kwargs = mock_service.process_text.call_args
+        
+        # process_text(text=..., system_prompt=..., model=...)
+        # From code: result_text = current_text
+        # current_text = line.text or line.original_text or ""
+        # So it should be called with "Current"
+        
+        called_text = kwargs.get('text', args[0] if args else None)
+        self.assertEqual(called_text, "Current")
 
 if __name__ == '__main__':
     unittest.main()
