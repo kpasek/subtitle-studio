@@ -84,6 +84,9 @@ TERAZ TWÓJ TEKST DO PRZETWORZENIA:
             # Additional cleanup for echoed tags
             cleaned_response = re.sub(r'</?text_to_process>', '', raw_response, flags=re.IGNORECASE).strip()
             
+            # Normalize whitespace: replace newlines and multiple spaces with a single space
+            cleaned_response = re.sub(r'\s+', ' ', cleaned_response)
+            
             return cleaned_response
         except Exception as e:
             logger.error(f"SI Processing error: {e}")
