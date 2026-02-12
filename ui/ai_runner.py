@@ -104,6 +104,10 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         self.list_available.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
         
         self._refresh_available_list()
+        
+        # Select first item if available
+        if self.list_available.size() > 0:
+            self.list_available.selection_set(0)
 
         # Middle: Buttons
         frame_btns = ctk.CTkFrame(self, fg_color="transparent")
@@ -282,7 +286,15 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
                 # 2. Switch app to `original_ai_TIMESTAMP.csv`
                 # 3. Run AI on the app (which now points to the new file).
                 
-                new_filename = f"{current_p.stem}_AI_{timestamp}{current_p.suffix}"
+                # Logic for filename cleaning (preventing explosion)
+                # Keep base name and one timestamp tag
+                stem = current_p.stem
+                if "_AI_" in stem:
+                    base_name = stem.split("_AI_")[0]
+                else:
+                    base_name = stem
+                
+                new_filename = f"{base_name}_AI_{timestamp}{current_p.suffix}"
                 new_path = current_p.parent / new_filename
                 shutil.copy2(current_p, new_path)
                 
@@ -291,6 +303,9 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
                 self.master.lbl_filename.configure(text=f"Plik: {new_filename}")
                 
                 # Update project config to remember this new file
+                # Force update by clearing subtitle_path first if needed, 
+                # but explicit calling save_project should be enough as _gather uses loaded_path
+                self.master.project_config["subtitle_path"] = str(new_path)
                 set_project_config(self.master, "subtitle_path", str(new_path))
                 save_project(self.master)
                 
