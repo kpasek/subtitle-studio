@@ -174,6 +174,10 @@ def enqueue_convert_all(app):
     source_files = list(app.audio_dir.glob("output1 (*).wav")) + list(app.audio_dir.glob("output1 (*).mp3"))
     total_source = len(source_files)
 
+    if total_source == 0:
+        messagebox.showinfo("Informacja", "Brak plików źródłowych (output1_*.wav/mp3) do konwersji.", parent=app)
+        return
+
     ready_dir = ready_dir_from_audio_dir(app.audio_dir)
     existing_target = 0
     if ready_dir.exists():
@@ -185,7 +189,7 @@ def enqueue_convert_all(app):
         "Konwersja audio",
         total_source,
         existing_target,
-        callback=lambda overwrite: _execute_convert_all(app, overwrite)
+        callback=lambda overwrite, only_errors=False: _execute_convert_all(app, overwrite)
     )
 
 

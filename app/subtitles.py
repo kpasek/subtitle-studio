@@ -1459,6 +1459,11 @@ class SubtitlePanel(ctk.CTkFrame):
                 if idx is not None and 0 <= idx < len(self.app.lines):
                     self.app.lines[idx].audio_filename = Path(path).name
                     self.app.lines[idx].audio_status = 'OK'
+                    
+                    # Reset verification flags
+                    self.app.lines[idx].audio_similarity = 0.0
+                    self.app.lines[idx].audio_hallucination = "PENDING"
+
                     try:
                         from app.io import save_lines_to_file
                         if getattr(self.app, 'loaded_path', None):
