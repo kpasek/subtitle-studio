@@ -90,11 +90,30 @@ class SubtitlePanel(ctk.CTkFrame):
                                            fg_color="#1E90FF", hover_color="#4169E1")
         self.verify_button.pack(side="left", padx=4, pady=5)
         
-        # Restore Button
-        self.btn_restore = ctk.CTkButton(top_frame, text="↺ Przywróć", width=100,
-                                         command=self.restore_selected_values,
-                                         fg_color="#7f8c8d", hover_color="#95a5a6")
+
+        # Restore Button z tooltipem o skrócie
+        self.btn_restore = ctk.CTkButton(
+            top_frame,
+            text="↺ Przywróć",
+            width=100,
+            command=self.restore_selected_values,
+            fg_color="#7f8c8d",
+            hover_color="#95a5a6"
+        )
         self.btn_restore.pack(side="left", padx=4, pady=5)
+        self.btn_restore._text_label.configure(text="↺ Przywróć (Ctrl+D)")
+
+        # Button: Oznacz jako Gotowe
+        self.btn_done = ctk.CTkButton(
+            top_frame,
+            text="✅ Gotowe",
+            width=100,
+            command=lambda: self.set_selected_status("DONE"),
+            fg_color="#27ae60",
+            hover_color="#219150"
+        )
+        self.btn_done.pack(side="left", padx=4, pady=5)
+        self.btn_done._text_label.configure(text="✅ Gotowe (Ctrl+Shift+D)")
 
         self.delete_all_button = ctk.CTkButton(top_frame, text="🗑️ Usuń audio", width=100,
                                                command=self.delete_selected_dialogs, state="disabled",

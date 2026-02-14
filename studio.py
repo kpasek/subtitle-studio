@@ -185,6 +185,7 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())
         self.bind("<Control-d>", lambda e: self.subtitle_panel.restore_selected_values())
         self.bind("<Control-g>", lambda e: self.subtitle_panel.generate_selected_dialogs())
+        self.bind("<Control-Shift-D>", lambda e: self.subtitle_panel.set_selected_status("DONE"))
 
         # Ctrl+X (Usuń audio) - uwaga na konflikt z wycinaniem tekstu
         self.bind("<Control-x>", self._on_ctrl_x)
