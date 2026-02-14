@@ -361,7 +361,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_filename': line.audio_filename,
                 'audio_transcribed_text': line.audio_transcribed_text,
                 'audio_hallucination': line.audio_hallucination,
-                'status_flag': getattr(line, 'status_flag', None),
+                'status_flag': (getattr(line, 'status_flag', None) or ''),
                 'ai_processed': str(getattr(line, 'ai_processed', False)),
                 'uid': uid
             }
@@ -386,7 +386,7 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_filename': line.audio_filename,
                 'audio_transcribed_text': line.audio_transcribed_text,
                 'audio_hallucination': line.audio_hallucination,
-                'status_flag': getattr(line, 'status_flag', None),
+                'status_flag': (getattr(line, 'status_flag', None) or ''),
                 'ai_processed': str(getattr(line, 'ai_processed', False)),
                 'uid': uid
             }
@@ -455,30 +455,39 @@ def delete_lines_from_csv(uids_to_delete: List[str], csv_path: Optional[str] = N
     if deleted_count == 0:
         return 0
 
-    _csv_cache_data = new_cache
-    
+    # Ensure all fields are valid for CSV (no None values for status_flag, etc.)
+    processed_cache = []
+    for row in new_cache:
+        row = dict(row)  # copy
+        # Normalize status_flag and ai_processed
+        row['status_flag'] = row.get('status_flag') or ''
+        row['ai_processed'] = str(row.get('ai_processed', False))
+        processed_cache.append(row)
+
+    _csv_cache_data = processed_cache
+
     fieldnames = [
         'original_text', 'text', 'tts_text', 'audio_duration',
         'audio_similarity', 'audio_format', 'audio_filename',
         'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed',
         'uid'
     ]
-    
+
     try:
         temp_path = p.with_suffix(p.suffix + ".del.tmp")
         try:
             with open(temp_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
                 writer.writeheader()
-                writer.writerows(new_cache)
+                writer.writerows(processed_cache)
             temp_path.replace(p)
-            
+
             _csv_cache_mtime = p.stat().st_mtime
         finally:
             if temp_path.exists():
                 try: temp_path.unlink()
                 except: pass
-                
+
         return deleted_count
     except Exception as e:
         print(f"[DELETE_CSV_ERR] {e}")

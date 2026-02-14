@@ -1673,12 +1673,13 @@ class SubtitlePanel(ctk.CTkFrame):
             # Usuń wiersz z listy
             del self.app.lines[idx]
 
-        # Trwałe usunięcie z CSV
-        if uids_to_remove_from_db and self.app.loaded_path:
+        # Trwałe usunięcie z CSV poprzez nadpisanie pliku
+        if self.app.loaded_path:
              try:
-                 delete_lines_from_csv(uids_to_remove_from_db, str(self.app.loaded_path))
+                 from app.io import save_lines_to_file
+                 save_lines_to_file(str(self.app.loaded_path), self.app.lines)
              except Exception as e:
-                 print(f"Błąd podczas usuwania z CSV: {e}")
+                 print(f"Błąd podczas zapisywania zmian po usunięciu: {e}")
 
         # Wyczyść zaznaczenie
         self.selected_line_indices = []
