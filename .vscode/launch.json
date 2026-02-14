@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Studio.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/studio.py",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Buduj aplikację (build_pyinstaller.sh)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_pyinstaller.sh",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Buduj i instaluj aplikację (build_pyinstaller.sh install)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_pyinstaller.sh",
+      "args": ["install"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

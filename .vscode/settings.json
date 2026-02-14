@@ -1,0 +1,25 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^python3 ui/generation_summary\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -m unittest tests/test_io\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    },
+    "python.testing.unittestArgs": [
+        "-v",
+        "-s",
+        "./tests",
+        "-p",
+        "*test*.py"
+    ],
+    "python.testing.pytestEnabled": false,
+    "python.testing.unittestEnabled": true,
+    "python.envFile": "${workspaceFolder}/.env"
+    ,
+    "python.pythonPath": "${workspaceFolder}/.venv/bin/python",
+    "terminal.integrated.defaultProfile.linux": "zsh"
+}
