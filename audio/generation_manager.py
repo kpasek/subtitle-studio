@@ -314,6 +314,9 @@ class GenerationManager:
                 self.worker.stop(clear_queue=True)
             raise InterruptedError()
 
+        if self.worker:
+            self.worker.stop()
+
         self._notify_progress(total_to_gen, total_to_gen, "Zakończono.")
         print("DEBUG: Zadanie generowania zakończone sukcesem.")
 
@@ -411,6 +414,9 @@ class GenerationManager:
                 self.worker.stop(clear_queue=True)
             raise InterruptedError("Konwersja anulowana przez użytkownika.")
             
+        if self.worker:
+            self.worker.stop()
+
         self._notify_progress(total_tasks, total_tasks, "Zakończono konwersję.")
 
     def _load_tts_model(self, model_name: str, config: dict) -> Union[Dict, TTSBase, None]:
