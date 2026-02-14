@@ -530,14 +530,18 @@ class SubtitlePanel(ctk.CTkFrame):
                     l_uid = getattr(line_obj, 'uid', id(line_obj))
                     if l_uid in uid_to_item:
                         items_to_select.append(uid_to_item[l_uid])
-            
             if items_to_select:
                 self.tree.selection_set(*items_to_select)
                 self.tree.see(items_to_select[0])
+                # Synchronizuj selected_line_indices z faktycznym stanem tabeli
+                self.on_tree_select(None)
             else:
                 self.app.selected_line_index = None
+                self.selected_line_indices = []
+                self.update_audio_buttons_state()
         else:
             self.app.selected_line_index = None
+            self.selected_line_indices = []
             self.update_audio_buttons_state()
 
     def on_tree_select(self, event):
