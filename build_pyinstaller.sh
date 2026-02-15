@@ -33,7 +33,9 @@ echo "▶️  Budowanie aplikacji przez PyInstaller..."
 if [ "$1" == "install" ]; then
     echo "📦 Kopiowanie aplikacji do $TARGET_DIR"
     mkdir -p "$TARGET_DIR"
-    cp -r "$OUTPUT_DIR"* "$TARGET_DIR"
+    cp -a "$OUTPUT_DIR"/* "$TARGET_DIR"
+    # Kopiuj także ukryte pliki/katalogi (jeśli są)
+    cp -a "$OUTPUT_DIR"/.[!.]* "$TARGET_DIR" 2>/dev/null || true
     echo "✅ Aplikacja została skopiowana do $TARGET_DIR"
 else
     echo "ℹ️  Budowanie zakończone. Aby zainstalować, uruchom: ./build_pyinstaller.sh install"

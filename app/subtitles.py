@@ -607,12 +607,12 @@ class SubtitlePanel(ctk.CTkFrame):
         self.update_audio_buttons_state()
 
     def select_all_visible(self, event=None):
-        """Zaznacza wszystkie widoczne wiersze (limit 100)."""
+        """Zaznacza wszystkie widoczne wiersze (limit 1000)."""
         items = self.tree.get_children()
         if not items:
             return "break"
 
-        limit = 100
+        limit = 1000
         to_select = items[:limit]
 
         self.tree.selection_set(*to_select)
