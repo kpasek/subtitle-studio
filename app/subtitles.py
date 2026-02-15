@@ -51,9 +51,10 @@ class SubtitlePanel(ctk.CTkFrame):
             {"id": "content", "text": "Tekst", "width": 600, "anchor": "w", "stretch": True},
             {"id": "status", "text": "Status", "width": 80, "anchor": "center", "stretch": False},
             {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
+            {"id": "char_count", "text": "CHAR", "width": 90, "anchor": "center", "stretch": False},
             {"id": "cps", "text": "CPS", "width": 70, "anchor": "center", "stretch": False},
             {"id": "similarity", "text": "SIM %", "width": 80, "anchor": "center", "stretch": False},
-            {"id": "hallucination", "text": "Halu!", "width": 70, "anchor": "center", "stretch": False},
+            {"id": "hallucination", "text": "HALU!", "width": 70, "anchor": "center", "stretch": False},
             {"id": "audio_file", "text": "Plik", "width": 250, "anchor": "w", "stretch": False},
         ]
 
@@ -392,6 +393,7 @@ class SubtitlePanel(ctk.CTkFrame):
         idx_content = col_pos.get("content")
         idx_status = col_pos.get("status")
         idx_duration = col_pos.get("duration")
+        idx_char_count = col_pos.get("char_count")
         idx_cps = col_pos.get("cps")
         idx_similarity = col_pos.get("similarity")
         idx_hallucination = col_pos.get("hallucination")
@@ -486,6 +488,15 @@ class SubtitlePanel(ctk.CTkFrame):
 
             if idx_content is not None:
                 row_values[idx_content] = line_text
+
+            if idx_char_count is not None:
+                if view_mode == 'Napisy':
+                    char_val = len(line_obj.get_text())
+                elif view_mode == 'TTS':
+                    char_val = len(line_obj.get_tts_text())
+                else:
+                    char_val = len(line_obj.original_text)
+                row_values[idx_char_count] = str(char_val)
 
             if idx_status is not None:
                 flag = getattr(line_obj, 'status_flag', None)
