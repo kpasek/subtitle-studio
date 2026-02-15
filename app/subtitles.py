@@ -150,15 +150,15 @@ class SubtitlePanel(ctk.CTkFrame):
 
         self.filter_button = ctk.CTkButton(search_frame, text="Filtruj", command=self.open_filter_window, width=80)
         self.filter_button.pack(side="left", padx=(0, 5))
-        
+
+        self.search_button = ctk.CTkButton(search_frame, text="Odśwież", width=80,
+                           command=lambda: apply_patterns(self.app))
+        self.search_button.pack(side="left", padx=(0, 5))
+
         self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Szukaj tekstu...")
         self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.search_entry.bind("<Return>", lambda event: apply_patterns(self.app))
         self.search_entry.bind("<Control-BackSpace>", lambda event: self.search_entry.delete(0, tk.END))
-
-        self.search_button = ctk.CTkButton(search_frame, text="Szukaj", width=80,
-                                            command=lambda: apply_patterns(self.app))
-        self.search_button.pack(side="left", padx=0)
 
 
         # 3. Table Frame
