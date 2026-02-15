@@ -11,3 +11,4 @@ build
 /gui.build/
 /gui.dist/
 /.subtitle_studio_config.json
+logs

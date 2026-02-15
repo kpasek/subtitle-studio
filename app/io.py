@@ -54,7 +54,8 @@ def _ensure_csv_cache(path: str) -> bool:
         _csv_cache_mtime = current_mtime
         return True
     except Exception as e:
-        print(f"[CSV_CACHE_ERR] {e}")
+        from app.logger import Logger
+        Logger.error(f"[CSV_CACHE_ERR] {e}")
         return False
 
 def _extract_uid_component(value: Optional[str]) -> Optional[str]:
@@ -228,7 +229,8 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
             with open(p, 'r', encoding='utf-8', newline='') as f:
                 return _load_csv_file(f)
         except UnicodeDecodeError:
-            print("[LOAD_CSV] UTF-8 decode failed, probuje latin-1...")
+            from app.logger import Logger
+            Logger.info("[LOAD_CSV] UTF-8 decode failed, probuje latin-1...")
             with open(p, 'r', encoding='latin-1', newline='') as f:
                 return _load_csv_file(f)        
 
@@ -302,7 +304,8 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
             _csv_cache_path = str(p)
             _csv_cache_mtime = p.stat().st_mtime
             
-            print(f"[SAVE_CSV] Zapisano {saved_count} linii (posortowano po UID)")
+            from app.logger import Logger
+            Logger.info(f"[SAVE_CSV] Zapisano {saved_count} linii (posortowano po UID)")
         finally:
             if temp_path.exists():
                 try: temp_path.unlink()
@@ -422,7 +425,8 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 
         return updated_count
     except Exception as e:
-        print(f"[UPDATE_CSV_ERR] {e}")
+        from app.logger import Logger
+        Logger.error(f"[UPDATE_CSV_ERR] {e}")
         return 0
 
 
@@ -490,5 +494,6 @@ def delete_lines_from_csv(uids_to_delete: List[str], csv_path: Optional[str] = N
 
         return deleted_count
     except Exception as e:
-        print(f"[DELETE_CSV_ERR] {e}")
+        from app.logger import Logger
+        Logger.error(f"[DELETE_CSV_ERR] {e}")
         return 0

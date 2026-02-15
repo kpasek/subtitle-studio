@@ -130,7 +130,8 @@ def _execute_generate_all(app, overwrite: bool, only_errors: bool = False):
                 except: 
                     pass
         except Exception as e:
-            print(f"Error update line: {e}")
+            from app.logger import Logger
+            Logger.error(f"Error update line: {e}")
             try:
                 from app.io import save_lines_to_file
                 if getattr(app, 'loaded_path', None):
@@ -203,7 +204,8 @@ def _execute_convert_all(app, overwrite: bool):
                 for f in ready_dir.glob("*.mp3"):
                     os.remove(f)
             except Exception as e:
-                print(f"Błąd czyszczenia katalogu ready: {e}")
+                from app.logger import Logger
+                Logger.error(f"Błąd czyszczenia katalogu ready: {e}")
 
     if not app.current_project_path:
         messagebox.showwarning("Brak projektu", "Zapisz projekt przed dodaniem do kolejki.", parent=app)

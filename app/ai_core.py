@@ -1,8 +1,8 @@
 import requests
-import logging
+from app.logger import Logger
 import re
 
-logger = logging.getLogger(__name__)
+logger = Logger
 
 
 class OllamaService:

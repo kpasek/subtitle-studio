@@ -2,12 +2,12 @@ import threading
 import queue
 import time
 import uuid
-import logging
+# from app.logger import Logger
 from typing import Callable, Any, Optional, Dict, List
 from dataclasses import dataclass, field
 
-# Konfiguracja logowania (można dostosować do systemu logowania w aplikacji)
-logger = logging.getLogger(__name__)
+from app.logger import Logger
+logger = Logger
 
 @dataclass
 class WorkerTask:
@@ -145,7 +145,7 @@ class Worker:
                     task.on_complete(result)
                     
             except Exception as e:
-                logger.error(f"[{self.name}] Błąd w zadaniu {task.task_id}: {e}", exc_info=True)
+                logger.error(f"[{self.name}] Błąd w zadaniu {task.task_id}: {e}")
                 if task.on_error:
                     task.on_error(e)
             finally:

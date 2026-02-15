@@ -273,7 +273,8 @@ class PatternManagerWindow(ctk.CTkToplevel):
                 else:
                     tree.insert("", "end", iid=item_iid, values=(display_text,))
             except Exception as e:
-                print(f"Error displaying pattern item {i}: {e}")
+                from app.logger import Logger
+                Logger.error(f"Error displaying pattern item {i}: {e}")
                 continue
 
         tree.tag_configure('disabled', foreground='gray')
