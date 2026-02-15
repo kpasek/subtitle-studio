@@ -201,9 +201,9 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
 
     def _on_close(self):
         self.state_ref.remove_listener(self)
-        # We DO NOT clear master.ai_state here, to allow background run
-        # State is cleared only when user explicitly "Resets" or "Starts New" ??
-        # Or maybe check if finished?
+        # Jeśli zadanie zostało zakończone, resetuj ai_state, by umożliwić kolejne generowanie
+        if self.state_ref.is_finished:
+            self.master.ai_state = None
         self.destroy()
 
     def update_from_state(self, state: AIRunnerState):

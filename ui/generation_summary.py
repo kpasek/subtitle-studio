@@ -156,7 +156,11 @@ class GenerationSummaryWindow(ctk.CTkToplevel):
 
         # Odpinamy obserwatora, ale NIE zatrzymujemy managera (chyba że user kliknął Anuluj)
         if hasattr(self, 'manager') and self.manager:
-             self.manager.unregister_progress_observer(self._update_progress_safe)
+            self.manager.unregister_progress_observer(self._update_progress_safe)
+            # Reset managera jeśli nie ma aktywnego zadania (po zakończeniu)
+            if not self.manager.is_busy():
+                self.manager.worker = None
+                self.manager.current_job = None
         super().destroy()
 
     def _update_stats_preview(self):
