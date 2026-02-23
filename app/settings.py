@@ -355,7 +355,8 @@ class SettingsWindow(ctk.CTkToplevel):
             # Reset cached model if voice/API keys changed
             # Prościej: zawsze resetuj przy zapisie ustawień globalnych
             self.master.tts_model = None
-            print("Wyczyszczono cache modelu TTS z powodu zapisu ustawień globalnych.")
+            from app.logger import Logger
+            Logger.info("Wyczyszczono cache modelu TTS z powodu zapisu ustawień globalnych.")
 
         except Exception as e:
             messagebox.showerror(

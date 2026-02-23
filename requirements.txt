@@ -8,6 +8,4 @@ packaging
 audioop-lts
 nuitka
 pydub
-rapidfuzz
-openai-whisper
 pyinstaller

@@ -21,18 +21,9 @@ try:
 except ImportError:
     MUTAGEN_AVAILABLE = False
 
-try:
-    import whisper
-    WHISPER_AVAILABLE = True
-except ImportError:
-    WHISPER_AVAILABLE = False
-
-try:
-    from rapidfuzz import fuzz
-    RAPIDFUZZ_AVAILABLE = True
-except ImportError:
-    RAPIDFUZZ_AVAILABLE = False
-
+# Whisper i RapidFuzz usunięte na rzecz zewnętrznego API
+WHISPER_AVAILABLE = False
+RAPIDFUZZ_AVAILABLE = False
 
 @dataclass
 class VerificationJob:
@@ -52,8 +43,7 @@ class VerificationJob:
 class VerificationManager:
     _instance = None
     _lock = threading.Lock()
-    _whisper_model = None  # Cache dla modelu Whisper
-    _model_lock = threading.Lock()
+    # Usunięto cache modelu Whisper
 
     def __new__(cls):
         if cls._instance is None:
@@ -297,68 +287,10 @@ class VerificationManager:
         return -1.0
 
     @staticmethod
-    def _get_whisper_model():
-        """Załaduj model Whisper z cache'iem - aby nie ładować za każdym razem."""
-        with VerificationManager._model_lock:
-            if VerificationManager._whisper_model is None:
-                print(f"[INFO] Ładuję model Whisper (po raz pierwszy)...")
-                try:
-                    # Sprawdź czy CUDA jest dostępne
-                    import torch
-                    if torch.cuda.is_available():
-                        print(f"[INFO] CUDA dostępne, próbuję załadować na GPU...")
-                        try:
-                            VerificationManager._whisper_model = whisper.load_model("base", device="cuda")
-                            print(f"[INFO] Model załadowany na GPU (CUDA)")
-                        except Exception as cuda_err:
-                            print(f"[WARNING] Błąd ładowania na CUDA: {cuda_err}")
-                            print(f"[INFO] Załaduję na CPU zamiast...")
-                            VerificationManager._whisper_model = whisper.load_model("base", device="cpu")
-                            print(f"[INFO] Model załadowany na CPU")
-                    else:
-                        print(f"[INFO] CUDA niedostępne, załaduję na CPU...")
-                        VerificationManager._whisper_model = whisper.load_model("base", device="cpu")
-                        print(f"[INFO] Model teraz załadowany na CPU")
-                except Exception as e:
-                    print(f"[ERROR] Nie mogę załadować modelu Whisper: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    raise
-        return VerificationManager._whisper_model
-
-    @staticmethod
-    def _clean_non_latin_chars(text: str) -> str:
-        """
-        Usuwa znaki spoza alfabetu łacińskiego i polskiego.
-        Zachowuje: litery (A-Z, a-z), znaki polskie (ąćęłńóśźż), spacje i znaki interpunkcyjne.
-        Usuwa: znaki chińskie, cyrylice, hieroglify, itp.
-        """
-        import re
-        # Zachowaj tylko znaki łacińskie (ASCII), polskie i spacje
-        # \w w unicode daje literki ale też cyfry i _
-        # Będziemy bardziej selektywni: ASCII (a-z, A-Z, 0-9) + znaki polskie + spacje + znaki interpunkcyjne
-        
-        # Znaki polskie: ąćęłńóśźż (małe) i ĄĆĘŁŃÓŚŹŻ (duże)
-        allowed_pattern = r"[a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s.,!?\-;:\'\"]"
-        
-        # Zachowaj tylko znaki z allowed_pattern
-        cleaned = ''.join(char for char in text if re.match(allowed_pattern, char, re.UNICODE))
-        
-        # Usuń wielokrotne spacje
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-        
-        if cleaned != text:
-            print(f"[INFO] Oczyszczenie tekstu z obcych znaków:")
-            print(f"  Przed: {repr(text)}")
-            print(f"  Po:    {repr(cleaned)}")
-        
-        return cleaned
-
-    @staticmethod
     def verify_similarity(line, audio_path: str) -> dict:
         """
-        Weryfikuje similarity poprzez speech-to-text.
-        Konwertuje audio do tekstu za pomocą Whisper i porównuje z oryginalnym tekstem.
+        Weryfikuje similarity poprzez zewnętrzne API (lokalne).
+        Wysyła POST na http://localhost:8001/audio/verify
         
         Args:
             line: Obiekt Line do weryfikacji
@@ -367,6 +299,9 @@ class VerificationManager:
         Returns:
             dict: Słownik z wynikami {'similarity': float, 'transcribed_text': str, 'success': bool}
         """
+        import requests
+        import json
+
         result = {
             'similarity': 0.0,
             'transcribed_text': '',
@@ -374,92 +309,58 @@ class VerificationManager:
             'error': None
         }
 
-        if not RAPIDFUZZ_AVAILABLE:
-            result['error'] = 'rapidfuzz library not available'
+        audio_path_str = str(audio_path)
+        if not os.path.exists(audio_path_str):
+            result['error'] = f'Plik audio nie istnieje: {audio_path_str}'
             return result
         
-        # Jeśli brak bibliotek
-        if not WHISPER_AVAILABLE or not RAPIDFUZZ_AVAILABLE:
-            error_msg = 'Brak bibliotek (Whisper lub RapidFuzz)'
-            result['error'] = error_msg
-            return result
-        
-        audio_path = str(audio_path)
-        if not os.path.exists(audio_path):
-            result['error'] = f'Plik audio nie istnieje'
-            return result
-        
-        # Sprawdzenie rozmiaru pliku
-        file_size = os.path.getsize(audio_path)
-        if file_size < 1000:
-            result['error'] = f'Plik audio zbyt mały'
-            return result
-        
-        # Konwersja audio do tekstu
-        try:
-            model = VerificationManager._get_whisper_model()
-            
-            # Sprawdzenie czy model jest na CPU, jeśli tak wyłącz FP16
-            import torch
-            fp16 = True
-            try:
-                if next(model.parameters()).device.type == 'cpu':
-                    fp16 = False
-            except:
-                pass
-            
-            # Wyłącz warningi z Whisper'a dla CPU
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message=".*Performing inference on CPU.*")
-                warnings.filterwarnings("ignore", message=".*FP16 is not supported on CPU.*")
-                
-                transcription_result = model.transcribe(audio_path, language="pl", fp16=fp16)
-                transcribed_text = transcription_result.get("text", "").strip()
-            
-            # Usuń znaki spoza alfabetu łacińskiego i polskiego
-            transcribed_text = VerificationManager._clean_non_latin_chars(transcribed_text)
-            
-            # Fallback jeśli brak tekstu z language="pl"
-            if not transcribed_text:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message=".*Performing inference on CPU.*")
-                    warnings.filterwarnings("ignore", message=".*FP16 is not supported on CPU.*")
-                    
-                    transcription_result = model.transcribe(audio_path, fp16=fp16)
-                    transcribed_text = transcription_result.get("text", "").strip()
-                    transcribed_text = VerificationManager._clean_non_latin_chars(transcribed_text)
-        except Exception as e:
-            result['error'] = f'Błąd transkrypcji: {str(e)}'
-            return result
-        
-        # Porównanie z oryginalnym tekstem
-        try:
-            tts_text = line.get_tts_text().strip()
-            
-            # Oczyszczenie tekstów - usunięcie znaków specjalnych, średniki, etc.
-            import re
-            def clean_text(text):
-                # Usunięcie znaków specjalnych oprócz spacji, zachowanie tylko liter, cyfr i spacji
-                text = re.sub(r'[^\w\s]', ' ', text, flags=re.UNICODE)
-                # Zamiana wielkich spacji na pojedynczą
-                text = re.sub(r'\s+', ' ', text)
-                return text.strip().lower()
-            
-            cleaned_transcribed = clean_text(transcribed_text)
-            cleaned_tts = clean_text(tts_text)
-            
-            # Porównanie z tekstem do TTS - token sort ratio jest bardziej tolerancyjny
-            # Porównujemy oczyszczone teksty (tylko słowa, bez znaków specjalnych)
-            similarity = fuzz.token_sort_ratio(cleaned_transcribed, cleaned_tts) / 100.0
-            
-            result['similarity'] = similarity
-            result['transcribed_text'] = transcribed_text
+        # Pobranie oczekiwanego tekstu (TTS text)
+        tts_text = line.get_tts_text().strip()
+        if not tts_text:
+            result['similarity'] = 1.0 # Pusty tekst = puste audio = OK?
             result['success'] = True
-            
-        except Exception as e:
-            result['error'] = f'Błąd porównania: {str(e)}'
             return result
+
+        payload = {
+            "audio_path": os.path.abspath(audio_path_str),
+            "text": tts_text
+        }
         
+        api_url = "http://localhost:8001/audio/verify"
+
+        try:
+            response = requests.post(
+                api_url, 
+                json=payload, 
+                headers={'Content-Type': 'application/json'},
+                timeout=30 # Timeout dla API
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                # API zwraca: 
+                # {
+                #     "success": true,
+                #     "score": 98,    <-- to jest w skali 0-100
+                #     "match": true,
+                #     "transcribed_text": "...",
+                #     ...
+                # }
+                
+                sim_score = data.get('score', 0)
+                # Konwersja 0-100 na 0.0-1.0
+                similarity = float(sim_score) / 100.0
+                
+                result['similarity'] = similarity
+                result['transcribed_text'] = data.get('transcribed_text', '')
+                result['success'] = True
+            else:
+                result['error'] = f"API error: {response.status_code} - {response.text}"
+                
+        except Exception as e:
+            result['error'] = f"Połączenie z API nieudane: {str(e)}"
+            # Fallback lub logowanie błędu - tutaj po prostu zwracamy error w strukturze
+            
         return result
 
 

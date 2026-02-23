@@ -107,7 +107,8 @@ def import_old_project(app):
                                 else:
                                     old_file.unlink()
                             except Exception as e:
-                                print(f"Błąd zmiany nazwy pliku audio {old_file.name}: {e}")
+                                from app.logger import Logger
+                                Logger.error(f"Błąd zmiany nazwy pliku audio {old_file.name}: {e}")
                         
                         ready_dir = project_ready_dir(project_path)
                         old_ready = ready_dir / f"output1 ({old_uid}){ext}"
@@ -119,7 +120,8 @@ def import_old_project(app):
                                 else:
                                     old_ready.unlink()
                             except Exception as e:
-                                print(f"Błąd zmiany nazwy w ready/ {old_ready.name}: {e}")
+                                from app.logger import Logger
+                                Logger.error(f"Błąd zmiany nazwy w ready/ {old_ready.name}: {e}")
 
                 line.uid = new_uid
                 line.audio_filename = ""
@@ -200,7 +202,8 @@ def open_project(app, path: Optional[str] = None):
                         try:
                             save_lines_to_file(str(csv_candidate), loaded)
                         except Exception as write_err:
-                            print(f"Błąd zapisu CSV po imporcie TXT: {write_err}")
+                            from app.logger import Logger
+                            Logger.error(f"Błąd zapisu CSV po imporcie TXT: {write_err}")
                     if csv_candidate.exists():
                         app.loaded_path = csv_candidate
 
@@ -215,7 +218,8 @@ def open_project(app, path: Optional[str] = None):
                     pass
         
             except Exception as e:
-                print(f"Błąd wczytywania napisów z projektu: {e}")
+                from app.logger import Logger
+                Logger.error(f"Błąd wczytywania napisów z projektu: {e}")
                 app.lines = []
         else:
             app.lines = []
@@ -316,7 +320,8 @@ def _load_app_config(app, only_config=False):
                 cfg = json.load(f)
             app.global_config = cfg
         except Exception as e:
-            print(f"Błąd wczytywania configu: {e}")
+            from app.logger import Logger
+            Logger.error(f"Błąd wczytywania configu: {e}")
             app.global_config = {}
     else:
         app.global_config = {}

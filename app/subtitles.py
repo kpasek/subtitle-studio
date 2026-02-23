@@ -51,9 +51,10 @@ class SubtitlePanel(ctk.CTkFrame):
             {"id": "content", "text": "Tekst", "width": 600, "anchor": "w", "stretch": True},
             {"id": "status", "text": "Status", "width": 80, "anchor": "center", "stretch": False},
             {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
+            {"id": "char_count", "text": "CHAR", "width": 90, "anchor": "center", "stretch": False},
             {"id": "cps", "text": "CPS", "width": 70, "anchor": "center", "stretch": False},
             {"id": "similarity", "text": "SIM %", "width": 80, "anchor": "center", "stretch": False},
-            {"id": "hallucination", "text": "Halu!", "width": 70, "anchor": "center", "stretch": False},
+            {"id": "hallucination", "text": "HALU!", "width": 70, "anchor": "center", "stretch": False},
             {"id": "audio_file", "text": "Plik", "width": 250, "anchor": "w", "stretch": False},
         ]
 
@@ -318,7 +319,8 @@ class SubtitlePanel(ctk.CTkFrame):
         try:
             indexed.sort(key=key_fn, reverse=not asc)
         except Exception as e:
-            print(f"[ERROR] Sort failed for col {col_id}: {e}")
+            from app.logger import Logger
+            Logger.error(f"Sort failed for col {col_id}: {e}", context=f"col_id={col_id}")
             return
             
         self.app.lines = [ln for _, ln in indexed]
@@ -392,6 +394,7 @@ class SubtitlePanel(ctk.CTkFrame):
         idx_content = col_pos.get("content")
         idx_status = col_pos.get("status")
         idx_duration = col_pos.get("duration")
+        idx_char_count = col_pos.get("char_count")
         idx_cps = col_pos.get("cps")
         idx_similarity = col_pos.get("similarity")
         idx_hallucination = col_pos.get("hallucination")
@@ -486,6 +489,15 @@ class SubtitlePanel(ctk.CTkFrame):
 
             if idx_content is not None:
                 row_values[idx_content] = line_text
+
+            if idx_char_count is not None:
+                if view_mode == 'Napisy':
+                    char_val = len(line_obj.get_text())
+                elif view_mode == 'TTS':
+                    char_val = len(line_obj.get_tts_text())
+                else:
+                    char_val = len(line_obj.original_text)
+                row_values[idx_char_count] = str(char_val)
 
             if idx_status is not None:
                 flag = getattr(line_obj, 'status_flag', None)
@@ -595,12 +607,12 @@ class SubtitlePanel(ctk.CTkFrame):
         self.update_audio_buttons_state()
 
     def select_all_visible(self, event=None):
-        """Zaznacza wszystkie widoczne wiersze (limit 100)."""
+        """Zaznacza wszystkie widoczne wiersze (limit 1000)."""
         items = self.tree.get_children()
         if not items:
             return "break"
 
-        limit = 100
+        limit = 1000
         to_select = items[:limit]
 
         self.tree.selection_set(*to_select)
@@ -748,7 +760,8 @@ class SubtitlePanel(ctk.CTkFrame):
             if self.app.loaded_path:
                 update_line_in_csv(self.app.lines[line_idx], str(self.app.loaded_path))
         except Exception as e:
-            print(f"Błąd zapisu do CSV: {e}")
+            from app.logger import Logger
+            Logger.error(f"Błąd zapisu do CSV: {e}")
         
         # Odśwież UI pojedynczego wiersza (Optymalizacja)
         values = list(self.tree.item(item_id, "values"))
@@ -835,7 +848,8 @@ class SubtitlePanel(ctk.CTkFrame):
                 update_lines_in_csv(to_update, str(self.app.loaded_path))
                 self.set_preview(self.app.lines)
             except Exception as e:
-                print(f"Error saving status: {e}")
+                from app.logger import Logger
+                Logger.error(f"Error saving status: {e}")
 
     def restore_selected_values(self):
         """
@@ -1090,7 +1104,8 @@ class SubtitlePanel(ctk.CTkFrame):
                         pass
 
             except Exception as e:
-                print(f"[VERIFY_APPLY_ERROR] {e}")
+                from app.logger import Logger
+                Logger.error(f"[VERIFY_APPLY_ERROR] {e}")
                 continue
         
         # Aktualizacja licznika postępu
@@ -1153,7 +1168,8 @@ class SubtitlePanel(ctk.CTkFrame):
                     self._refresh_lines_view(indices_to_refresh)
                 
             except Exception as e:
-                print(f"[APPLY_RESULTS] BŁĄD w odświeżaniu widoku: {e}")
+                from app.logger import Logger
+                Logger.error(f"[APPLY_RESULTS] BŁĄD w odświeżaniu widoku: {e}")
 
     def _refresh_lines_view(self, indices: List[int]):
         """Szybkie odświeżenie widoku (tylko kolumn weryfikacji) dla podanych indeksów."""
@@ -1282,7 +1298,8 @@ class SubtitlePanel(ctk.CTkFrame):
         try:
             self.set_preview(self.app.lines)
         except Exception as e:
-            print(f"Błąd podczas stosowania filtrów: {e}")
+            from app.logger import Logger
+            Logger.error(f"Błąd podczas stosowania filtrów: {e}")
 
     def update_audio_buttons_state(self):
         """Aktualizuje stan przycisków w oparciu o zaznaczenie."""
@@ -1413,7 +1430,8 @@ class SubtitlePanel(ctk.CTkFrame):
             AITaskRunnerWindow(self.app, selected, is_global=False)
         except Exception as e:
             messagebox.showerror("Błąd", f"Nie można otworzyć okna zadań AI: {e}", parent=self.app)
-            print(f"Error opening AI runner: {e}")
+            from app.logger import Logger
+            Logger.error(f"Error opening AI runner: {e}")
 
 
     def generate_selected_dialogs(self):
@@ -1536,7 +1554,8 @@ class SubtitlePanel(ctk.CTkFrame):
                 self.ver_uid_to_index_map = new_uid_to_idx
                 
             except Exception as e:
-                print(f"[VERIFY_INIT_ERROR] Map creation failed: {e}")
+                from app.logger import Logger
+                Logger.error(f"[VERIFY_INIT_ERROR] Map creation failed: {e}")
                 
             if not was_running:
                 self.app.set_status(f"Weryfikacja {len(self.selected_line_indices)} linii...")
@@ -1668,7 +1687,8 @@ class SubtitlePanel(ctk.CTkFrame):
                             file_path.unlink()
                             deleted_audio_count += 1
                     except Exception as e:
-                        print(f"Błąd usuwania pliku {file_path}: {e}")
+                        from app.logger import Logger
+                        Logger.error(f"Błąd usuwania pliku {file_path}: {e}")
             
             # Usuń wiersz z listy
             del self.app.lines[idx]
@@ -1679,7 +1699,8 @@ class SubtitlePanel(ctk.CTkFrame):
                  from app.io import save_lines_to_file
                  save_lines_to_file(str(self.app.loaded_path), self.app.lines)
              except Exception as e:
-                 print(f"Błąd podczas zapisywania zmian po usunięciu: {e}")
+                 from app.logger import Logger
+                 Logger.error(f"Błąd podczas zapisywania zmian po usunięciu: {e}")
 
         # Wyczyść zaznaczenie
         self.selected_line_indices = []
