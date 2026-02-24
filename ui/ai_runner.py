@@ -5,6 +5,7 @@ from typing import List, TYPE_CHECKING
 import threading
 import datetime
 import shutil
+import re
 from pathlib import Path
 
 from app.builtin_tasks import BUILTIN_TASKS, AITask
@@ -619,8 +620,27 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
                 print(f"SI OUT: {response}")
                 
                 if response:
-                    result_text = response.strip()
-                
+                    # Parse tags if present
+                    sugestia_match = re.search(r'<sugestia>(.*?)</sugestia>', response, re.IGNORECASE | re.DOTALL)
+                    jakosc_match = re.search(r'<jakosc>(\d+)</jakosc>', response, re.IGNORECASE)
+
+                    if sugestia_match:
+                        line.ai_suggestion = sugestia_match.group(1).strip()
+                        result_text = line.ai_suggestion
+                    else:
+                        line.ai_suggestion = response.strip()
+                        result_text = line.ai_suggestion
+                        
+                    if jakosc_match:
+                        try:
+                            line.ai_dialogue_quality = int(jakosc_match.group(1))
+                        except:
+                            line.ai_dialogue_quality = 100
+                    else:
+                        # Reset quality if not provided? Or keep default 100?
+                        # User says "100% means it's good". So if model doesn't say, we assume it's what it is or 100.
+                        pass
+
                 if control.is_stopped: break
                 
         except Exception as e:
@@ -628,12 +648,9 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
             
         # 4. Save result
         if not control.is_stopped:
-            if target_field == "Text":
-                line.text = result_text
-            elif target_field == "TTS Text":
-                line.tts_text = result_text
-            elif target_field == "Original Text (Overwrite)":
-                line.original_text = result_text
+            # IMPORTANT: Based on user request "model nie powinien modyfikować tekstu bezpośrednio"
+            # We now ONLY update line.ai_suggestion instead of line.text/tts_text
+            # result_text currently holds the suggestion.
             
             line.ai_processed = True
             

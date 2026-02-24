@@ -76,7 +76,7 @@ LineList = List[Line]
 class SubtitleStudioApp(ctk.CTk):
     """Główna klasa aplikacji Subtitle Studio."""
     APP_TITLE = "Subtitle Studio"
-    APP_VERSION = "0.14.0"
+    APP_VERSION = "0.15.0"
 
     def __init__(self):
         super().__init__(className="SubtitleStudio")

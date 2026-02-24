@@ -218,6 +218,8 @@ def load_subtitle_file(path: str, audio_dir: Optional[Path] = None) -> List[Line
                 audio_hallucination=row.get('audio_hallucination', 'PENDING'),
                 status_flag=row.get('status_flag', None),
                 ai_processed=str(row.get('ai_processed', 'False')).lower() == 'true',
+                ai_suggestion=row.get('ai_suggestion', None),
+                ai_dialogue_quality=int(row.get('ai_dialogue_quality') or 100),
                 uid=uid
             ))
 
@@ -264,7 +266,8 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                 fieldnames = [
                     'original_text', 'text', 'tts_text', 'audio_duration',
                     'audio_similarity', 'audio_format', 'audio_filename',
-                    'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed', 'uid'
+                    'audio_transcribed_text', 'audio_hallucination', 'status_flag', 'ai_processed', 
+                    'ai_suggestion', 'ai_dialogue_quality', 'uid'
                 ]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
                 writer.writeheader()
@@ -286,6 +289,8 @@ def save_lines_to_file(path: str, lines: Union[List[str], List[Line]]) -> None:
                             'audio_hallucination': item.audio_hallucination,
                             'status_flag': item.status_flag,
                             'ai_processed': str(item.ai_processed),
+                            'ai_suggestion': item.ai_suggestion if item.ai_suggestion else '',
+                            'ai_dialogue_quality': item.ai_dialogue_quality,
                             'uid': _cleanup_uid_field(item.uid)  
                         }
                         if not row_dict['uid']:
@@ -366,6 +371,8 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_hallucination': line.audio_hallucination,
                 'status_flag': (getattr(line, 'status_flag', None) or ''),
                 'ai_processed': str(getattr(line, 'ai_processed', False)),
+                'ai_suggestion': (getattr(line, 'ai_suggestion', '') or ''),
+                'ai_dialogue_quality': getattr(line, 'ai_dialogue_quality', 100),
                 'uid': uid
             }
             new_cache.append(new_row)
@@ -391,6 +398,8 @@ def update_lines_in_csv(lines_to_update: List[Line], csv_path: Optional[str] = N
                 'audio_hallucination': line.audio_hallucination,
                 'status_flag': (getattr(line, 'status_flag', None) or ''),
                 'ai_processed': str(getattr(line, 'ai_processed', False)),
+                'ai_suggestion': (getattr(line, 'ai_suggestion', '') or ''),
+                'ai_dialogue_quality': getattr(line, 'ai_dialogue_quality', 100),
                 'uid': uid
             }
             new_cache.append(new_row)

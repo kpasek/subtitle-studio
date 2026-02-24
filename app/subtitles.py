@@ -49,6 +49,8 @@ class SubtitlePanel(ctk.CTkFrame):
         # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
         self.columns_config = [
             {"id": "content", "text": "Tekst", "width": 600, "anchor": "w", "stretch": True},
+            {"id": "ai_suggestion", "text": "Sugestia SI", "width": 400, "anchor": "w", "stretch": False},
+            {"id": "ai_quality", "text": "SI %", "width": 60, "anchor": "center", "stretch": False},
             {"id": "status", "text": "Status", "width": 80, "anchor": "center", "stretch": False},
             {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
             {"id": "char_count", "text": "CHAR", "width": 90, "anchor": "center", "stretch": False},
@@ -392,6 +394,8 @@ class SubtitlePanel(ctk.CTkFrame):
         col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
         
         idx_content = col_pos.get("content")
+        idx_ai_suggestion = col_pos.get("ai_suggestion")
+        idx_ai_quality = col_pos.get("ai_quality")
         idx_status = col_pos.get("status")
         idx_duration = col_pos.get("duration")
         idx_char_count = col_pos.get("char_count")
@@ -489,6 +493,13 @@ class SubtitlePanel(ctk.CTkFrame):
 
             if idx_content is not None:
                 row_values[idx_content] = line_text
+
+            if idx_ai_suggestion is not None:
+                row_values[idx_ai_suggestion] = line_obj.ai_suggestion or ""
+
+            if idx_ai_quality is not None:
+                quality = getattr(line_obj, 'ai_dialogue_quality', 100)
+                row_values[idx_ai_quality] = f"{quality}%" if line_obj.ai_processed else "-"
 
             if idx_char_count is not None:
                 if view_mode == 'Napisy':
@@ -802,6 +813,8 @@ class SubtitlePanel(ctk.CTkFrame):
                          state=tk.NORMAL if can_gen else tk.DISABLED)
         menu.add_command(label="✓ Weryfikuj audio (Ctrl+V)", command=self.verify_selected_dialogs,
                          state=tk.NORMAL if can_verify else tk.DISABLED)
+        menu.add_command(label="🎯 Zaakceptuj sugestię SI", command=self.accept_ai_suggestions,
+                         state=tk.NORMAL)
         menu.add_command(label="✨ Zadania SI (Ctrl+Alt+A)", command=self.open_ai_runner_selected,
                          state=tk.NORMAL)
         menu.add_command(label="🗑️ Usuń audio (Ctrl+X)", command=self.delete_selected_dialogs,
@@ -908,6 +921,36 @@ class SubtitlePanel(ctk.CTkFrame):
                 messagebox.showerror("Błąd", f"Nie udało się zapisać zmian: {e}", parent=self)
         else:
             self.app.set_status("Brak zmian do wykonania.")
+
+    def accept_ai_suggestions(self):
+        """Kopiuje sugestię SI do pola Text lub TTS Text (zależnie od widoku)."""
+        if not self.selected_line_indices:
+            return
+            
+        view_mode = self.app.view_mode.get()
+        if view_mode == "Oryginał":
+            messagebox.showinfo("Informacja", "Nie można edytować tekstu w trybie podglądu oryginału.")
+            return
+
+        to_update = []
+        for idx in self.selected_line_indices:
+            if 0 <= idx < len(self.app.lines):
+                line = self.app.lines[idx]
+                if line.ai_suggestion:
+                    if view_mode == "Napisy":
+                        line.set_text(line.ai_suggestion)
+                    elif view_mode == "TTS":
+                        line.set_tts_text(line.ai_suggestion)
+                    to_update.append(line)
+        
+        if to_update:
+            try:
+                if self.app.loaded_path:
+                    update_lines_in_csv(to_update, str(self.app.loaded_path))
+                self.set_preview(self.app.lines)
+                self.app.set_status(f"Zaakceptowano sugestie dla {len(to_update)} wierszy.")
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie udało się zapisać zmian: {e}")
 
     # --- Weryfikacja audio (zintegrowana) ---
     def start_verification(self, force_refresh=False, ignore_short=True, verify_options=None):
