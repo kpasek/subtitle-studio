@@ -26,7 +26,7 @@ class ShortcutsWindow(ctk.CTkToplevel):
             ("Edycja i Wybór", [
                 ("Ctrl + A", "Zaznacz widoczne (limit 100)"),
                 ("Ctrl + C", "Kopiuj tekst zaznaczonej linii"),
-                ("Ctrl + K", "Zatwierdź zmiany"),
+                ("Ctrl + K", "Zaakceptuj sugestię SI"),
                 ("Ctrl + R", "Menedżer wzorców"),
             ]),
 

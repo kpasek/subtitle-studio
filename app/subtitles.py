@@ -49,6 +49,7 @@ class SubtitlePanel(ctk.CTkFrame):
         # Konfiguracja kolumn - tutaj można łatwo dodawać nowe kolumny w przyszłości
         self.columns_config = [
             {"id": "content", "text": "Tekst", "width": 600, "anchor": "w", "stretch": True},
+            {"id": "ai_quality", "text": "SI %", "width": 60, "anchor": "center", "stretch": False},
             {"id": "status", "text": "Status", "width": 80, "anchor": "center", "stretch": False},
             {"id": "duration", "text": "Czas", "width": 80, "anchor": "center", "stretch": False},
             {"id": "char_count", "text": "CHAR", "width": 90, "anchor": "center", "stretch": False},
@@ -116,21 +117,31 @@ class SubtitlePanel(ctk.CTkFrame):
         self.btn_done.pack(side="left", padx=4, pady=5)
         self.btn_done._text_label.configure(text="✅ Gotowe (Ctrl+Shift+D)")
 
+        self.btn_accept_ai = ctk.CTkButton(
+            top_frame,
+            text="🎯 Zaakceptuj SI",
+            width=110,
+            command=self.accept_ai_suggestions,
+            fg_color="#d35400",
+            hover_color="#e67e22"
+        )
+        self.btn_accept_ai.pack(side="left", padx=4, pady=5)
+
         self.delete_all_button = ctk.CTkButton(top_frame, text="🗑️ Usuń audio", width=100,
                                                command=self.delete_selected_dialogs, state="disabled",
                                                fg_color="#C51616", hover_color="#920F0F")
-        self.delete_all_button.pack(side="left", padx=4, pady=5)
-
+        # self.delete_all_button.pack(...) # moved to menu as per user request
+        
         # --- Right/Middle side: View & Info ---
         ctk.CTkLabel(top_frame, text="|", text_color="gray").pack(side="left", padx=(10, 5))
 
         ctk.CTkLabel(top_frame, text="Widok:").pack(side="left", padx=(5, 5))
         self.view_switcher = ctk.CTkSegmentedButton(
             top_frame,
-            values=["Oryginał", "Napisy", "TTS"],
+            values=["Oryginał", "Napisy", "TTS", "Sugestia SI"],
             variable=self.app.view_mode,
             command=self._on_view_mode_change,
-            width=180
+            width=250
         )
         self.view_switcher.pack(side="left", padx=5, pady=5)
 
@@ -311,6 +322,9 @@ class SubtitlePanel(ctk.CTkFrame):
                 if col_id == 'audio_file':
                     val = getattr(ln, 'audio_filename', '') or ''
                     return (0, str(val).lower())
+                if col_id == 'ai_quality':
+                    val = getattr(ln, 'ai_dialogue_quality', 100)
+                    return (0, int(val if val is not None else 100))
             except Exception:
                 return (1, '')
             return (1, '')
@@ -387,11 +401,17 @@ class SubtitlePanel(ctk.CTkFrame):
         status_filter = f.get('status')
         ai_f = f.get('ai_status', 'Wszystkie')
         diff_f = f.get('diff_status', 'Wszystkie')
+        
+        # Nowe filtry SI
+        f_min_ai_qual = int(f.get('min_ai_quality')) if f.get('min_ai_quality') else None
+        f_max_ai_qual = int(f.get('max_ai_quality')) if f.get('max_ai_quality') else None
+        f_has_ai_sug = f.get('has_ai_suggestion', 'Wszystkie')
 
         # Prepare column indices once
         col_pos = {c['id']: idx for idx, c in enumerate(self.columns_config)}
         
         idx_content = col_pos.get("content")
+        idx_ai_quality = col_pos.get("ai_quality")
         idx_status = col_pos.get("status")
         idx_duration = col_pos.get("duration")
         idx_char_count = col_pos.get("char_count")
@@ -414,6 +434,13 @@ class SubtitlePanel(ctk.CTkFrame):
                 line_text = line_obj.get_text()
             elif view_mode == 'TTS':
                 line_text = line_obj.get_tts_text()
+            elif view_mode == 'Sugestia SI':
+                # Jeżeli SI nie sugerowało zmian, to ma się nic nie wyświetlać
+                line_text = line_obj.ai_suggestion or ""
+                # Jeśli tekst byłby taki sam jak aktualny (np. nikt go nie zmienił), 
+                # to też można pokazać puste, aby łatwiej było znaleźć różnice? 
+                # User mówi "jeżeli SI nie sugerowało zmian to ma się nic nie wyświetlać"
+                # To sugeruje, że jeśli ai_suggestion jest None lub puste.
             else:
                 line_text = line_obj.original_text
 
@@ -426,7 +453,17 @@ class SubtitlePanel(ctk.CTkFrame):
             # Length Filter
             if f_min_len is not None and len(line_text) < f_min_len: continue
             if f_max_len is not None and len(line_text) > f_max_len: continue
-            
+
+            # AI Quality Filter
+            q_val = getattr(line_obj, 'ai_dialogue_quality', 100)
+            if f_min_ai_qual is not None and q_val < f_min_ai_qual: continue
+            if f_max_ai_qual is not None and q_val > f_max_ai_qual: continue
+
+            # Has AI Suggestion Filter
+            has_ai_sug = bool(line_obj.ai_suggestion)
+            if f_has_ai_sug == 'Tak' and not has_ai_sug: continue
+            if f_has_ai_sug == 'Nie' and has_ai_sug: continue
+
             # CPS Filter
             cps_val = line_obj.calculate_cps()
             if f_min_cps is not None and cps_val < f_min_cps: continue
@@ -489,6 +526,13 @@ class SubtitlePanel(ctk.CTkFrame):
 
             if idx_content is not None:
                 row_values[idx_content] = line_text
+
+            if idx_ai_quality is not None:
+                q_val = getattr(line_obj, 'ai_dialogue_quality', None)
+                if q_val is not None:
+                    row_values[idx_ai_quality] = f"{q_val}%"
+                else:
+                    row_values[idx_ai_quality] = "-"
 
             if idx_char_count is not None:
                 if view_mode == 'Napisy':
@@ -754,6 +798,8 @@ class SubtitlePanel(ctk.CTkFrame):
             self.app.lines[line_idx].set_text(new_text)
         elif mode == "TTS":
             self.app.lines[line_idx].set_tts_text(new_text)
+        elif mode == "Sugestia SI":
+            self.app.lines[line_idx].ai_suggestion = new_text
         
         # Zapisz do CSV bezpośrednio
         try:
@@ -802,6 +848,8 @@ class SubtitlePanel(ctk.CTkFrame):
                          state=tk.NORMAL if can_gen else tk.DISABLED)
         menu.add_command(label="✓ Weryfikuj audio (Ctrl+V)", command=self.verify_selected_dialogs,
                          state=tk.NORMAL if can_verify else tk.DISABLED)
+        menu.add_command(label="🎯 Zaakceptuj sugestię SI", command=self.accept_ai_suggestions,
+                         state=tk.NORMAL)
         menu.add_command(label="✨ Zadania SI (Ctrl+Alt+A)", command=self.open_ai_runner_selected,
                          state=tk.NORMAL)
         menu.add_command(label="🗑️ Usuń audio (Ctrl+X)", command=self.delete_selected_dialogs,
@@ -908,6 +956,36 @@ class SubtitlePanel(ctk.CTkFrame):
                 messagebox.showerror("Błąd", f"Nie udało się zapisać zmian: {e}", parent=self)
         else:
             self.app.set_status("Brak zmian do wykonania.")
+
+    def accept_ai_suggestions(self):
+        """Kopiuje sugestię SI do pola Text lub TTS Text (zależnie od widoku)."""
+        if not self.selected_line_indices:
+            return
+            
+        view_mode = self.app.view_mode.get()
+        if view_mode == "Oryginał":
+            messagebox.showinfo("Informacja", "Nie można edytować tekstu w trybie podglądu oryginału.")
+            return
+
+        to_update = []
+        for idx in self.selected_line_indices:
+            if 0 <= idx < len(self.app.lines):
+                line = self.app.lines[idx]
+                if line.ai_suggestion:
+                    if view_mode == "Napisy":
+                        line.set_text(line.ai_suggestion)
+                    elif view_mode == "TTS":
+                        line.set_tts_text(line.ai_suggestion)
+                    to_update.append(line)
+        
+        if to_update:
+            try:
+                if self.app.loaded_path:
+                    update_lines_in_csv(to_update, str(self.app.loaded_path))
+                self.set_preview(self.app.lines)
+                self.app.set_status(f"Zaakceptowano sugestie dla {len(to_update)} wierszy.")
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie udało się zapisać zmian: {e}")
 
     # --- Weryfikacja audio (zintegrowana) ---
     def start_verification(self, force_refresh=False, ignore_short=True, verify_options=None):
@@ -1309,6 +1387,9 @@ class SubtitlePanel(ctk.CTkFrame):
         self.generate_button.configure(state=state)
         self.verify_button.configure(state=state)
         self.delete_all_button.configure(state=state)
+        self.btn_done.configure(state=state)
+        self.btn_restore.configure(state=state)
+        self.btn_accept_ai.configure(state=state)
 
         status_msg = "Audio: ---"
         if has_selection and self.app.audio_dir and self.app.audio_dir.is_dir():

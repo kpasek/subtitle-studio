@@ -70,9 +70,21 @@ class FilterWindow(ctk.CTkToplevel):
         self.diff_option = tk.StringVar(value=self.current_filters.get('diff_status', 'Wszystkie'))
         ctk.CTkOptionMenu(frm, variable=self.diff_option, values=["Wszystkie", "Tylko zmienione", "Bez zmian"]).grid(row=7, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
 
+        # AI Quality (min/max)
+        ctk.CTkLabel(frm, text="Jakość SI (min/max):").grid(row=8, column=0, sticky="w", padx=5, pady=5)
+        self.min_ai_qual = tk.StringVar(value=str(self.current_filters.get('min_ai_quality', '')))
+        self.max_ai_qual = tk.StringVar(value=str(self.current_filters.get('max_ai_quality', '')))
+        ctk.CTkEntry(frm, textvariable=self.min_ai_qual).grid(row=8, column=1, sticky="ew", padx=5, pady=5)
+        ctk.CTkEntry(frm, textvariable=self.max_ai_qual).grid(row=8, column=2, sticky="ew", padx=5, pady=5)
+
+        # Has Suggestion
+        ctk.CTkLabel(frm, text="Posiada sugestię: ").grid(row=9, column=0, sticky="w", padx=5, pady=5)
+        self.has_sug_option = tk.StringVar(value=self.current_filters.get('has_ai_suggestion', 'Wszystkie'))
+        ctk.CTkOptionMenu(frm, variable=self.has_sug_option, values=["Wszystkie", "Tak", "Nie"]).grid(row=9, column=1, columnspan=2, sticky="ew", padx=5, pady=5)
+
         # Buttons
         btn_frame = ctk.CTkFrame(frm, fg_color="transparent")
-        btn_frame.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12,0))
+        btn_frame.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(12,0))
         ctk.CTkButton(btn_frame, text="Wyczyść", command=self._on_clear).pack(side="left", padx=6)
         ctk.CTkButton(btn_frame, text="Zastosuj", command=self._on_apply).pack(side="right", padx=6)
 
@@ -114,6 +126,18 @@ class FilterWindow(ctk.CTkToplevel):
         if diff_v != "Wszystkie":
             filters['diff_status'] = diff_v
 
+        # AI Filters
+        try:
+            if self.min_ai_qual.get(): filters['min_ai_quality'] = int(self.min_ai_qual.get())
+        except: pass
+        try:
+            if self.max_ai_qual.get(): filters['max_ai_quality'] = int(self.max_ai_qual.get())
+        except: pass
+        
+        has_sug_v = self.has_sug_option.get()
+        if has_sug_v != "Wszystkie":
+             filters['has_ai_suggestion'] = has_sug_v
+
         if callable(self.apply_callback):
             self.apply_callback(filters)
         self.destroy()
@@ -125,9 +149,12 @@ class FilterWindow(ctk.CTkToplevel):
         self.max_len.set('')
         self.min_sim.set('')
         self.max_sim.set('')
+        self.min_ai_qual.set('')
+        self.max_ai_qual.set('')
         self.show_option.set('Wszystkie')
         self.hal_option.set('Wszystkie')
         self.status_option.set('Wszystkie')
+        self.has_sug_option.set('Wszystkie')
         if callable(self.apply_callback):
             self.apply_callback({})
 

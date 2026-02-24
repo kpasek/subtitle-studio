@@ -43,11 +43,15 @@ class AppMenu:
 
         # --- Edycja ---
         edit_menu = tk.Menu(menubar, tearoff=0)
-        edit_menu.add_command(label="Przywróć wartość", command=lambda: self._invoke_panel("restore_selected_values"))
+        edit_menu.add_command(label="Przywróć wartość", command=lambda: self._invoke_panel("restore_selected_values"), accelerator="Ctrl+D")
         edit_menu.add_separator()
-        edit_menu.add_command(label="Oznacz jako Gotowe", command=lambda: self._invoke_panel("set_selected_status", "DONE"))
+        edit_menu.add_command(label="Zaakceptuj sugestię SI", command=lambda: self._invoke_panel("accept_ai_suggestions"), accelerator="Ctrl+K")
+        edit_menu.add_separator()
+        edit_menu.add_command(label="Oznacz jako Gotowe", command=lambda: self._invoke_panel("set_selected_status", "DONE"), accelerator="Ctrl+Shift+D")
         edit_menu.add_command(label="Oznacz jako Błędne", command=lambda: self._invoke_panel("set_selected_status", "ERROR"))
         edit_menu.add_command(label="Wyczyść flagi", command=lambda: self._invoke_panel("set_selected_status", None))
+        edit_menu.add_separator()
+        edit_menu.add_command(label="Usuń audio (zaznaczone)", command=lambda: self._invoke_panel("delete_selected_dialogs"), accelerator="Ctrl+X")
 
         # --- Dialogi ---
         gen_menu = tk.Menu(menubar, tearoff=0)

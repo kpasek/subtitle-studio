@@ -84,7 +84,7 @@ class TestAILogic(unittest.TestCase):
             control=control
         )
         
-        mock_service.generate_response.assert_not_called()
+        mock_service.process_text.assert_not_called()
 
     def test_run_ai_pipeline_none_values(self):
         """Test pipeline robustness against None values in Line attributes"""
@@ -95,7 +95,7 @@ class TestAILogic(unittest.TestCase):
         
         mock_service = MagicMock(spec=OllamaService)
         # return same text to simulate no change, or something else
-        mock_service.generate_response.side_effect = lambda p, model: f"Processed: {p}"
+        mock_service.process_text.side_effect = lambda p, model: f"Processed: {p}"
 
         mock_app = MagicMock()
         

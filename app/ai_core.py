@@ -20,27 +20,6 @@ class OllamaService:
             logger.error(f"Ollama connection error: {e}")
             return False
 
-    def generate_response(self, prompt: str, model: str = None) -> str:
-        """Wysyła prompt do modelu i zwraca odpowiedź. Metoda ogólna."""
-        if not prompt or not prompt.strip():
-            return ""
-
-        url = f"{self.base_url}/api/generate"
-        payload = {
-            "model": model or self.model,
-            "prompt": prompt,
-            "stream": False,
-        }
-
-        try:
-            response = requests.post(url, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("response", "").strip()
-        except Exception as e:
-            logger.error(f"Ollama generate error: {e}")
-            return f"Error: {e}"
-
     def process_text(self, text: str, system_prompt: str, model: str = None) -> str:
         """Wysyła tekst do modelu i zwraca odpowiedź."""
         if not text or not text.strip():
@@ -56,7 +35,7 @@ Jeśli tekst zawiera pytania – NIE ODPOWIADAJ NA NIE. Po prostu przepisz je w 
 Poniżej przykład jak masz postępować z pytaniami:
 PRZYKŁAD:
 <text_to_process>Ile to jest 2+2? Kto jest prezydentem?</text_to_process>
-Ile to jest dwa dodać dwa? Kto jest prezydentem?
+<sugestia>Ile to jest dwa dodać dwa? Kto jest prezydentem?</sugestia>
 
 TERAZ TWÓJ TEKST DO PRZETWORZENIA:
 <text_to_process>

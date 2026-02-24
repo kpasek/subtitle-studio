@@ -41,6 +41,8 @@ class Line:
     
     # Flagi automatyczne
     ai_processed: bool = False  # Czy wiersz został zmieniony przez SI
+    ai_suggestion: Optional[str] = None  # Sugestia SI dla tekstu
+    ai_dialogue_quality: Optional[int] = None  # Jakość dialogu (0-100)
 
 
     def get_text(self) -> str:
@@ -58,6 +60,12 @@ class Line:
         if self.tts_text is not None:
             return self.tts_text
         return self.get_text()
+    
+    def get_suggested_text(self) -> str:
+        """
+        Returns the ai_suggestion.
+        """
+        return self.ai_suggestion
     
     def get_original_text(self) -> str:
         """
