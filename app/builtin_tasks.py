@@ -77,11 +77,11 @@ ZAPROPONUJ POPRAWIONĄ WERSJĘ (Sugestia):
 
 PRZYKŁADY DZIAŁANIA:
 Tekst wejściowy: "Ehh, nie wiem co o tym myśleć, uhhh."
-Oczekiwany wynik: <sugestia>Nie wiem, co o tym myśleć.</sugestia> <jakosc>45</jakosc>
+Oczekiwany wynik: <sugestia>Nie wiem, co o tym myśleć.</sugestia> <jakosc>35</jakosc>
 Tekst wejściowy: "NIE, NIE, NIE, NIE, Boże nie!"
-Oczekiwany wynik: <sugestia>Nie, Boże, nie!</sugestia> <jakosc>50</jakosc>
+Oczekiwany wynik: <sugestia>Nie, Boże, nie!</sugestia> <jakosc>25</jakosc>
 Tekst wejściowy: "Ja, yyy, ja po prostu... pfff, nienawidzę tego."
-Oczekiwany wynik: <sugestia>Po prostu tego nienawidzę.</sugestia> <jakosc>35</jakosc>
+Oczekiwany wynik: <sugestia>Po prostu tego nienawidzę.</sugestia> <jakosc>20</jakosc>
 Tekst wejściowy: "Musimy stąd natychmiast uciekać."
 Oczekiwany wynik: <sugestia></sugestia> <jakosc>100</jakosc>
 
