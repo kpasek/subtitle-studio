@@ -184,6 +184,7 @@ class SubtitleStudioApp(ctk.CTk):
         # Kontekstowe (Linia) - bindujemy do root, ale sprawdzamy kontekst w metodach
         self.bind("<Control-space>", lambda e: self.subtitle_panel.play_selected_audio())
         self.bind("<Control-d>", lambda e: self.subtitle_panel.restore_selected_values())
+        self.bind("<Control-k>", lambda e: self.subtitle_panel.accept_ai_suggestions())
         self.bind("<Control-g>", lambda e: self.subtitle_panel.generate_selected_dialogs())
         self.bind("<Control-Shift-D>", lambda e: self.subtitle_panel.set_selected_status("DONE"))
 
@@ -197,17 +198,20 @@ class SubtitleStudioApp(ctk.CTk):
         self.bind("<Delete>", self._on_delete_key)
 
     def _cycle_view_mode(self, event=None):
-        """Przełącza widok między Napisy a TTS (pomija Oryginał)."""
+        """Przełącza widok między Napisy, TTS a Sugestia SI (pomija Oryginał)."""
         current = self.view_mode.get()
         if current == "Napisy":
-            self.subtitle_panel.view_switcher.set("TTS")
-            self.view_mode.set("TTS")
+            new_mode = "TTS"
+        elif current == "TTS":
+            new_mode = "Sugestia SI"
         else:
-            self.subtitle_panel.view_switcher.set("Napisy")
-            self.view_mode.set("Napisy")
+            new_mode = "Napisy"
+            
+        self.subtitle_panel.view_switcher.set(new_mode)
+        self.view_mode.set(new_mode)
 
         # Wywołujemy metodę zmiany widoku w panelu
-        self.subtitle_panel._on_view_mode_change("TTS" if current == "Napisy" else "Napisy")
+        self.subtitle_panel._on_view_mode_change(new_mode)
         return "break"
 
     def open_ai_runner_global(self):

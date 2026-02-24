@@ -59,7 +59,6 @@ class AIRunnerState:
         self.task_thread = None
         self.listeners = [] # List of windows to update
         self.result_message = None
-        self.target_field = None
         self.skip_processed = False
         self.is_global_run = False
 
@@ -111,10 +110,9 @@ class AIRunnerState:
             if dead in self.listeners:
                 self.listeners.remove(dead)
 
-    def start_pipeline(self, lines, tasks, target, skip_processed, service):
+    def start_pipeline(self, lines, tasks, skip_processed, service):
         self.selected_lines = lines
         self.execution_queue = tasks
-        self.target_field = target
         self.skip_processed = skip_processed
         self.is_running = True
         self.is_finished = False
@@ -130,7 +128,6 @@ class AIRunnerState:
             func=run_ai_pipeline,
             lines=self.selected_lines,
             tasks=self.execution_queue,
-            target_field=target,
             skip_processed=skip_processed,
             service=service,
             app_ref=self.master, 
@@ -311,11 +308,6 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         # Bottom: Options & Run
         self.frame_actions = ctk.CTkFrame(self)
         self.frame_actions.grid(row=4, column=0, columnspan=3, pady=10, sticky="ew")
-
-        ctk.CTkLabel(self.frame_actions, text="Zapisz wynik do:").pack(side="left", padx=10)
-        self.target_var = ctk.StringVar(value="tts")
-        combo_target = ctk.CTkOptionMenu(self.frame_actions, variable=self.target_var, values=["Text", "TTS Text", "Original Text (Overwrite)"])
-        combo_target.pack(side="left", padx=5)
 
         self.skip_processed_var = ctk.BooleanVar(value=True)
         chk_skip = ctk.CTkCheckBox(self.frame_actions, text="Pomiń już przetworzone przez SI", variable=self.skip_processed_var)
@@ -526,38 +518,14 @@ class AITaskRunnerWindow(ctk.CTkToplevel):
         
         # Start State Pipeline
         tasks = list(self.execution_queue)
-        target = self.target_var.get()
-        # Mapping target value to field names
-        target_map = {
-            "tts": "TTS Text",
-            "text": "Text",
-            "Original Text (Overwrite)": "Original Text (Overwrite)"
-        }
-        # In UI I used "tts" / "text" values in radio button, but code expects "Text"/"TTS Text"
-        # Wait, I initialized radio button with "values" list in CTkOptionMenu previously, but now I used request RadioButtons.
-        # Let's fix that.
-        
-        # Correction: I used CTkRadioButton with variable self.target_var.
-        # Values used in radiobuttons: "tts", "text". 
-        # But pipeline expects "Text" or "TTS Text".
-        
-        target_key = self.target_var.get()
-        if target_key == "tts":
-            target = "TTS Text"
-        elif target_key == "text":
-            target = "Text"
-        else:
-            # Handle option menu if used
-            target = target_key
-            
         skip_processed = self.skip_processed_var.get()
         
-        self.state_ref.start_pipeline(self.selected_lines, tasks, target, skip_processed, service)
+        self.state_ref.start_pipeline(self.selected_lines, tasks, skip_processed, service)
 
 
 # --- Pipeline Logic (runs in worker thread) ---
 
-def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, skip_processed: bool, 
+def run_ai_pipeline(lines: List[Line], tasks: List[AITask], skip_processed: bool, 
                     service: OllamaService, app_ref, progress_callback, control: AIControl):
     
     total = len(lines)
@@ -635,10 +603,8 @@ def run_ai_pipeline(lines: List[Line], tasks: List[AITask], target_field: str, s
                         try:
                             line.ai_dialogue_quality = int(jakosc_match.group(1))
                         except:
-                            line.ai_dialogue_quality = 100
+                            line.ai_dialogue_quality = None
                     else:
-                        # Reset quality if not provided? Or keep default 100?
-                        # User says "100% means it's good". So if model doesn't say, we assume it's what it is or 100.
                         pass
 
                 if control.is_stopped: break

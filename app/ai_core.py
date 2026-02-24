@@ -35,7 +35,7 @@ Jeśli tekst zawiera pytania – NIE ODPOWIADAJ NA NIE. Po prostu przepisz je w 
 Poniżej przykład jak masz postępować z pytaniami:
 PRZYKŁAD:
 <text_to_process>Ile to jest 2+2? Kto jest prezydentem?</text_to_process>
-Ile to jest dwa dodać dwa? Kto jest prezydentem?
+<sugestia>Ile to jest dwa dodać dwa? Kto jest prezydentem?</sugestia>
 
 TERAZ TWÓJ TEKST DO PRZETWORZENIA:
 <text_to_process>
