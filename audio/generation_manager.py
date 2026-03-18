@@ -203,7 +203,7 @@ class GenerationManager:
         try:
             model_name_lower = job.tts_model_name.lower()
 
-            if model_name_lower in ['xtts', 'stylish', 'piper']:
+            if model_name_lower in ['xtts', 'stylish', 'piper', 'teamsp']:
                 GenerationManager._call_local_api_static(tts_model_instance, text, str(output_path), job.tts_config)
             
             elif isinstance(tts_model_instance, TTSBase):
@@ -228,6 +228,8 @@ class GenerationManager:
             payload["voice_file"] = config.get('xtts_voice_path', '')
         if "piper" in api_url.lower():
             payload["voice_file"] = config.get('piper_model_path', '')
+        if "teamsp" in api_url.lower():
+            payload["voice"] = config.get('teamsp_voice_id', '')
 
         try:
             response = session.post(api_url, json=payload, timeout=90)
@@ -466,6 +468,15 @@ class GenerationManager:
             session = requests.Session()
             session.headers.update({'Content-Type': 'application/json'})
             return {'url': api_url.rstrip('/') + '/piper/tts', 'session': session}
+
+        elif m_name == 'teamsp':
+            api_url = config.get('local_api_url')
+            if not api_url:
+                raise ValueError("Brak URL dla TeamSP API w ustawieniach (Globalne).")
+            print(f"DEBUG: TeamSP URL: {api_url}")
+            session = requests.Session()
+            session.headers.update({'Content-Type': 'application/json'})
+            return {'url': api_url.rstrip('/') + '/teamsp/tts', 'session': session}
 
         raise ValueError(f"Nieznany model TTS: {model_name}")
 

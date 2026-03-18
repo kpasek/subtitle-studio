@@ -633,6 +633,7 @@ def gather_tts_config(app):
         'elevenlabs_voice_id': app.global_config.get('elevenlabs_voice_id'),
         'google_credentials_path': app.global_config.get('google_credentials_path'),
         'google_voice_name': app.global_config.get('google_voice_name'),
+        'teamsp_voice_id': app.project_config.get('teamsp_voice_id') or app.global_config.get('teamsp_voice_id'),
     }
 
 

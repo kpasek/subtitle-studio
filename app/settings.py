@@ -163,6 +163,14 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkEntry(t_piper, textvariable=self.piper_model_path_var).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=10)
         ctk.CTkButton(t_piper, text="...", width=40, command=self.select_model_file).grid(row=0, column=2, sticky="e", padx=10, pady=10)
 
+        # TeamSP
+        t_teamsp = tts_inner_tabs.add("TeamSP")
+        t_teamsp.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(t_teamsp, text="ID głosu TeamSP:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        self.teamsp_voice_id_var = tk.StringVar(value=self.master.global_config.get('teamsp_voice_id', ''))
+        ctk.CTkEntry(t_teamsp, textvariable=self.teamsp_voice_id_var).grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+        CreateToolTip(t_teamsp, "Identyfikator (string) głosu dla generatora TeamSP.")
+
         # --- TAB: SI ---
         tab_ai.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(tab_ai, text="Url serwera Ollama:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
@@ -216,7 +224,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(frame, text="Aktywny model TTS:").grid(
             row=2, column=0, sticky="w", padx=10, pady=10)
         available_models = ["XTTS", "STylish", "ElevenLabs",
-                            "Google Cloud TTS", "Piper"]
+                            "Google Cloud TTS", "Piper", "TeamSP"]
         saved_model = self.master.project_config.get(
             'active_tts_model', available_models[0])
         self.active_model_var = tk.StringVar(value=saved_model)
@@ -263,6 +271,17 @@ class SettingsWindow(ctk.CTkToplevel):
 
         CreateToolTip(self.ent_piper_model_project,
                       "Opcjonalne: Nadpisz globalną ścieżkę do pliku .onnx z modelem Piper tylko dla tego projektu.")
+
+        ctk.CTkLabel(frame, text="ID głosu TeamSP (Projekt)").grid(
+            row=6, column=0, padx=10, pady=5, sticky="w")
+        self.teamsp_voice_project_id_var = tk.StringVar(
+            value=self.master.project_config.get('teamsp_voice_id', ''))
+        self.ent_teamsp_voice_project = ctk.CTkEntry(
+            frame, width=350, textvariable=self.teamsp_voice_project_id_var)
+        self.ent_teamsp_voice_project.grid(
+            row=6, column=1, padx=(0, 10), pady=5, sticky="ew")
+        CreateToolTip(self.ent_teamsp_voice_project,
+                      "Opcjonalne: Nadpisz globalny ID głosu TeamSP tylko dla tego projektu.")
 
 
     def select_voice_file(self, ent_path_var=None):
@@ -343,6 +362,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 'google_credentials_path': self.gcp_creds_var.get(),
                 'google_voice_name': self.gcp_voice_name_var.get(),
                 'piper_model_path': self.piper_model_path_var.get().strip(),
+                'teamsp_voice_id': self.teamsp_voice_id_var.get().strip(),
                 'ffmpeg_filters': filters_data,
                 'appearance_mode': self.appearance_mode_var.get(),
                 'color_theme': self.color_theme_var.get()
@@ -374,6 +394,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 'xtts_voice_path', self.xtts_voice_project_path_var.get())
             self.master.set_project_config(
                 'piper_model_path', self.piper_model_project_path_var.get().strip())
+            self.master.set_project_config(
+                'teamsp_voice_id', self.teamsp_voice_project_id_var.get().strip())
         except ValueError:
             messagebox.showerror(
                 "Błędna wartość", "Przyspieszenie musi być liczbą.", parent=self)
