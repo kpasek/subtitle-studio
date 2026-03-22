@@ -39,7 +39,7 @@ JobType = Union[GenerationJob, ConversionJob]
 
 
 class GenerationManager:
-    _instance: Optional['GenerationManager'] = None
+    _instance: Optional["GenerationManager"] = None
     _lock = threading.Lock()
 
     def __new__(cls):
@@ -50,7 +50,7 @@ class GenerationManager:
         return cls._instance
 
     def __init__(self):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
         self._initialized = True
 
@@ -63,14 +63,14 @@ class GenerationManager:
 
         self._observers_queue: List[Callable] = []
         self._observers_progress: List[Callable] = []
-        
+
         # State for monitoring
         self.last_progress = (0, 0, "Oczekiwanie...")
 
     @classmethod
-    def get_instance(cls) -> 'GenerationManager':
+    def get_instance(cls) -> "GenerationManager":
         return cls()
-        
+
     def is_busy(self) -> bool:
         # If cancellation is requested, consider manager not busy to allow new jobs strictly
         busy_job = self.current_job is not None and not self.cancel_event.is_set()
@@ -130,7 +130,9 @@ class GenerationManager:
     def _start_thread_if_needed(self):
         if self.manager_thread is None or not self.manager_thread.is_alive():
             print("Uruchamianie wątku menedżera...")
-            self.manager_thread = threading.Thread(target=self._process_queue, daemon=True)
+            self.manager_thread = threading.Thread(
+                target=self._process_queue, daemon=True
+            )
             self.manager_thread.start()
 
     def _process_queue(self):
@@ -142,18 +144,24 @@ class GenerationManager:
 
             try:
                 if isinstance(self.current_job, GenerationJob):
-                    print(f"Rozpoczynam zadanie generowania: {self.current_job.project_path}")
+                    print(
+                        f"Rozpoczynam zadanie generowania: {self.current_job.project_path}"
+                    )
                     self._execute_tts_job(self.current_job)
                 elif isinstance(self.current_job, ConversionJob):
-                    print(f"Rozpoczynam zadanie konwersji: {self.current_job.project_path}")
+                    print(
+                        f"Rozpoczynam zadanie konwersji: {self.current_job.project_path}"
+                    )
                     self._execute_convert_job(self.current_job)
 
             except InterruptedError:
-                print(f"Zadanie {self.current_job.project_path} zatrzymane przez użytkownika.")
+                print(
+                    f"Zadanie {self.current_job.project_path} zatrzymane przez użytkownika."
+                )
                 self._notify_progress(0, 1, "Zadanie zatrzymane.")
             except Exception as e:
                 print(f"Błąd krytyczny w zadaniu {self.current_job.project_path}: {e}")
-                traceback.print_exc() # Pokaż pełny stack trace w konsoli
+                traceback.print_exc()  # Pokaż pełny stack trace w konsoli
                 self._notify_progress(0, 1, f"Błąd: {e}")
 
             self.current_job = None
@@ -199,37 +207,64 @@ class GenerationManager:
     def _worker_tts_task(identifier, text, job, tts_model_instance):
         """Statyczna metoda workera dla TTS."""
         output_path = job.audio_dir / f"output1 ({identifier}).wav"
-        
+
         try:
             model_name_lower = job.tts_model_name.lower()
 
-            if model_name_lower in ['xtts', 'stylish', 'piper', 'teamsp']:
-                GenerationManager._call_local_api_static(tts_model_instance, text, str(output_path), job.tts_config)
-            
+            if model_name_lower in ["xtts", "stylish", "piper", "teamsp"]:
+                GenerationManager._call_local_api_static(
+                    tts_model_instance, text, str(output_path), job.tts_config
+                )
+
             elif isinstance(tts_model_instance, TTSBase):
                 tts_model_instance.tts(text, str(output_path))
             else:
-                raise TypeError(f"Nieznany typ instancji modelu: {type(tts_model_instance)}")
+                raise TypeError(
+                    f"Nieznany typ instancji modelu: {type(tts_model_instance)}"
+                )
 
             # Powiadomienie o sukcesie (zwracamy wynik)
             return (identifier, str(output_path))
-            
+
         except Exception as e:
             raise e
 
     @staticmethod
-    def _call_local_api_static(tts_model: dict, text: str, output_file: str, config: dict):
+    def _get_tts_num_threads(model_name: str, config: dict) -> int:
+        tts_concurrency = config.get("tts_concurrency", {})
+        generators = tts_concurrency.get("generators", {})
+        global_max = tts_concurrency.get("global_max_threads", 16)
+
+        model_name_lower = model_name.lower()
+
+        if "google" in model_name_lower:
+            model_key = "google_tts"
+        elif model_name_lower in ["stylish", "xtts", "piper", "teamsp", "elevenlabs"]:
+            model_key = model_name_lower
+        else:
+            return 1
+
+        model_cfg = generators.get(model_key, {})
+        if model_cfg.get("enabled", False):
+            model_threads = model_cfg.get("threads", 4)
+            return min(model_threads, global_max)
+        return 1
+
+    @staticmethod
+    def _call_local_api_static(
+        tts_model: dict, text: str, output_file: str, config: dict
+    ):
         # Statyczna wersja _call_local_api
-        api_url = tts_model['url']
-        session = tts_model['session']
+        api_url = tts_model["url"]
+        session = tts_model["session"]
         payload = {"text": text, "output_file": output_file}
 
         if "xtts" in api_url.lower():
-            payload["voice_file"] = config.get('xtts_voice_path', '')
+            payload["voice_file"] = config.get("xtts_voice_path", "")
         if "piper" in api_url.lower():
-            payload["voice_file"] = config.get('piper_model_path', '')
+            payload["voice_file"] = config.get("piper_model_path", "")
         if "teamsp" in api_url.lower():
-            payload["voice"] = config.get('teamsp_voice_id', '')
+            payload["voice"] = config.get("teamsp_voice_id", "")
 
         try:
             response = session.post(api_url, json=payload, timeout=90)
@@ -237,7 +272,9 @@ class GenerationManager:
             try:
                 response_data = response.json()
                 if not response_data.get("output_file") and response_data.get("error"):
-                     raise ConnectionError(f"API Error Message: {response_data.get('error')}")
+                    raise ConnectionError(
+                        f"API Error Message: {response_data.get('error')}"
+                    )
             except json.JSONDecodeError:
                 pass
         except requests.exceptions.RequestException as e:
@@ -247,14 +284,20 @@ class GenerationManager:
         print(f"DEBUG: Konfiguracja modelu: {job.tts_model_name}")
         self._notify_progress(0, 1, f"Ładowanie modelu {job.tts_model_name}...")
 
-        # 1. Konfiguracja workera
+        num_threads = self._get_tts_num_threads(job.tts_model_name, job.tts_config)
+        print(
+            f"DEBUG: TTS concurrency - model: {job.tts_model_name}, threads: {num_threads}"
+        )
+
         if self.worker:
             self.worker.stop(clear_queue=True)
-        self.worker = Worker(name="TTSWorker", num_threads=1) # TTS models are mostly sequential or resource heavy
+        self.worker = Worker(name="TTSWorker", num_threads=num_threads)
 
         # 1a. Ładowanie modelu
         try:
-            tts_model_instance = self._load_tts_model(job.tts_model_name, job.tts_config)
+            tts_model_instance = self._load_tts_model(
+                job.tts_model_name, job.tts_config
+            )
             if tts_model_instance is None:
                 raise ValueError("Model zwrócił None przy ładowaniu.")
         except Exception as e:
@@ -273,12 +316,16 @@ class GenerationManager:
             print("DEBUG: Lista linii jest pusta. Kończę zadanie.")
             return
 
-        self._notify_progress(0, total_to_gen, f"Rozpoczynam generowanie {total_to_gen} linii...")
+        self._notify_progress(
+            0, total_to_gen, f"Rozpoczynam generowanie {total_to_gen} linii..."
+        )
 
         # 2. Zlecanie zadań
         tracker = BatchResultTracker(total_to_gen, flush_interval=1.0)
         tracker.callback = lambda res: self._notify_progress(
-            tracker.processed, tracker.total, f"Generowanie... ({tracker.processed}/{tracker.total})"
+            tracker.processed,
+            tracker.total,
+            f"Generowanie... ({tracker.processed}/{tracker.total})",
         )
 
         for identifier, text in job.lines_to_generate:
@@ -288,13 +335,15 @@ class GenerationManager:
             def on_done(res):
                 ident, path = res
                 tracker.add_result(ident, path, is_modified=True)
-                if getattr(job, 'on_generate', None):
+                if getattr(job, "on_generate", None):
                     job.on_generate(ident, path)
-            
+
             def on_error(err):
-                # Identifier is tricky to pass to error handling without partial/closure, 
+                # Identifier is tricky to pass to error handling without partial/closure,
                 # but worker loop prints log. We just need to tick the tracker.
-                tracker.add_result(identifier, None, is_modified=False) # Tratujemy jako przetworzone (z błędem)
+                tracker.add_result(
+                    identifier, None, is_modified=False
+                )  # Tratujemy jako przetworzone (z błędem)
                 print(f"Błąd generowania dla {identifier}: {err}")
 
             self.worker.add_task(
@@ -304,13 +353,13 @@ class GenerationManager:
                 job=job,
                 tts_model_instance=tts_model_instance,
                 on_complete=on_done,
-                on_error=on_error
+                on_error=on_error,
             )
-            
+
         # 3. Oczekiwanie
         while not tracker.is_done and not self.cancel_event.is_set():
             time.sleep(0.5)
-            
+
         if self.cancel_event.is_set():
             if self.worker:
                 self.worker.stop(clear_queue=True)
@@ -323,10 +372,15 @@ class GenerationManager:
         print("DEBUG: Zadanie generowania zakończone sukcesem.")
 
     @staticmethod
-    def _worker_convert_task_static(input_file, output_file, filter_settings, out_format):
+    def _worker_convert_task_static(
+        input_file, output_file, filter_settings, out_format
+    ):
         try:
             from audio.audio_converter import AudioConverter
-            conv = AudioConverter(filter_settings=filter_settings, out_format=out_format)
+
+            conv = AudioConverter(
+                filter_settings=filter_settings, out_format=out_format
+            )
             conv.parse_ogg(input_file, output_file)
             return True, None
         except Exception as e:
@@ -334,16 +388,16 @@ class GenerationManager:
 
     def _execute_convert_job(self, job: ConversionJob):
         self._notify_indeterminate("Skanowanie plików...")
-        
+
         # 1. Konfiguracja workera
         if self.worker:
             self.worker.stop(clear_queue=True)
             self.worker = None
 
         try:
-             workers_count = int(job.converter_config.get("conversion_workers", 4))
+            workers_count = int(job.converter_config.get("conversion_workers", 4))
         except:
-             workers_count = 4
+            workers_count = 4
 
         self.worker = Worker(name="ConversionWorker", num_threads=workers_count)
 
@@ -355,7 +409,7 @@ class GenerationManager:
         converter_cfg = job.converter_config
         out_fmt = converter_cfg.get("audio_output_format", "mp3")
         filters = converter_cfg.get("ffmpeg_filters", {})
-        
+
         temp_converter = AudioConverter(filter_settings=filters, out_format=out_fmt)
 
         tasks = []
@@ -364,119 +418,130 @@ class GenerationManager:
                 if filename.lower().endswith((".wav", ".ogg", ".mp3")):
                     if filename.lower().endswith(".temp.ogg"):
                         continue
-                    
+
                     input_path = os.path.join(audio_dir, filename)
-                    output_path = temp_converter.build_output_file_path(filename, str(output_dir), out_fmt)
-                    
+                    output_path = temp_converter.build_output_file_path(
+                        filename, str(output_dir), out_fmt
+                    )
+
                     if os.path.exists(output_path):
                         continue
-                        
+
                     tasks.append((input_path, output_path))
         except Exception as e:
-             self._notify_progress(0, 1, f"Błąd skanowania katalogu: {e}")
-             return
+            self._notify_progress(0, 1, f"Błąd skanowania katalogu: {e}")
+            return
 
         total_tasks = len(tasks)
         if total_tasks == 0:
-             self._notify_progress(1, 1, "Brak plików do konwersji lub wszystkie gotowe.")
-             return
+            self._notify_progress(
+                1, 1, "Brak plików do konwersji lub wszystkie gotowe."
+            )
+            return
 
-        self._notify_progress(0, total_tasks, f"Rozpoczynam konwersję {total_tasks} plików...")
+        self._notify_progress(
+            0, total_tasks, f"Rozpoczynam konwersję {total_tasks} plików..."
+        )
 
         # 3. Zlecanie zadań
         # Zgodnie z wymaganiem: aktualizacja progress baru co 5 sekund
         tracker = BatchResultTracker(total_tasks, flush_interval=5.0)
         tracker.callback = lambda res: self._notify_progress(
-            tracker.processed, tracker.total, f"Konwertowanie... ({tracker.processed}/{tracker.total})"
+            tracker.processed,
+            tracker.total,
+            f"Konwertowanie... ({tracker.processed}/{tracker.total})",
         )
-        
+
         for inp, outp in tasks:
             if self.cancel_event.is_set():
                 break
-                
+
             def on_done_corrected(worker_res):
                 # worker_res is return from _worker_convert_task_static -> (success, error)
-                tracker.add_result(outp, {"success": worker_res[0], "error": worker_res[1]})
+                tracker.add_result(
+                    outp, {"success": worker_res[0], "error": worker_res[1]}
+                )
 
             self.worker.add_task(
                 GenerationManager._worker_convert_task_static,
-                input_file=inp, 
+                input_file=inp,
                 output_file=outp,
                 filter_settings=filters,
                 out_format=out_fmt,
-                on_complete=on_done_corrected
+                on_complete=on_done_corrected,
             )
 
         # 4. Oczekiwanie
         while not tracker.is_done and not self.cancel_event.is_set():
             time.sleep(0.5)
-            
+
         if self.cancel_event.is_set():
             if self.worker:
                 self.worker.stop(clear_queue=True)
             raise InterruptedError("Konwersja anulowana przez użytkownika.")
-            
+
         if self.worker:
             self.worker.stop()
 
         self._notify_progress(total_tasks, total_tasks, "Zakończono konwersję.")
 
-    def _load_tts_model(self, model_name: str, config: dict) -> Union[Dict, TTSBase, None]:
+    def _load_tts_model(
+        self, model_name: str, config: dict
+    ) -> Union[Dict, TTSBase, None]:
         print(f"DEBUG: _load_tts_model wywołane dla: {model_name}")
-        
+
         # Normalizacja nazwy do małych liter dla łatwiejszego porównania
         m_name = model_name.lower()
 
-        if m_name == 'xtts':
-            api_url = config.get('local_api_url')
+        if m_name == "xtts":
+            api_url = config.get("local_api_url")
             if not api_url:
                 raise ValueError("Brak URL dla XTTS API w ustawieniach (Globalne).")
             print(f"DEBUG: XTTS URL: {api_url}")
             session = requests.Session()
-            session.headers.update({'Content-Type': 'application/json'})
-            return {'url': api_url.rstrip('/') + '/xtts/tts', 'session': session}
+            session.headers.update({"Content-Type": "application/json"})
+            return {"url": api_url.rstrip("/") + "/xtts/tts", "session": session}
 
-        elif m_name == 'stylish':
-            api_url = config.get('local_api_url')
+        elif m_name == "stylish":
+            api_url = config.get("local_api_url")
             if not api_url:
                 raise ValueError("Brak URL dla Stylish API w ustawieniach (Globalne).")
             print(f"DEBUG: Stylish URL: {api_url}")
             session = requests.Session()
-            session.headers.update({'Content-Type': 'application/json'})
+            session.headers.update({"Content-Type": "application/json"})
             # Ważne: endpoint dla stylish to zazwyczaj /stylish/tts
-            return {'url': api_url.rstrip('/') + '/stylish/tts', 'session': session}
+            return {"url": api_url.rstrip("/") + "/stylish/tts", "session": session}
 
-        elif m_name == 'elevenlabs':
-            api_key = config.get('elevenlabs_api_key')
-            voice_id = config.get('elevenlabs_voice_id')
+        elif m_name == "elevenlabs":
+            api_key = config.get("elevenlabs_api_key")
+            voice_id = config.get("elevenlabs_voice_id")
             if not api_key or not voice_id:
                 raise ValueError("Brak API Key lub Voice ID dla ElevenLabs.")
             return ElevenLabsTTS(api_key=api_key, voice_id=voice_id)
 
-        elif 'google' in m_name: # Google Cloud TTS
-            creds_path = config.get('google_credentials_path')
-            voice_name = config.get('google_voice_name')
+        elif "google" in m_name:  # Google Cloud TTS
+            creds_path = config.get("google_credentials_path")
+            voice_name = config.get("google_voice_name")
             if not creds_path or not Path(creds_path).exists():
                 raise ValueError("Nieprawidłowa ścieżka do credentials Google TTS.")
             return GoogleCloudTTS(credentials_path=creds_path, voice_name=voice_name)
 
-        elif m_name == 'piper':
-            api_url = config.get('local_api_url')
+        elif m_name == "piper":
+            api_url = config.get("local_api_url")
             if not api_url:
                 raise ValueError("Brak URL dla Piper API w ustawieniach (Globalne).")
             print(f"DEBUG: Piper URL: {api_url}")
             session = requests.Session()
-            session.headers.update({'Content-Type': 'application/json'})
-            return {'url': api_url.rstrip('/') + '/piper/tts', 'session': session}
+            session.headers.update({"Content-Type": "application/json"})
+            return {"url": api_url.rstrip("/") + "/piper/tts", "session": session}
 
-        elif m_name == 'teamsp':
-            api_url = config.get('local_api_url')
+        elif m_name == "teamsp":
+            api_url = config.get("local_api_url")
             if not api_url:
                 raise ValueError("Brak URL dla TeamSP API w ustawieniach (Globalne).")
             print(f"DEBUG: TeamSP URL: {api_url}")
             session = requests.Session()
-            session.headers.update({'Content-Type': 'application/json'})
-            return {'url': api_url.rstrip('/') + '/teamsp/tts', 'session': session}
+            session.headers.update({"Content-Type": "application/json"})
+            return {"url": api_url.rstrip("/") + "/teamsp/tts", "session": session}
 
         raise ValueError(f"Nieznany model TTS: {model_name}")
-
