@@ -29,13 +29,11 @@ DEFAULT_TTS_CONCURRENCY = {
         "google_tts": {"enabled": True, "threads": 4},
         "piper": {"enabled": True, "threads": 4},
         "teamsp": {"enabled": True, "threads": 4},
-        "stylish": {"enabled": True, "threads": 4},
     },
 }
 
 TTS_GENERATOR_NAMES = {
     "xtts": "Local TTS (XTTS)",
-    "stylish": "STylish",
     "elevenlabs": "ElevenLabs",
     "google_tts": "Google Cloud TTS",
     "piper": "Piper",
@@ -379,7 +377,6 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         available_models = [
             "XTTS",
-            "STylish",
             "ElevenLabs",
             "Google Cloud TTS",
             "Piper",

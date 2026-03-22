@@ -211,7 +211,7 @@ class GenerationManager:
         try:
             model_name_lower = job.tts_model_name.lower()
 
-            if model_name_lower in ["xtts", "stylish", "piper", "teamsp"]:
+            if model_name_lower in ["xtts", "piper", "teamsp"]:
                 GenerationManager._call_local_api_static(
                     tts_model_instance, text, str(output_path), job.tts_config
                 )
@@ -239,7 +239,7 @@ class GenerationManager:
 
         if "google" in model_name_lower:
             model_key = "google_tts"
-        elif model_name_lower in ["stylish", "xtts", "piper", "teamsp", "elevenlabs"]:
+        elif model_name_lower in ["xtts", "piper", "teamsp", "elevenlabs"]:
             model_key = model_name_lower
         else:
             return 1
@@ -501,16 +501,6 @@ class GenerationManager:
             session = requests.Session()
             session.headers.update({"Content-Type": "application/json"})
             return {"url": api_url.rstrip("/") + "/xtts/tts", "session": session}
-
-        elif m_name == "stylish":
-            api_url = config.get("local_api_url")
-            if not api_url:
-                raise ValueError("Brak URL dla Stylish API w ustawieniach (Globalne).")
-            print(f"DEBUG: Stylish URL: {api_url}")
-            session = requests.Session()
-            session.headers.update({"Content-Type": "application/json"})
-            # Ważne: endpoint dla stylish to zazwyczaj /stylish/tts
-            return {"url": api_url.rstrip("/") + "/stylish/tts", "session": session}
 
         elif m_name == "elevenlabs":
             api_key = config.get("elevenlabs_api_key")

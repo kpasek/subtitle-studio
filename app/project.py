@@ -738,7 +738,6 @@ def gather_tts_config(app):
                 "google_tts": {"enabled": True, "threads": 4},
                 "piper": {"enabled": True, "threads": 4},
                 "teamsp": {"enabled": True, "threads": 4},
-                "stylish": {"enabled": True, "threads": 4},
             },
         },
     )
