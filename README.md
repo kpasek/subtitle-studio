@@ -82,7 +82,7 @@ Pasek wyszukiwania obsługuje wyrażenia regularne (Regex), co pozwala na zaawan
 Aplikacja wspiera różne silniki TTS. Konfiguracja odbywa się w ustawieniach projektu.
 * **Google Cloud TTS** – Wysoka jakość, wymaga pliku credentials JSON.
 * **ElevenLabs** – Najwyższa jakość (głosy AI), wymaga klucza API.
-* **Local API (XTTS / STylish)** – Współpraca z lokalnymi serwerami generowania mowy.
+* **Local API (XTTS)** – Współpraca z lokalnymi serwerami generowania mowy.
 
 Dla zaawansowanej obsługi lokalnej, Subtitle Studio współpracuje z repozytorium:
 👉 **[TTS Dialog Generator](https://github.com/kpasek/tts-dialog-generator)**
